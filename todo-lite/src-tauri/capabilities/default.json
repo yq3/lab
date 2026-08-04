@@ -1,0 +1,30 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Capability for the main window",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "opener:default",
+    "notification:default",
+    "global-shortcut:default",
+    {
+      "identifier": "sql:default",
+      "allow": [
+        {
+          "url": "sqlite:todo-lite.db",
+          "scope": [
+            "SELECT * FROM lists",
+            "SELECT * FROM sections",
+            "SELECT * FROM tags",
+            "SELECT * FROM tasks",
+            "SELECT * FROM task_tags",
+            "SELECT * FROM list_groups",
+            "SELECT * FROM sqlite_master"
+          ]
+        }
+      ]
+    },
+    "sql:allow-execute"
+  ]
+}

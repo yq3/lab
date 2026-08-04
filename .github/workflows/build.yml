@@ -1,0 +1,46 @@
+name: release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "todo-lite-v*"
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: todo-lite/src-tauri
+
+      - name: Install dependencies
+        working-directory: todo-lite
+        run: npm ci
+
+      - name: Build and bundle with Tauri
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: todo-lite
+          tagName: todo-lite-v__VERSION__
+          releaseName: "todo-lite v__VERSION__"
+          releaseBody: "See the assets to download this version and install."
+          releaseDraft: true
+          prerelease: false
