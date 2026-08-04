@@ -14,3 +14,5 @@
 - 代码是实验性的、可随时丢弃：无 CI、无发布、无稳定性保证。
 - 默认开发分支是 `develop`（不是 `main`）。
 - 除非用户明确要求，否则开发完成后不要提交到 GitHub（不要 commit / push）。
+- **Git 推送必须用 SSH**：本机 keychain 无 GitHub HTTPS 凭据，HTTPS push 会报认证错误。remote 已配置为 `git@github.com:yq3/lab.git`，请勿改回 HTTPS。推送到 GitHub 前先确认 `ssh -T git@github.com` 可用（首次可能需 `ssh-add ~/.ssh/id_ed25519`）。
+- 发布流程：push tag `todo-lite-v*`（如 `git tag todo-lite-v0.1.0 && git push origin todo-lite-v0.1.0`）触发 `.github/workflows/build.yml`，在 GitHub Actions 上构建 Windows / macOS 安装包并挂到 draft Release。
