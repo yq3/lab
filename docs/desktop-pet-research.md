@@ -1,7 +1,7 @@
 # 开源 Agent 桌宠调研报告
 
 > 调研日期：2026-08-06 ｜ 调研方式：GitHub API 整仓源码精读（openpets / petdex / clawd-on-desk / oc-claw / agentpet / cc-haha / PawPause / awesome-codex-pet）
-> 目标：为自研"桌面宠物"（agent 状态上报 + 喝水/休息提醒 + todo 管理 + 对话入口）评估复用资产与可借鉴架构。
+> 目标：为自研"桌面宠物"（agent 状态上报 + token 消耗统计 + 喝水/休息提醒 + todo 管理 + 对话入口）评估复用资产与可借鉴架构。
 
 ---
 
@@ -11,6 +11,7 @@
 |---|---|---|---|---|---|---|---|
 | agent 状态→宠物 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | opencode 一等支持 | ✅ 官方插件+MCP | ✅ 自带插件文件 | ✅ 插件+权限气泡 | ✅ | ✅ | ✅ 插件写 JSONL | ✅ |
+| **token 消耗统计** | ❌ | ❌ | 半（订阅额度环） | ✅ token+成本+养成 | ✅ token 图表 | ❌ | 部分 |
 | 休息/喝水提醒 | ✅ 官方插件 | ❌ | ❌ | 半（休息提醒） | ❌ | ✅ 喝水+休息+专注 | ✅ 定时任务 |
 | todo 管理 | 半（插件可写） | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | 对话入口 | ✅ AI gateway | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
@@ -422,6 +423,39 @@ cp integrations/opencode/pawpause-agent-hook.js ~/.config/opencode/plugins/
 - PawPause：事件里会带工具名/命令原文（截断 120 字符），**明文落盘**——这是文件总线方案在隐私上的明确代价，气泡显示前同样应做净化；
 - 自研必须照做净化，并权衡"事件文件是否落盘"。
 
+### 4.5 Token 消耗统计：数据从哪来（自研新增需求）
+
+七个项目里只有 **agentpet / oc-claw / clawd** 做了用量统计，且数据来源各不相同；**openpets / petdex / PawPause 完全不统计**。自研要做的第一件事是搞清楚 token 数字从哪来：
+
+| 来源 | 原理 | 代表 | 精确度 | 备注 |
+|---|---|---|---|---|
+| **读 agent 自己的用量记录** | agent 官方把每次调用的 token 数落盘 | **opencode 原生 SQLite**（见下）、Claude Code JSONL transcript、Codex/OpenClaw JSONL session | 精确 | 首选，零侵入 |
+| **解析 transcript 增量** | hook 只告诉 transcript 路径，app 侧按字节偏移增量解析 JSONL，汇总 input+output | agentpet `TranscriptReader.newUsageTokens()`（还跟踪会话中 `/model` 切换，成本按模型分别计价） | 精确 | Claude Code 专用 |
+| **订阅额度（非 token）** | 官方 status-line 把额度用占比塞进 stdin | clawd：Claude Code `rate_limits`（v2.1.80+ 官方 statusline 字段 `five_hour/seven_day.used_percentage` + `resets_at`，无需额外 API 调用）；Codex 同理 | 额度百分比 | 适合"配额环"展示，不是 token 数 |
+| **本地 telemetry/审计文件** | 轮询 agent 自带统计 | oc-claw：Gemini telemetry、OpenClaw JSONL 里的 usage 字段 | 精确 | agent 支持才有 |
+| **估算（无真实数字时兜底）** | 按文本/工具输入粗估 | agentpet `ModelPricing.costUSD()`：per-million USD 单价表（haiku 1/5、sonnet 3/15、opus 15/75 美元；cache write 1.25×、cache read 0.1×） | 估算 | 真实数字缺失时的兜底 |
+
+#### ⭐ opencode 原生自带精确 token 统计（自研可直接白嫖）
+
+opencode（sst/opencode）把每次模型调用的用量直接写进自己的 SQLite（`packages/core/src/database/migration/20260510033149_session_usage.ts` 证实，已在本机 opencode v1.18.11 实测验证）：
+
+- 表结构：`session` + `message`（另有 part/project/todo 等表），message.data 为 JSON；**每条 assistant 消息**带：
+  - `data.cost`（USD 成本，opencode 自己算好的）
+  - `data.tokens.input / output / reasoning / cache.read / cache.write`
+- `session` 表聚合列：`cost, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write`（实测样例：本会话 `tokens_input=897803, tokens_output=42834, tokens_cache_read=20027008, cost=0.20`）
+- `time_created / time_updated` 为毫秒时间戳，可按时间/项目（`project_id`）聚合出每日/每周报表；顺带一提：schema 里还有原生 `todo` 表，与你的 todo 功能可互通
+- **数据库路径（跨平台一致，XDG data 语义）**：
+
+| 平台 | 路径 |
+|---|---|
+| macOS / Linux | `~/.local/share/opencode/opencode.db`（**不是** `~/Library`！实测 v1.18.11） |
+| **Windows** | **`%LOCALAPPDATA%\opencode\opencode.db`**（xdg-basedir 在 win32 映射到 LOCALAPPDATA） |
+| 非稳定 channel | 同名但带渠道后缀：`opencode-{channel}.db`（如 canary） |
+
+- **读取注意**：① 库是 **WAL 模式**（运行时存在 `-wal/-shm` 文件），宠物侧用**只读连接**即可，opencode 运行中也无冲突；Windows 上 Tauri 用 rusqlite / sqlx（plugin-sql）打开只读连接即可；② 早期版本（纯文件存储时代）没有 SQLite，需读旧格式 `storage/session/*.json` / `storage/message/*.json`，或要求升级 opencode；③ 建议按 opencode 版本检测库文件存在与否，做双路径兼容。
+
+**结论**：自研宠物直接读 opencode 的 SQLite（session 表按时间/项目聚合），即可拿到精确的 token 数、缓存命中、美元成本——**macOS / Linux / Windows 三端同路径语义、同表结构**，不需要插件配合、不需要估算；顺带也拿到了"当前会话用了多少"做气泡汇报。Claude Code 用户则用 transcript 增量解析（agentpet 已验证可行，注意 Windows 上 transcript 路径同样来自 hook payload）。
+
 ---
 
 ## 5. 对自研的启示与建议
@@ -452,6 +486,7 @@ cp integrations/opencode/pawpause-agent-hook.js ~/.config/opencode/plugins/
 - **自研起点推荐 Tauri v2 + React + TS**（与 todo-lite 同栈，oc-claw 已验证此栈可做宠物）；
 - 窗口：透明、无边框、置顶、点击穿透（Tauri `transparent` + `setIgnoreCursorEvents`）；多显示器定位参考 openpets `display.ts`；
 - 事件链路选型建议：Tauri 侧用 **fs watch + JSONL 文件总线**（PawPause 方案，最省事）起步，需要细粒度状态（permission/会话错误）或双向控制时再升级为本地 HTTP + token（petdex 方案）；
+- **token 统计选型**：直接读 opencode SQLite（session/message 表有精确 tokens + cost），Claude Code 走 transcript 增量解析（agentpet 方案），两者都不需要 agent 配合；额度环展示参考 clawd 的 status-line 方案；
 - 若只想"马上有个好用的宠物"：macOS 直接装 petdex App + 挂 opencode 插件（零代码）；想功能全选 openpets 现成平台；想要"休息+喝水+专注+agent 上报"一体化可先试用 PawPause 成品。
 
 ---
@@ -471,5 +506,6 @@ cp integrations/opencode/pawpause-agent-hook.js ~/.config/opencode/plugins/
 ## 附录 B：调研信息源
 
 - 各项目 README / docs（openpets 的 architecture.md、agent-integrations.md、ipc.md、plugins.md、pets.md；petdex 的 README + `petdex-desktop-native` 源码；clawd-on-desk README + `agents/*.js` + `hooks/opencode-install.js`；oc-claw / agentpet / PawPause README + 源码树）
-- 关键源码：`opencode-plugin-runtime.ts`（openpets）、`opencode-plugin.js` / `sprite.zig` / `hook_server.zig`（petdex）、`opencode-family.js`（clawd）、`pawpause-agent-hook.js` / `claudeEvents.ts` / `spriteStates.ts`（PawPause）
+- 关键源码：`opencode-plugin-runtime.ts`（openpets）、`opencode-plugin.js` / `sprite.zig` / `hook_server.zig`（petdex）、`opencode-family.js`（clawd）、`pawpause-agent-hook.js` / `claudeEvents.ts` / `spriteStates.ts`（PawPause）、`TranscriptReader.swift` / `ModelPricing.swift` / `ClaudeHookPayload.swift`（agentpet）、`claude-rate-limits.js` / `codex-rate-limits.js`（clawd）
+- Token 统计来源（opencode）：`packages/core/src/database/migration/20260510033149_session_usage.ts`（session/message 表 usage+cost 字段）、`packages/core/src/database/database.ts`（DB 文件名 `opencode.db`、channel 后缀规则）、`packages/core/src/global.ts` + xdg-basedir（路径：macOS/Linux `~/.local/share/opencode`、Windows `%LOCALAPPDATA%\opencode`）；本机 opencode v1.18.11 实测验证（session 聚合列含 cost/tokens_*）
 - 素材规范：awesome-codex-pet README（atlas v1/v2、pet.json 样例、安装脚本）
