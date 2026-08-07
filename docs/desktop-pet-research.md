@@ -1,23 +1,23 @@
 # 开源 Agent 桌宠调研报告
 
-> 调研日期：2026-08-06 ｜ 调研方式：GitHub API 整仓源码精读（openpets / petdex / clawd-on-desk / oc-claw / agentpet / cc-haha / awesome-codex-pet）
+> 调研日期：2026-08-06 ｜ 调研方式：GitHub API 整仓源码精读（openpets / petdex / clawd-on-desk / oc-claw / agentpet / cc-haha / PawPause / awesome-codex-pet）
 > 目标：为自研"桌面宠物"（agent 状态上报 + 喝水/休息提醒 + todo 管理 + 对话入口）评估复用资产与可借鉴架构。
 
 ---
 
 ## 1. 结论先行
 
-| 需求 | openpets | petdex | clawd-on-desk | agentpet | oc-claw | cc-haha |
-|---|---|---|---|---|---|---|
-| agent 状态→宠物 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| opencode 一等支持 | ✅ 官方插件+MCP | ✅ 自带插件文件 | ✅ 插件+权限气泡 | ✅ | ✅ | ✅ |
-| 休息/喝水提醒 | ✅ 官方插件 | ❌ | ❌ | 半（休息提醒） | ❌ | ✅ 定时任务 |
-| todo 管理 | 半（插件可写） | ❌ | ❌ | ❌ | ❌ | ❌ |
-| 对话入口 | ✅ AI gateway | ❌ | ❌ | ❌ | ❌ | ✅ |
-| 插件/扩展机制 | ✅ SDK v3 | ❌ | ❌ | ❌ | ❌ | ❌ |
-| 素材生态复用 | ✅ 支持 codex pet | ✅ 生态核心 | ✅ 支持导入 | ✅ 画廊 | ✅ | 部分 |
-| 运行时体重 | Electron 全家桶 | Zig 原生（最轻） | Electron | 原生 Swift | Tauri | Electron |
-| 许可 | MIT | MIT | AGPL-3.0 | MIT | MIT | MIT |
+| 需求 | openpets | petdex | clawd-on-desk | agentpet | oc-claw | PawPause | cc-haha |
+|---|---|---|---|---|---|---|---|
+| agent 状态→宠物 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| opencode 一等支持 | ✅ 官方插件+MCP | ✅ 自带插件文件 | ✅ 插件+权限气泡 | ✅ | ✅ | ✅ 插件写 JSONL | ✅ |
+| 休息/喝水提醒 | ✅ 官方插件 | ❌ | ❌ | 半（休息提醒） | ❌ | ✅ 喝水+休息+专注 | ✅ 定时任务 |
+| todo 管理 | 半（插件可写） | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| 对话入口 | ✅ AI gateway | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
+| 插件/扩展机制 | ✅ SDK v3 | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| 素材生态复用 | ✅ 支持 codex pet | ✅ 生态核心 | ✅ 支持导入 | ✅ 画廊 | ✅ | ✅ PetDex 格式 | 部分 |
+| 运行时体重 | Electron 全家桶 | Zig 原生（最轻） | Electron | 原生 Swift | Tauri | Electron | Electron |
+| 许可 | MIT | MIT | AGPL-3.0 | MIT | MIT | MIT | MIT |
 
 **一句话定位**：
 
@@ -26,6 +26,7 @@
 - **clawd-on-desk** = 覆盖面最广的"盯 agent"宠物（19+ agent、权限审批气泡、会话仪表盘、移动端镜像），AGPL 许可需注意；
 - **agentpet** = 养成向（token→XP→进化）+ 菜单栏监控，Swift 原生；
 - **oc-claw** = Tauri 栈的 notch 岛宠物（与 todo-lite 同技术栈，最适合作为自研起点参照）；
+- **PawPause** = 与自研目标最贴近的产品形态（休息+喝水+专注+agent 上报四合一），事件链路用 JSONL 文件总线（最简单）；
 - **cc-haha** = agent 工作台全家桶，桌宠只是其中一角，对"纯桌宠"过重。
 
 ---
@@ -324,18 +325,79 @@ Hermes → Plugin → Event parser → Activity state
 
 ---
 
+### 3.7 PawPause（angziii/PawPause）—— 与自研目标最贴近的产品形态
+
+- **Stars / 许可**：52★ / MIT（素材许可另计，见 ASSET_LICENSE.md）
+- **技术栈**：Electron 43 + electron-vite 5 + React 19 + TypeScript，electron-store 持久化，vitest 测试；macOS / Windows；9 语言 i18n；电子打包带 notarize 脚本
+- **定位**："本地优先的像素伴侣：休息、专注、喝水、agent 活动提醒"——**正是你目标清单的现成组合**（基于 PawPal 桌宠基础 + PetDex 格式启发，单作者小项目）
+
+#### 3.7.1 Agent 事件链路：JSONL 事件文件总线（四种方案之外的第四种形态）
+
+- **opencode 集成**（`integrations/opencode/pawpause-agent-hook.js`，约 100 行官方 opencode 插件）：
+
+```
+mkdir -p ~/.config/opencode/plugins
+cp integrations/opencode/pawpause-agent-hook.js ~/.config/opencode/plugins/
+```
+
+插件把事件归一化后 **append 一行 JSON** 到 `~/.local/share/pawpause/agent-events/opencode.jsonl`（`PAWPAUSE_AGENT_EVENTS` 可覆盖）；app 侧 watch 该文件（多候选路径：Windows `%APPDATA%` / `%LOCALAPPDATA%`、macOS `.local/share` / `Library/Application Support` / userData）。
+
+事件分类表：
+
+| opencode 事件 | 归一化 kind / progressKind |
+|---|---|
+| `session.status` idle/complete/done/stop | complete |
+| `session.status` 其它 | working / thinking |
+| `session.next.step.started` / `reasoning.started` / `text.started` | working / thinking |
+| `session.next.tool.called` / `tool.input.started` | working / tool（bash→script） |
+| `session.next.shell.started` / `command.execute.before` | working / script（带 command 原文） |
+| `permission.asked` / `question.asked` | needs-review / permission·choice |
+| `session.error` / `step.failed` | failed |
+| `chat.message` | working / thinking |
+
+**优点**：app 与 agent 彻底解耦——app 没开事件也不丢、可回放；无 token、无 HTTP/IPC 服务；实现最简单；多 agent 各写各的文件天然分流。**缺点**：文件轮询有延迟；事件明文落盘（隐私）；并发 append 需幂等去重。
+
+#### 3.7.2 其余 agent 接入（零侵入优先）
+
+- **Claude Code**：不装任何 hook！直接解析 `~/.claude/projects/*.jsonl` 会话记录（`parseClaudeLogRecord`）：assistant 消息含 `tool_use`→working，`stop_reason` 为 `end_turn` / `stop_sequence`→response；代价是看不到 permission/notification 等细粒度状态；
+- **DeepSeek TUI**：读 `~/.deepseek/sessions` + 审批事件 `~/.deepseek/audit.log`；
+- **Hermes**：插件写 JSONL（`~/.hermes/plugins/`）+ 会话文件兜底；支持 WSL→Windows 跨机路径对接；
+- **Codex**：支持本地事件（README 声称，含完成/失败/review/进度提醒）。
+
+#### 3.7.3 休息 / 喝水 / 专注（你要的自定义功能现成实现）
+
+- **Break intervention**：可选"全屏遮挡"强制休息模式——提醒被无视时的强干预手段；
+- **Hydration**：喝水提醒 + 每日/历史统计；
+- **自定义提醒**：宠物倒计时，到期前才出现在界面上，可选到期宠物放大（`breakPrompt→review` 动画）；
+- **Focus mode**：macOS 活动窗口检测（需 Accessibility 权限）→ 被屏蔽 app / 关键词触发全屏干扰提醒（`focusGuard→review`、`focusAlert→failed`）；
+- 提醒状态 → PetDex 动画映射表（`spriteStates.ts`）：thinking→waiting、breakPrompt→review、hydrationDone→waving、sad→failed 等。
+
+#### 3.7.4 素材
+
+- 完全复用 **PetDex 格式**（192×208 帧、1536×1872 atlas、9 状态行），`PETDEX_STATES` 帧时长表与 petdex `sprite.zig` 参数一致；
+- 自动扫描 `~/.codex/pets`（`npx petdex install xxx` 装的直接可见），app 内可导入文件夹/zip；
+- 大型素材包不入库（仓库保持小）。
+
+#### 3.7.5 评价
+
+- **优点**：产品形态与你目标重合度最高（休息/喝水/专注/agent 上报全有）；事件链路实现最简单（JSONL 文件总线）；Claude Code 零侵入解析是独门技巧；MIT 且代码量小（main 进程单文件 ~4k 行），易读；
+- **缺点**：52★ 单作者项目、无插件机制、Electron 体重、无 todo 能力；JSONL 明文事件有隐私代价。
+
+---
+
 ## 4. 核心机制横评（自研最关心的事）
 
-### 4.1 agent → 宠物的事件链路：四种方案
+### 4.1 agent → 宠物的事件链路：五种方案
 
 | 方案 | 原理 | 代表 | opencode 是否支持 | 特点 |
 |---|---|---|---|---|
 | **A. hook / 插件事件** | agent 官方事件系统（JSON stdin 或插件回调） | openpets（opencode 插件 / Claude hooks）、petdex（opencode-plugin.js）、clawd（插件+hooks） | ✅ 插件 API（`event / chat.message / tool.execute.before/after`） | 事件最丰富（含 permission.asked、session.error）；opencode 插件需写进 `opencode.json` 的 `plugin` 数组 |
 | **B. MCP 工具** | agent 作为 MCP client 调 `react/say/status` | openpets、petdex | ✅ opencode 支持 MCP server | 通用性最好（任何 MCP agent 可用），但**只有 agent 主动调用才触发**（配合指令文件引导） |
-| **C. 日志/会话文件轮询** | 轮询 `~/.codex/sessions/`、JSONL、telemetry | clawd（codex JSONL）、oc-claw（OpenClaw JSONL） | 部分（opencode 无官方会话 JSONL 习惯） | 零侵入，但粒度粗、有延迟 |
+| **C. 日志/会话文件轮询** | 轮询 `~/.codex/sessions/`、JSONL、telemetry | clawd（codex JSONL）、oc-claw（OpenClaw JSONL）、PawPause（Claude 会话记录） | 部分（opencode 无官方会话 JSONL 习惯） | 零侵入，但粒度粗、有延迟 |
 | **D. PTY/终端包装** | 包一层 CLI 解析输出 | （clawd 早期方案，已弃） | — | 侵入式，不推荐 |
+| **E. JSONL 事件文件总线** | 插件/钩子把归一化事件 **append 到 JSONL**，app 侧 watch 文件 | PawPause（opencode/hermes 插件写 `agent-events/*.jsonl`） | ✅（官方插件写文件即可） | 实现最简单：无 token、无服务、app 关闭不丢事件可回放；缺点：轮询延迟、事件明文落盘、多写者需去重 |
 
-> **opencode 生态结论**：一等方案是 **A（hook 插件）+ B（MCP）+ 指令文件引导**，三者 openpets 全做了，petdex 做了 A，clawd 做了 A+权限桥。自研最小可行 = 一个类似 petdex `opencode-plugin.js` 的插件（约 100 行 JS）POST 本地 HTTP。
+> **opencode 生态结论**：一等方案是 **A（hook 插件）+ B（MCP）+ 指令文件引导**，三者 openpets 全做了，petdex 做了 A，clawd 做了 A+权限桥。自研最小可行 = 一个类似 petdex `opencode-plugin.js` 的插件（约 100 行 JS）POST 本地 HTTP；若想更省事，用 PawPause 的 **E（JSONL 文件总线）**——agent 侧只 append，Tauri 侧 fs watch 即可，Tauri 下无需起 HTTP server。
 
 ### 4.2 传输与安全
 
@@ -345,6 +407,7 @@ Hermes → Plugin → Event parser → Activity state
 | petdex | 本地 HTTP `127.0.0.1:7777` | header token（文件 0600，每会话轮换） | 30/s 限流，一次一连接 |
 | clawd | 本地 HTTP `/state`、`/bubble` | 自有 token/权限规则 | 支持权限气泡双向桥接 |
 | agentpet | 本地事件 socket | — | HookInstaller 写入 agent 配置 |
+| PawPause | **无传输**：JSONL 文件总线（插件 append，app watch） | 无（文件系统权限本身） | 最简单；明文落盘；可回放 |
 
 ### 4.3 状态模型与动画
 
@@ -353,9 +416,11 @@ Hermes → Plugin → Event parser → Activity state
 - clawd：12 动画状态 + 多会话优先级合并；
 - 渲染：openpets 用 CSS sprite animation（Electron），petdex 用 Zig 直接画帧（原生），oc-claw/agentpet 用 Tauri canvas/SwiftUI；**自研 Tauri 用 canvas 帧播放 atlas 即可，与格式无关**。
 
-### 4.4 语音安全（共通的坑）
+### 4.4 消息安全（共通的坑，但严格度不一）
 
-三个项目都做了"自动消息净化"：消息只能来自白名单语音池（或模板化），拒绝原始输出/路径/URL/secret——防止宠物气泡泄露敏感信息。自研必须照做。
+- openpets / clawd：自动消息只能来自白名单语音池（或模板化），拒绝原始输出/路径/URL/secret——防止宠物气泡泄露敏感信息；
+- PawPause：事件里会带工具名/命令原文（截断 120 字符），**明文落盘**——这是文件总线方案在隐私上的明确代价，气泡显示前同样应做净化；
+- 自研必须照做净化，并权衡"事件文件是否落盘"。
 
 ---
 
@@ -379,30 +444,32 @@ Hermes → Plugin → Event parser → Activity state
 
 - 不一定要做沙箱插件系统；把权限面（schedule/pet:*/ai/notify/network）映射成 Tauri 命令 + 配置清单即可；
 - 喝水/休息提醒 = schedule + notify；todo 管理 = 直接对接 todo-lite 的 SQLite（或通过自定义 IPC/HTTP）；对话入口 = 调 opencode 后台会话的入口（如 spawn `opencode run` 或复用其 server API），气泡内展示回复；
+- 休息/喝水/专注的现成实现参考 **PawPause**：休息强制全屏遮挡、喝水每日/历史统计、到期宠物放大、macOS 活动窗口检测专注模式；
 - 养成/成就（agentpet 思路）可作为差异化玩法。
 
 ### 5.4 技术选型
 
 - **自研起点推荐 Tauri v2 + React + TS**（与 todo-lite 同栈，oc-claw 已验证此栈可做宠物）；
 - 窗口：透明、无边框、置顶、点击穿透（Tauri `transparent` + `setIgnoreCursorEvents`）；多显示器定位参考 openpets `display.ts`；
-- 若只想"马上有个好用的宠物"：macOS 直接装 petdex App + 挂 opencode 插件（零代码）；想功能全选 openpets 现成平台。
+- 事件链路选型建议：Tauri 侧用 **fs watch + JSONL 文件总线**（PawPause 方案，最省事）起步，需要细粒度状态（permission/会话错误）或双向控制时再升级为本地 HTTP + token（petdex 方案）；
+- 若只想"马上有个好用的宠物"：macOS 直接装 petdex App + 挂 opencode 插件（零代码）；想功能全选 openpets 现成平台；想要"休息+喝水+专注+agent 上报"一体化可先试用 PawPause 成品。
 
 ---
 
 ## 附录 A：项目档案速查
 
-| | openpets | petdex | clawd-on-desk | agentpet | oc-claw | cc-haha |
-|---|---|---|---|---|---|---|
-| GitHub | alvinunreal/openpets | crafter-station/petdex | rullerzhou-afk/clawd-on-desk | ntd4996/agentpet | rainnoon/oc-claw | NanmiCoder/cc-haha |
-| Stars | ~1.0k | ~3.7k | ~5.8k | ~300 | ~350 | ~14k |
-| 许可 | MIT | MIT | AGPL-3.0 | MIT | MIT | MIT |
-| 平台 | Win/mac/Linux | mac（桌面端） | Win/mac/Linux | mac 原生+Win/Linux | mac/Win | Win/mac/Linux |
-| 语言/框架 | Electron+TS | Zig+Next.js | Electron+JS | Swift/SwiftUI+Tauri | Tauri+React+Rust | Electron+TS |
-| opencode 集成 | 插件+MCP+指令 | 插件文件 | 插件+权限桥 | 通用 wrapper | hooks 监听 | 工作台内置 |
-| 扩展机制 | 插件 SDK v3 | 无 | 无 | 无 | 无 | 无 |
+| | openpets | petdex | clawd-on-desk | agentpet | oc-claw | PawPause | cc-haha |
+|---|---|---|---|---|---|---|---|
+| GitHub | alvinunreal/openpets | crafter-station/petdex | rullerzhou-afk/clawd-on-desk | ntd4996/agentpet | rainnoon/oc-claw | angziii/PawPause | NanmiCoder/cc-haha |
+| Stars | ~1.0k | ~3.7k | ~5.8k | ~300 | ~350 | ~50 | ~14k |
+| 许可 | MIT | MIT | AGPL-3.0 | MIT | MIT | MIT | MIT |
+| 平台 | Win/mac/Linux | mac（桌面端） | Win/mac/Linux | mac 原生+Win/Linux | mac/Win | mac/Win | Win/mac/Linux |
+| 语言/框架 | Electron+TS | Zig+Next.js | Electron+JS | Swift/SwiftUI+Tauri | Tauri+React+Rust | Electron+React | Electron+TS |
+| opencode 集成 | 插件+MCP+指令 | 插件文件 | 插件+权限桥 | 通用 wrapper | hooks 监听 | 插件写 JSONL | 工作台内置 |
+| 扩展机制 | 插件 SDK v3 | 无 | 无 | 无 | 无 | 无 | 无 |
 
 ## 附录 B：调研信息源
 
-- 各项目 README / docs（openpets 的 architecture.md、agent-integrations.md、ipc.md、plugins.md、pets.md；petdex 的 README + `petdex-desktop-native` 源码；clawd-on-desk README + `agents/*.js` + `hooks/opencode-install.js`；oc-claw / agentpet README + 源码树）
-- 关键源码：`opencode-plugin-runtime.ts`（openpets）、`opencode-plugin.js` / `sprite.zig` / `hook_server.zig`（petdex）、`opencode-family.js`（clawd）
+- 各项目 README / docs（openpets 的 architecture.md、agent-integrations.md、ipc.md、plugins.md、pets.md；petdex 的 README + `petdex-desktop-native` 源码；clawd-on-desk README + `agents/*.js` + `hooks/opencode-install.js`；oc-claw / agentpet / PawPause README + 源码树）
+- 关键源码：`opencode-plugin-runtime.ts`（openpets）、`opencode-plugin.js` / `sprite.zig` / `hook_server.zig`（petdex）、`opencode-family.js`（clawd）、`pawpause-agent-hook.js` / `claudeEvents.ts` / `spriteStates.ts`（PawPause）
 - 素材规范：awesome-codex-pet README（atlas v1/v2、pet.json 样例、安装脚本）
