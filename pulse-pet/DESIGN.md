@@ -71,7 +71,7 @@ Tauri 一个 App 可挂多个 webview 窗口。v1 三个窗口：
 
 | 窗口 | 用途 | 关键配置 |
 |---|---|---|
-| `pet` | 宠物精灵 + 气泡（主可见 UI） | `transparent:true`、`decorations:false`、`alwaysOnTop:true`、`skipTaskbar:true`、`resizable:false`、默认 `ignoreCursorEvents:true`（点击穿透），交互时临时设 false |
+| `pet` | 宠物精灵 + 气泡（主可见 UI） | `transparent:true`、`decorations:false`、`alwaysOnTop:true`、`skipTaskbar:true`、`resizable:false`、默认 `ignoreCursorEvents:false`（**不穿透，可拖拽/右键**）；M6 穿透可切换功能上线后，默认仍是 `false`，切换为 `true` 时进入"纯展示"模式（右键菜单改由托盘/全局热键唤起，见 §7.2/§7.3） |
 | `panel` | 控制面板（设置/Token/Todo/提醒） | 普通窗口、`visible:false` 默认隐藏，托盘"设置"或右键菜单唤起 |
 | `fireworks` | 烟花粒子动画 | `transparent:true`、`decorations:false`、`alwaysOnTop:true`、`skipTaskbar:true`、`fullscreen:true` 或跨屏最大化；播放完成（约 3-5s）后 `hide`，下次 `show` |
 
@@ -90,21 +90,25 @@ Tauri 一个 App 可挂多个 webview 窗口。v1 三个窗口：
 
 | opencode 事件 | 归一化 `kind` | 说明 |
 |---|---|---|
-| `session.status` 且 `status.type == idle` | `idle` | agent 空闲 |
-| `session.status` 其它 | `working` | agent 工作中 |
+| `session.status` 且 `status.type == idle` | `idle` | agent 空闲，同时作为状态复位主信号 |
+| `session.status` 其它 | `working` | agent 工作中（也作为 `editing`/`thinking` 等瞬态的复位兜底） |
 | `chat.message` | `thinking` | 模型思考 |
+| 工具完成事件（`tool.execute.after` 若可用，否则下一条 `session.status` 非 idle） | `working` | 把 `editing`/`testing` 拉回 working |
 | `tool.execute.before` 且工具为 `edit/write/patch/apply_patch` | `editing` | 写代码 |
 | `tool.execute.before` 且工具为 `bash/shell/terminal` 且命令含 `test/vitest/jest/pytest/npm test` 等 | `testing` | 跑测试 |
 | `permission.asked` | `waiting-permission` | 等待用户审批 |
 | `session.error` | `error` | 出错 |
 | `event`（自定义 bus 事件） | 透传分类 | 兜底 |
 
+> **状态复位约定**：`editing`/`thinking`/`testing`/`waiting-permission` 为瞬态。复位优先级：① 收到 `tool.execute.after`（若 opencode 提供）→ `working`；② 收到 `chat.message` 完成 → `working`（由 `session.status` 非 idle 兜底）；③ App 侧状态超时兜底——任一瞬态若 N 秒（默认 30s，可配）内无新事件则回退到 `working`，再无事件 30s 回退到 `idle`。M2 第一步实测 `session.status` 实际发送频率与 `tool.execute.after` 是否存在；据此二选一作为主复位信号，另一个作为兜底。
+
 - **节流**（学习 openpets）：speech 20s / permission 3s / reaction 10s 冷却，原子写 JSON 状态文件防并发。
 - **自忽略**：正则跳过 `pulsepet_status/say/react` 工具，防回环（openpets 已踩过的坑）。
 - **消息净化**：气泡文案只能来自白名单语音池（thinking/success/error/permission/waiting 五类模板），**不展示原始 prompt/输出/路径/URL/secret 样式 token**。命令行具体内容仅用于归一化分类，**不发给宠物**。
-- **token 文件**：`~/.pulsepet/runtime/update-token` mode 0600，由 Tauri App 启动时生成并写文件，插件每次启动读 token。App 退出时清除，下次启动重新生成。
+- **token 文件**：`~/.pulsepet/runtime/update-token` mode 0600（POSIX 端），由 Tauri App 启动时生成并写文件，插件每次启动读 token。App 退出时清除，下次启动重新生成。Windows 无 POSIX 权限语义，mode 0600 无效——Windows 端仅靠"用户级目录（`%LOCALAPPDATA%` / `~/.pulsepet`）+ 单用户登录假设 + ACL 默认仅本用户可见"保护，不在 v1 实装 ACL 强化。
 - **端口文件**：`~/.pulsepet/runtime/endpoint` 存 `127.0.0.1:<port>`，端口冲突时 App 会换端口并更新此文件；插件每次发请求前先读最新端口。
 - **killswitch**：`~/.pulsepet/runtime/hooks-disabled` 文件存在则插件整体跳过，便于排障。
+- **App 退出/未启动时的失败处理**：endpoint 文件或 token 文件不存在、连接拒绝、超时、401 一律视为"App 不在"，**静默跳过该次事件**（不打日志、不报错给 opencode 终端），并用指数退避（首次立即重试 1 次，之后间隔 1s→2s→5s→30s 封顶）避免高频事件打爆日志。endpoint/token 文件重新出现后下次事件即恢复立即投递。
 
 ### 3.2 HTTP server（Rust 侧，端口 + token 鉴权）
 
@@ -129,7 +133,7 @@ Tauri 一个 App 可挂多个 webview 窗口。v1 三个窗口：
 - App 维护 `HashMap<SessionId, SessionState>`，每收事件更新对应 session。
 - 显示状态用 clawd 式优先级合并：`error > waiting-permission > testing > editing > thinking > working > idle`。
 - 多个 session 同时活跃时，单只宠物显示最高优先级状态（v1 不做多宠物）。
-- 长时间无心跳的 session（30s 无事件 + 无 `/health` ping）回收为 `idle`。
+- 长时间无事件的 session（30s 无 `/state` 事件）回收为 `idle`。`/health` 仅用于调试探活，不参与回收条件（v1 插件不发心跳，避免"无 /health"分支成为死代码）。
 
 ### 3.4 AgentAdapter 抽象（v1 仅 opencode，留扩展接口）
 
@@ -144,6 +148,8 @@ interface AgentAdapter {
 ```
 
 v1 只实现 `OpenCodeAdapter`，但模块边界清晰：将来加 `ClaudeCodeAdapter`（transcript 增量解析）只需新增文件不改主链路。AgentAdapter 在 TS 侧而非 Rust 侧——因为 opencode 插件归一化已在前端语义层完成（JS 写最顺），Rust 只负责 HTTP 接收和 SQLite 读取。
+
+**职责边界说明**：`AgentAdapter` 是接口抽象，但 v1 的 opencode 适配实际跨两层——事件归一化在 TS 侧（插件 JS），token 读取在 Rust 侧（`token_stats.rs` rusqlite）。未来加 Claude Code 时，token 数据源走 transcript JSONL 增量解析（不入 opencode.db），可能改 TS 侧也可能改 Rust 侧——"只改一个文件"的表述对此不完全成立。POC 阶段接受此边界，v2 接入第二个 agent 时再评估是否把 `tokenSource` 实现也收口进 `AgentAdapter` 抽象（让每个 adapter 自带 token 读取实现，Rust 侧只暴露通用 fs/JSONL 读取能力）。
 
 ---
 
@@ -160,6 +166,7 @@ v1 只实现 `OpenCodeAdapter`，但模块边界清晰：将来加 `ClaudeCodeAd
 
 - 旧版本兜底（纯文件存储时代）：探测 `~/.local/share/opencode/storage/session/*.json`、`storage/message/*.json` —— v1 仅做"探测存在 + 报告版本不支持"，不做完整解析；提示用户升级 opencode。完整解析后置到 v1.1。
 - **连接模式**：`OpenFlags::SQLITE_OPEN_READ_ONLY | SQLITE_OPEN_NO_MUTEX`，**不**用 WAL 也不写任何 journal；只读连接与 opencode 运行时连接互不冲突（WAL 模式允许 N 读 1 写）。
+  - **NO_MUTEX 线程安全注意**：`NO_MUTEX` 表示连接不可跨线程共享。Tauri command 在 tokio 线程池中调用，rusqlite 连接不能放进 `Mutex<Connection>` 长期持有跨多线程——v1 采用**每次查询新建只读连接**（开销极小，~ms 级，省去锁竞争），`token_stats_query` 入口即开即关即弃。
 - **聚合查询**（按时间跨度 + 项目）：
 
 ```sql
@@ -221,7 +228,8 @@ fn token_stats_current_session(session_id: String) -> Result<Option<TokenRow>, S
 ### 5.1 调度器（Rust 侧）
 
 - v1 用 Tauri 的 `tokio` runtime + `tokio::time::interval` 最简实现：每 1 分钟 tick 一次，检查所有启用的提醒规则是否到点。
-- 提醒规则持久化在脉冲内 SQLite（`pulsemet.db`）的 `reminders` 表。
+- **macOS 睡眠恢复**：`tokio::time::interval` 默认 `MissedTickBehavior::Burst`，系统睡眠醒来会补发所有错过的 tick（可能瞬间连弹数次提醒）。调度器初始化时显式设 `MissedTickBehavior::Skip`，错过的不补，等下一个整 tick。
+- 提醒规则持久化在脉冲内 SQLite（`pulsepet.db`）的 `reminders` 表。
 - 到点：发送 Tauri event `reminder://trigger` 给前端，前端根据规则决定渲染气泡还是烟花。
 - 调度器读 SQLite 表后做 in-memory 倒计时，避免每分钟查库；用户改设置后通过 Tauri command 通知调度器 reload。
 
@@ -230,6 +238,7 @@ fn token_stats_current_session(session_id: String) -> Result<Option<TokenRow>, S
 - 宠物头顶气泡文案：`该喝水啦 💧` / `休息一下 ☕` / `站起来走走 🚶` 等（提醒规则可配文案）。
 - 气泡有效时长 8s 自动消失；点击宠物可"已确认"提前消失；3 分钟内不重复提醒同一条。
 - 文案净化同 §3.1 —— 提醒文案是用户自配或模板，防泄露敏感信息。
+- **跨午夜窗口语义**：`start_time > end_time`（如 22:00–06:00）视为跨日窗口——当日在 `start_time` 起至次日 `end_time` 止为该规则的"活跃时段"，调度器 tick 时判断"当前时刻是否在 [start_time, 24:00) ∪ [00:00, end_time) 内"来决定是否进入倒计时。窗口在区间外不触发提醒。
 
 ### 5.3 烟花模式（用户设置中开启）
 
@@ -244,14 +253,15 @@ fn token_stats_current_session(session_id: String) -> Result<Option<TokenRow>, S
 ```sql
 CREATE TABLE reminders (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  kind TEXT NOT NULL,                  -- "hydration" | "rest" | "custom"
-  label TEXT NOT NULL,                 -- 用户可配文案
-  interval_minutes INTEGER NOT NULL,   -- 触发间隔
+  kind TEXT NOT NULL,                  -- "hydration" | "rest" | "custom" | "todo"
+  label TEXT NOT NULL,                 -- 用户可配文案（todo kind 时存 todo title）
+  interval_minutes INTEGER NOT NULL,   -- 触发间隔（todo kind 用 0 表示非周期提醒）
   start_time TEXT,                     -- 当日起始时间 HH:MM（如 "09:00"）
   end_time TEXT,                       -- 当日结束时间 HH:MM
   enabled INTEGER NOT NULL DEFAULT 1,
   use_fireworks INTEGER NOT NULL DEFAULT 0,  -- 单条覆盖全局开关
   last_triggered_at TEXT,
+  source_todo_id INTEGER,              -- kind='todo' 时反向引用 todos.id，NULL 表示非 todo 派生
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -266,6 +276,8 @@ CREATE TABLE reminder_logs (
 
 历史统计（喝水次数 / 休息次数）从 `reminder_logs` 聚合。
 
+**todo 派生提醒约定**：todo 写入/修改 `due_date` 且 `remind_before_minutes > 0` 时，Rust 侧 todo command 同步 upsert 一行 `kind='todo'`、`source_todo_id=<todo.id>`、`interval_minutes=0`、`start_time` 为 `due_date - remind_before_minutes` 的 reminder；todo 删除/完成时级联删该行。`kind='todo'` 的 reminder 仅触发一次（非周期），触发后由 `reminders` 调度器根据 `last_triggered_at` 与当前时间判断是否再发。
+
 ---
 
 ## 6. 素材与精灵渲染
@@ -274,6 +286,7 @@ CREATE TABLE reminder_logs (
 
 - v1 起步用 1 张 PNG（128×128 单图，draw 几帧切换）打通链路。占位用一只简洁像素风小猫（姿势力求中性：坐姿 + 单眨眼），作者自备或用开源 CC0 素材（避免许可问题）。
 - 渲染：canvas 2D，按 60fps 切帧（占位阶段帧切换极简，主要验证状态机驱动）。
+- **canvas 缩放策略**（占位 + atlas 一致适用）：pet 窗口 220×220 逻辑尺寸，canvas 内部分辨率 = 220 × `window.devicePixelRatio`（HiDPI 下 2×→440），CSS 尺寸固定 220×220。帧图按 `min(canvasW/frameW, canvasH/frameH)` 居中绘制（占位 128×128 / atlas 单帧 192×208 都会被放大到 canvas 内），不裁剪保持比例。窗口 resize 不触发（v1 `resizable:false`），dpr 变化（拖到外接屏）时监听 `window.matchMedia` 重设画布尺寸。
 - 占位精灵只覆盖最常用 5 状态：`idle / thinking / working / success / error`，其余状态映射到最近的同类（如 `waiting-permission→thinking`、`testing→working`）。
 
 ### 6.2 atlas 加载器（M5 补入）
@@ -295,15 +308,32 @@ CREATE TABLE reminder_logs (
 | review | 8 | uniform |
 
 - webp 解码在 Rust 侧用 `image` + `image-webp`，避免前端起 worker 解大图；解码后下发 RGBA 图块数组到 webview，前端只做 canvas 切帧。
+- **网格尺寸校验**：解码后先读 `pet.json` 的 `cols/rows`（v1 期望 8×9 = 1536×1872，v2 8×11 = 1536×2288，单帧 192×208）。若实际图块尺寸与元数据不符，加载器报错并在控制面板提示"该素材网格尺寸非标准（如 8×9 / 8×11 之外）"，回退到上一可用素材或内置占位；不做按单帧强行裁剪（社区素材非标准网格裁剪语义含糊，宁可拒载也不误显示）。
 - atlas 加载器完成前，所有状态都用占位精灵；完成后切换为 atlas 帧时长表（pet.json 元数据 + 帧时长表）。
+
+**归一化事件 8 种 → atlas 9 行完整映射表**（M5 切 atlas 后启用）：
+
+| 归一化状态 | atlas 行号 | atlas 行名 | 说明 |
+|---|---|---|---|
+| `idle` | 0 | idle | 直映 |
+| `working` | 7 | running | 无同名行，落到通用 "running"（原地踏步式跑动） |
+| `thinking` | 6 | waiting | 待机/张望感最贴近"思考中" |
+| `editing` | 1 | running-right | 写代码 = 向前推进 |
+| `testing` | 2 | running-left | 测试 = 回溯验证，反向跑动 |
+| `waiting-permission` | 8 | review | 申请审批画面贴合 |
+| `error` | 5 | failed | 直映 |
+| `success`（任务完成/今日清零，§8.3） | 3 | waving | 庆祝式挥手 |
+| （应答/打招呼，预留） | 4 | jumping | v1 未驱动，留作 todo 完成全清等的二级庆祝 |
+
+> M1-M4 占位阶段沿用 §6.1 简表（`waiting-permission→thinking`、`testing→working`）；M5 切 atlas 起改用上表。
 
 ### 6.3 渲染细节精致化（M6）
 
-- **拖拽**：webview 不直接处理鼠标（默认穿透），用 Tauri `window.startDrag()` API 或 Rust 侧手动监听 `WindowEvent::CursorMove` + `set_position`。拖拽时临时关闭穿透、释放恢复。
+- **拖拽**：v1 pet 窗口默认 `ignoreCursorEvents=false`（非穿透），webview 可直接收 mousedown → 触发 Tauri `window.startDrag()`（或 Rust 侧监听 `WindowEvent::CursorMove` + `set_position`）。若用户在 M6 后切换到穿透态，则拖拽不可用——此时只能通过托盘/热键切回非穿透态再拖。文档此前"穿透时临时关闭穿透、释放恢复"的设想无法成立（穿透态下根本收不到 mousedown），故 v1 不做该路径。
 - **位置记忆**：宠物位置 + 所在显示器 id 写入 `pulsepet.db` 的 `app_state` 表，启动时还原。
 - **跨显示器拖拽**：Tauri `availableMonitors()` API 计算屏幕边界，跨屏拖拽实时更新窗口位置。
 - **启动定位**：上次所在显示器 + 上次坐标；若该显示器已不存在则回退主显示器。
-- **点击穿透可切换**：右键菜单"切换交互模式" + 全局热键（默认 `Ctrl+Shift+P` for pet / `⌘+Shift+P` macOS，与 opencode 不冲突），穿透开 = 纯展示，穿透关 = 可拖拽 / 右键。
+- **点击穿透可切换**：穿透态下右键菜单不可达，故切换通道为"全局热键 + 托盘菜单"双通道（热键 `⌘+Shift+Alt+P` Mac / `Ctrl+Shift+Alt+P` Win，与 §7.3 一致）；托盘右键菜单的"切换交互模式"项两条通道都可用（穿透态下托盘仍是系统级菜单不受影响）。穿透开 = 纯展示（鼠标穿透 + 不可拖拽），穿透关 = 可拖拽 / 右键。
 - **多显示器烟花**：v1 默认在主显示器播放；M6 后再评估是否跨屏烟花（Tauri 多窗口拼接或原生）。
 
 ---
@@ -352,7 +382,7 @@ CREATE TABLE reminder_logs (
 }
 ```
 
-`pet` 与 `fireworks` 默认 `ignoreCursorEvents=false`（关闭穿透），运行时通过 `setIgnoreCursorEvents` 动态切换。
+`pet` 与 `fireworks` 默认 `ignoreCursorEvents=false`（关闭穿透，可交互）；运行时通过 `setIgnoreCursorEvents` 动态切换。M1-M5 阶段不做切换，pet 窗口始终为可交互态；M6 引入穿透开关后，开启穿透时鼠标事件全部透出，pet 窗口的右键菜单不再可达——此时右键菜单只通过托盘（§7.2）和全局热键（§7.3）唤起。
 
 ### 7.2 托盘
 
@@ -362,7 +392,7 @@ CREATE TABLE reminder_logs (
   - 打开控制面板
   - 暂停所有提醒（v1 单一开关，便于"勿扰"）
   - 退出
-- 左键单击：切换控制面板可见性。
+- 左键单击：切换宠物窗口（pet）的可见性——pet 是 PulsePet 的主可见 UI，托盘左键作为 primary action 应作用于主窗口；控制面板走右键菜单的"打开控制面板"项。
 - 注意：`TrayIconEvent::Click` 在 Down/Up 各触发一次，toggle 逻辑须判断 `button_state`（与 todo-lite 同坑）。
 
 ### 7.3 全局快捷键
@@ -419,7 +449,9 @@ CREATE TABLE todos (
   title TEXT NOT NULL,
   notes TEXT,
   priority INTEGER NOT NULL DEFAULT 0,    -- 0/1/2/3
-  due_date TEXT,                          -- YYYY-MM-DD
+  due_date TEXT,                          -- YYYY-MM-DD 或 YYYY-MM-DDTHH:MM（带时间时按时间触发提醒）
+  remind_before_minutes INTEGER NOT NULL DEFAULT 5,  -- 到点前 N 分钟气泡提醒，0 = 不提前提醒
+  remind_last_triggered_at TEXT,           -- 防同条 todo 重复触发提醒
   completed_at TEXT,
   sort_order INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -433,14 +465,15 @@ CREATE TABLE todo_tags (
 );
 ```
 
-比 todo-lite 简化（无 lists/sections/groups），单层 todo 列表 + 标签 + 优先级 + 截止日期。够用为准。
+比 todo-lite 简化（无 lists/sections/groups），单层 todo 列表 + 标签 + 优先级 + 截止日期 + 提前提醒分钟。够用为准。
 
 ### 8.3 Todo 与宠物的联动
 
-- 任务到点前 X 分钟（用户可配，默认 5 min），宠物气泡显示"还有 X 分钟要完成「任务名」"。
+- 任务到点前 X 分钟（`remind_before_minutes`，默认 5 min，0 表示不提前提醒），宠物气泡显示"还有 X 分钟要完成「任务名」"。
 - 任务完成时宠物播放 `waving` 动画 + 气泡"干得漂亮 🎉"。
 - 完成今日全部任务，宠物头顶气泡显示今日完成数。
-- 这些联动通过 §3 调度器 + 宠物 webview 的 Tauri event 走，不引入新通道。
+- **调度器集成通道**：v1 不让调度器另查 `todos` 表，而是 todo 写入/修改时由 Rust 侧 todo command 同步往 `reminders` 表插/改一行 `kind='todo'` 派生提醒（带 `reminder_id → todo_id` 反向引用字段，见 §5.4 扩展），由 §5.1 调度器统一消费。删除：todo 删除时级联删对应 reminder。优点：调度器逻辑保持单一数据源，todo 模块只负责往 reminders 表注入。M7 前确认此通道定案。
+- 这些联动通过 §5.1 调度器 + 宠物 webview 的 Tauri event 走，不引入新通道。
 
 ---
 
@@ -512,22 +545,27 @@ lab/pulse-pet/
 - 三窗口配置（pet/panel/fireworks）+ 路由
 - 占位精灵 canvas 渲染（5 状态切换）
 - 托盘 + 单实例锁 + 控制面板唤起
-- 本地 SQLite（`pulsemet.db`）+ 基础表迁移
+- 本地 SQLite（`pulsepet.db`）+ 基础表迁移
 - `app_state` 表存位置 + 退出/启动恢复
 
 ### M2 事件链路（1 周）
 - Rust 侧 `tiny_http` server + 路由 + token 鉴权 + 限流
 - token 文件 / endpoint 文件 / killswitch 机制
+- 插件对连接失败/401/endpoint 缺失的静默 + 指数退避处理（§3.1）
 - opencode 插件 JS 实现 + 安装脚本 + opencode.json 合并/卸载
 - `session_state.rs` 多 session 状态机 + 优先级合并
 - 前端 `http-bridge` + `petStore` + 状态驱动动画
 - 端到端验证：开 opencode 跑任务 → 宠物切换 idle/thinking/working/success
+- **M2 done 标准补充验证项**：① 实测 `tool.execute.after` / `chat.message` 完成事件在 opencode 中是否存在并以何种字段区分；② 据此选定主复位信号 + 兜底信号，并加上 §3.1 30s 状态超时兜底；③ 跑完一个完整任务，验证宠物不会卡在 `editing`/`thinking` 状态超过 30s。
 
 ### M3 Token 统计（1 周）
 - Rust 侧 `token_stats.rs`：路径探测 + rusqlite 只读连接 + 聚合查询命令
 - 前端 Token 标签页：KPI / 时序图（自画 SVG）/ 项目分布 / 会话列表
 - 时间跨度切换：7d / 30d / 任意
 - 当前会话气泡汇报（session idle + 有用量时显示）
+- **M3 done 标准补充验证项**：
+  - 实测 opencode `session` 表 `cost` / `tokens_*` 的写入时机（逐 message 写还是 session 结束聚合写），据此决定气泡汇报是否需要延迟读取；若进行中 session 数字滞后/为零，气泡仅在 session `time_updated` 与 `session.status=idle` 时间差 < 阈值时显示，避免陈旧数字。
+  - `token_stats_current_session` 对"正跑中"的 session 返回 0 行时，前端必须"无记录则不出气泡"，已隐含但需写进 tested checklist。
 
 ### M4 提醒（1 周）
 - `reminders` 表 + 控制面板提醒配置 UI
@@ -590,6 +628,7 @@ lab/pulse-pet/
 - **多 session 抢镜**：v1 单宠物优先级合并可能让"我最不关心的那个 session 报错时宠物一直显示 error"；M6 后视用户反馈再评估切换规则（如"最近 5s 有事件的 session 优先"）。
 - **烟花在 Windows 透明窗口**：Tauri 2 在 Windows 上透明窗口的 `maximized + transparent + alwaysOnTop` 组合若有渲染问题，回退方案是 fireworks 窗口不透明、背景用接近桌面的深色 + 自适应 alpha 通道；M4 第一天先在 macOS 验证，第二天验 Windows。
 - **webp 解码跨平台**：`image-webp` crate 在 Windows 上编译需 `nasm`；若 CI 复杂度上升，回退方案是 atlas 直接要求 png 格式（petdex 也接受 png），跳过 webp。
+- **社区 atlas 网格尺寸不标准**：社区素材可能存在 8×9 / 8×11 之外的网格（如自定义行列），加载器在 §6.2 网格尺寸校验阶段拒载并回退到上一可用素材或内置占位，不强行裁剪。
 - **opencode 插件运行时**：opencode 插件 API 目前在演进，hooks 字段稳定但可能新增；v1 监听字段做存在性检测后兜底 `event` bus；安装脚本做"幂等合并 + `--pulse-pet-managed` 标记"保证卸载不误删用户原有插件。
 - **Tauri 2 API 变化**：锁定最新稳定版，按文档调整（与 todo-lite 同策略）。
 - **Windows 端实机验证延后**：v1 主要在 macOS 开发，Windows 在 M4/M8 阶段交叉验证。
@@ -600,6 +639,7 @@ lab/pulse-pet/
 
 - **macOS**：`npm run tauri build` 产出 `.app` + `.dmg`。
 - **Windows**：通过 GitHub Actions 产出（同 todo-lite），触发方式：push tag `pulse-pet-v*`，矩阵 `windows-latest + macos-latest`，产出附到 draft Release。
+- **CI workflow 修改**：复用 todo-lite 现有 `.github/workflows/build.yml`，但需 **修改而非照搬**——把 tag 触发模式从 `todo-lite-v*` 改为同时匹配 `todo-lite-v*` 与 `pulse-pet-v*`（正则 `^(todo-lite|pulse-pet)-v*`），并在 job 内据 tag 前缀切换工作目录（`pulse-pet/` vs `todo-lite/`）与产物命名（`PulsePet-<version>-<os>` vs `TodoLite-<version>-<os>`）。M2 起首次需要发版前完成此改动并 PR。
 - **opencode 插件**：随主包发布，也可独立 zip 发布（用户用 `install.sh/ps1` 安装，无需 Tauri app 也能尝试）。
 - **包体积目标**：Tauri app ~10-20MB；atlas 加载器完成后，素材包不入主包，用户从 petdex/awesome-codex-pet 自取。
 
