@@ -2,6 +2,7 @@
 
 > 依据：`DESIGN.md`（技术方案）、`DECISIONS.md`（范围决策）、`DESIGN-REVIEW.md`（评审记录，A 组矛盾 / B 组缺口 / C 组建议均已纳入用例）、`desktop-pet-research.md`（行业调研）。
 > 用途：v1 各里程碑（M1-M8）与 v1 Done 标准的验收依据。用例编号按模块前缀，可在里程碑结束时逐条勾验。
+> 评审：本文件评审见 [TEST-CASES-REVIEW.md](./TEST-CASES-REVIEW.md)；2026-08-10 已按其 P0/P1/P2 项修订合并。
 
 ## 编号约定
 
@@ -28,9 +29,10 @@
 - **步骤**：启动 App。
 - **预期**：
   1. `pet` 窗口显示（220×220、透明、无边框、置顶、不在任务栏、不可 resize、无阴影）；
-  2. `panel` 窗口隐藏（`visible:false`）；
-  3. `fireworks` 窗口隐藏；
-  4. 托盘图标出现。
+  2. `pet` 初始 `ignoreCursorEvents=false`（非穿透，可拖拽/右键；对应 DESIGN-REVIEW A1 修正后的默认值，运行时查询确认）；
+  3. `panel` 窗口隐藏（`visible:false`）；
+  4. `fireworks` 窗口隐藏；
+  5. 托盘图标出现。
 
 ### TC-APP-02 单实例锁
 
@@ -52,7 +54,7 @@
 
 ### TC-APP-05 托盘菜单项动作
 
-- **前置**：App 运行中。
+- **前置**：App 运行中；先配置一条 1 分钟间隔的提醒并启用。
 - **步骤**：依次点击菜单项：
   1. "打开控制面板"；
   2. "显示/隐藏宠物"；
@@ -61,7 +63,7 @@
 - **预期**：
   1. panel 显示；
   2. pet 可见性切换；
-  3. 所有提醒暂停，到点不再弹任何气泡/烟花；
+  3. 暂停生效：等待 90 秒（超过 1 个提醒周期）无任何气泡/烟花；
   4. App 完全退出，托盘图标消失，进程结束。
 
 ### TC-APP-06 全局热键唤起控制面板
@@ -80,28 +82,31 @@
 - **步骤**：与 opencode 默认热键（`Ctrl+O` 等）对照检查。
 - **预期**：PulsePet 三个全局热键不与 opencode 及常见 IDE 默认热键冲突。
 
-### TC-APP-09 位置记忆与启动恢复
+### TC-APP-09 位置记忆与启动恢复（M6+）
 
 - **前置**：拖动宠物到次显示器（若有多显示器）的某坐标。
 - **步骤**：退出 App → 重启。
 - **预期**：宠物出现在上次所在显示器 + 上次坐标；位置与显示器 id 已写入 `pulsepet.db` 的 `app_state` 表。
 
-### TC-APP-10 位置记忆的显示器回退
+### TC-APP-10 位置记忆的显示器回退（M6+）
 
 - **前置**：上次宠物在某个外接显示器（记录其 id）。
 - **步骤**：拔掉该显示器 → 重启 App。
 - **预期**：宠物回退到主显示器显示，不崩溃、不显示在屏幕外。
 
-### TC-APP-11 跨显示器拖拽
+### TC-APP-11 跨显示器拖拽（M6+）
 
 - **前置**：多显示器环境，M6 实现跨屏拖拽后。
 - **步骤**：拖动宠物从当前显示器跨越到另一显示器。
 - **预期**：宠物平滑跨屏，位置实时更新；跨屏过程中不被边缘卡住；落点坐标记录正确。
 
-### TC-APP-12 设置持久化
+### TC-APP-12 设置持久化（M1 基线 / M5+ 扩展）
 
-- **前置**：在 panel 修改若干设置（宠物选择、穿透开关、烟花全局开关、提醒规则）。
-- **步骤**：关闭 App → 重启 → 打开 panel 核对。
+- **前置**：M1 基线只改穿透开关、烟花全局开关、提醒规则；M5 起追加改宠物选择。
+- **步骤**：
+  1. M1 基线：在 panel 改穿透开关 / 烟花全局开关 / 提醒规则若干项；
+  2. M5 起追加：在 panel 改宠物选择一项。
+  3. 关闭 App → 重启 → 打开 panel 核对。
 - **预期**：所有设置保留（存于本地 SQLite）；宠物位置、提醒日志同样保留（对应 v1 Done 标准第 6 条）。
 
 ### TC-APP-13 首启引导
@@ -118,11 +123,13 @@
 
 - **前置**：opencode 已安装；`~/.config/opencode/opencode.json` 存在（或可创建）。
 - **步骤**：运行 `install.sh`。
+- **追加步骤**：在用户 `opencode.json` 的 plugin 段前后加注释行与尾逗号 → 再次运行 install.sh。
 - **预期**：
   1. `pulse-pet-hook.js` 拷贝到 `~/.config/opencode/plugins/`；
   2. `opencode.json` 的 `plugin` 数组合并 `pulse-pet` 一项，带 `--pulse-pet-managed` 标记；
   3. 用户原有 plugin 项保留不误删；
-  4. 重复安装幂等（不产生重复项）。
+  4. 重复安装幂等（不产生重复项）；
+  5. JSONC 感知：注释行与尾逗号保留，合并后文件仍为合法 opencode 配置（参考 openpets `opencode-config.ts`）。
 
 ### TC-EV-02 插件卸载
 
@@ -174,20 +181,32 @@
 - **预期**：
   1. opencode 终端无任何报错、无日志输出（静默跳过）；
   2. 插件不因连接拒绝/超时/401 崩溃；
-  3. 指数退避生效：首次立即重试 1 次，之后 1s→2s→5s→30s 封顶。
+  3. 指数退避生效（首次立即重试 1 次，之后 1s→2s→5s→30s 封顶）——**观察方式**：插件模块级单测 mock 时间断言退避序列（静默要求下集成层无法直接观测间隔）；集成层仅验证"静默跳过 + 恢复后立即投递"。可选：测试期设 `PULSEPET_DEBUG=1` 输出退避时间戳（仅测试期临时机制，不随 release 发布）。
 - **恢复**：启动 App 后，下一个事件立即恢复正常投递（endpoint/token 文件重新出现即恢复）。
 
 ### TC-EV-08 token 文件生命周期
 
 - **前置**：App 运行中。
 - **步骤**：
-  1. 检查 `~/.pulsepet/runtime/update-token`（POSIX 端）；
+  1. 检查 `~/.pulsepet/runtime/update-token`（POSIX 端；Windows 端见 TC-EV-08b）；
   2. 退出 App；
   3. 再次启动。
 - **预期**：
   1. 文件存在，mode 0600，内容是随机 token；
   2. App 退出时文件被清除；
   3. 再次启动生成**新** token（每次会话轮换）。
+
+### TC-EV-08b token / endpoint / killswitch 文件路径（Windows）
+
+- **前置**：Windows 环境，App 运行中。
+- **步骤**：
+  1. 检查 `%LOCALAPPDATA%\pulsepet\runtime\update-token` 与 `endpoint`；
+  2. 退出 App → 再次启动；
+  3. 创建 `hooks-disabled` → 触发事件 → 删除。
+- **预期**：
+  1. 两文件位于 `%LOCALAPPDATA%\pulsepet\runtime\`，内容与 POSIX 端一致（随机 token / `127.0.0.1:<port>`）；
+  2. 退出时 token 文件清除、重启后重新生成（新 token）；
+  3. killswitch 同目录生效（行为同 TC-EV-10）。
 
 ### TC-EV-09 endpoint 文件与端口冲突回退
 
@@ -227,6 +246,12 @@
   - `POST /state`（需 token，body `{sessionId, kind, agent, project?, detail?}`）；
   - `POST /bubble`（需 token）。
 - **预期**：/health 返回 200；/whoami 返回 200 且能标识当前实例；/state、/bubble 带 token 返回 200；未知路由返回 404。
+- **body 契约校验**（追加）：
+  1. body 缺 `sessionId` → 400；
+  2. body 缺 `kind` → 400；
+  3. body 缺 `agent` → 400（`sessionId/kind/agent` 必填，`project`/`detail` 可缺省）；
+  4. `kind` 为 8 种归一化取值之外的非法值 → 400；
+  5. 合法 body（含缺省 `project`/`detail`）→ 200。
 
 ### TC-EV-13 限流
 
@@ -260,9 +285,12 @@
 
 ### TC-EV-18 节流
 
-- **前置**：高频事件环境。
-- **步骤**：连续快速触发：语音类 5 次、权限类 5 次、反应类 5 次。
-- **预期**：speech 20s / permission 3s / reaction 10s 冷却生效；冷却期内同类事件被丢弃；冷却结束后恢复。
+- **前置**：高频事件环境；kind → 冷却分类映射按 DESIGN §3.1 定案表（speech：thinking/success/error；permission：waiting-permission；reaction：working/editing/testing/idle）。
+- **步骤**：连续快速触发：
+  1. thinking / success / error 各 5 次（speech 类）；
+  2. waiting-permission 5 次（permission 类）；
+  3. working / editing / testing / idle 各 5 次（reaction 类）。
+- **预期**：speech 20s / permission 3s / reaction 10s 冷却生效；冷却期内同类事件被丢弃；冷却结束后恢复；三类冷却互不干扰（如 waiting-permission 只占 permission 冷却，不占 speech 冷却）。
 
 ### TC-EV-19 自忽略（防回环）
 
@@ -274,7 +302,7 @@
 
 - **前置**：真实跑一个任务。
 - **步骤**：任务包含：带路径的报错、带 URL 的输出、敏感样式 token（如 `sk-...`）、长代码片段；跑完检查气泡与宠物收到的所有文案。
-- **预期**：气泡文案只来自白名单语音池（thinking/success/error/permission/waiting 五类模板）；不出现任何原始 prompt / 输出文本 / 路径 / URL / secret 样式 token；命令行具体内容只用于分类，从未进入气泡。
+- **预期**：气泡文案只来自白名单语音池（thinking/success/error/permission/waiting 五类模板）；不出现任何原始 prompt / 输出文本 / 路径 / URL / secret 样式 token；命令行具体内容只用于分类，从未进入气泡；waiting 类为 PulsePet 在 openpets 四类（thinking/success/error/permission）基础上的扩展模板，独立定义、非照搬。
 
 ### TC-EV-21 气泡文案长度与单行约束
 
@@ -425,11 +453,15 @@
 - **步骤**：托盘"暂停所有提醒"开启 → 等到原本会触发的时刻。
 - **预期**：任何提醒都不触发；取消暂停后恢复。
 
-### TC-RM-09 烟花模式触发
+### TC-RM-09 烟花模式触发（可断言部分）
 
 - **前置**：某规则勾选烟花模式（或全局开关开）。
 - **步骤**：触发该提醒。
-- **预期**：`fireworks` 窗口显示：全屏透明置顶、无边框、无任务栏项；从宠物位置为发射点朝屏幕中心/随机方向发射粒子；粒子数 ~300-500、HSL 渐变 + 拖尾、60fps；3-5s 消散后窗口 `hide`。
+- **预期**：
+  1. `fireworks` 窗口显示（全屏透明置顶、无边框、无任务栏项）；
+  2. 3-5s 内窗口自动 `hide`；
+  3. 无重复 show、无残留帧。
+- **目视验收项**（不进自动回归）：发射点位于宠物位置、朝屏幕中心/随机方向；粒子数 ~300-500、HSL 渐变 + 拖尾；60fps 流畅。
 
 ### TC-RM-10 烟花结束后可复用
 
@@ -477,7 +509,13 @@
 
 - **前置**：M1-M4 占位阶段（内置 1 张 PNG 128×128）。
 - **步骤**：依次驱动 idle / thinking / working / success / error。
-- **预期**：5 种状态均有对应帧切换；60fps 切帧；`waiting-permission→thinking`、`testing→working` 等未覆盖状态映射到最近同类。
+- **预期**：5 种状态均有对应画面；占位阶段每状态渲染单帧（单图 PNG，无多帧可切），状态切换时画面立即更换；rAF 循环按 60fps 维持动画时序；状态降级映射单独验证见 TC-SP-01b。
+
+### TC-SP-01b 占位阶段状态降级映射
+
+- **前置**：占位阶段（5 状态精灵）。
+- **步骤**：逐一驱动全部 8 种归一化状态。
+- **预期**：idle / thinking / working / success / error 直接渲染对应画面；`waiting-permission→thinking`、`testing→working`、`editing→working` 降级到最近同类渲染；全程无空白画面、无崩溃。
 
 ### TC-SP-02 canvas 缩放（C11）
 
@@ -540,6 +578,16 @@
 - **步骤**：验证编译链。
 - **预期**：`image-webp` 在 Windows 上可编译（需 nasm）；若 CI 复杂度上升，按回退方案 atlas 直接要求 png 格式跳过 webp。
 
+### TC-SP-11 选择宠物下拉（M5）
+
+- **前置**：M5 实现后；`~/.codex/pets/` 与 `~/.petdex/pets/` 各有素材、内置占位可用。
+- **步骤**：打开 panel → 设置 → "选择宠物"下拉。
+- **预期**：
+  1. 下拉列出：用户配置 pet → 内置占位 → `~/.codex/pets/` 扫描结果 → `~/.petdex/pets/` 扫描结果（与加载顺序一致，见 TC-SP-06）；
+  2. 切换后宠物立即重新加载并热替换 webview 帧（无需重启 App）；
+  3. 选中素材损坏/非标准网格时，下拉项旁有回退提示（回退到上一可用素材或内置占位，见 TC-SP-05）；
+  4. 所有可选项均能被渲染，无空白宠物。
+
 ---
 
 ## 六、TC-WIN 窗口交互（M6）
@@ -576,7 +624,7 @@
 ### TC-WIN-06 宠物窗口配置核对
 
 - **步骤**：对照 tauri.conf.json 检查三窗口。
-- **预期**：pet（220×220、transparent、decorations:false、alwaysOnTop、skipTaskbar、resizable:false、visible:true、shadow:false、url `#/pet`）；panel（900×640、visible:false、url `#/panel`）；fireworks（transparent、decorations:false、alwaysOnTop、skipTaskbar、visible:false、shadow:false、maximized:true、url `#/fireworks`）。
+- **预期**：pet（220×220、transparent、decorations:false、alwaysOnTop、skipTaskbar、resizable:false、visible:true、shadow:false、**ignoreCursorEvents:false**、url `#/pet`）；panel（900×640、visible:false、url `#/panel`）；fireworks（transparent、decorations:false、alwaysOnTop、skipTaskbar、visible:false、shadow:false、maximized:true、url `#/fireworks`）。
 
 ### TC-WIN-07 调试烟花热键
 
@@ -596,7 +644,11 @@
 ### TC-TD-02 todo CRUD
 
 - **步骤**：panel Todo 页新建/编辑/删除任务。
-- **预期**：`todos` 表正确读写；字段含 title/notes/priority(0-3)/due_date/remind_before_minutes/completed_at/sort_order/created_at/updated_at；`todo_tags` 级联正确；UI 与库一致。
+- **追加步骤**：
+  1. 建立带 2 个 tag 的 todo → 删除其中 1 个 tag；
+  2. 调整若干 todo 的 `sort_order`（拖拽或表单）；
+  3. 核查列表顺序。
+- **预期**：`todos` 表正确读写；字段含 title/notes/priority(0-3)/due_date/remind_before_minutes/completed_at/sort_order/created_at/updated_at；tag 增删即时反映到 `todo_tags`（删除 todo 时级联删除）；列表按 `sort_order` 排序显示，修改后顺序立即更新；UI 与库一致。
 
 ### TC-TD-03 到点提前提醒（B16 定案通道）
 
@@ -612,13 +664,13 @@
 ### TC-TD-05 今日全清庆祝
 
 - **步骤**：完成今日全部任务（最后一个完成时）。
-- **预期**：宠物气泡显示今日完成数（如"今日完成 N 项"）；可触发二级庆祝（jumping 预留位，v1 不做强制）。
+- **预期**："今日"按用户本地时区自然日（00:00 起）统计 `completed_at`（DESIGN §8.3 定案）；完成今日全部任务时气泡显示今日完成数（如"今日完成 N 项"）；可触发二级庆祝（jumping 预留位，v1 不做强制）。
 
 ### TC-TD-06 非周期提醒只触发一次
 
 - **前置**：todo 派生提醒触发过。
 - **步骤**：等待超过其预定时间继续观察。
-- **预期**：`kind='todo'` 仅触发一次（非周期）；调度器根据 `last_triggered_at` 与当前时间判断不再重发；同条 todo 不重复触发（`remind_last_triggered_at` 防重）。
+- **预期**：`kind='todo'` 仅触发一次（非周期）；调度器根据 `reminders.last_triggered_at` 与当前时间判断不再重发（**唯一防重来源**，DESIGN §5.4 定案）；`todos.remind_last_triggered_at` 保留字段 v1 不写入不读取，不作为防重依据。
 
 ### TC-TD-07 删除/完成级联清理
 
@@ -627,8 +679,8 @@
 
 ### TC-TD-08 remind_before_minutes=0
 
-- **步骤**：新建任务 `remind_before_minutes=0`，`due_date` 带时间。
-- **预期**：不提前提醒；到点本身是否提醒不引入（0 = 不提前提醒语义成立）。
+- **步骤**：新建任务 `remind_before_minutes=0`，`due_date` 带时间；等待到点。
+- **预期**：`0 = 不派生 reminder`——`reminders` 表中**不出现**该 todo 的 `kind='todo'` 行（完全无提醒，不提前也不到点）；随后若修改 `due_date` 且 `remind_before_minutes>0`，才 upsert 派生行（语义与 DESIGN §5.4 一致）。
 
 ### TC-TD-09 权限面声明（无运行时复检）
 
@@ -665,7 +717,7 @@
 ### TC-SEC-05 Windows token 保护说明
 
 - **步骤**：Windows 端核对运行时目录位置。
-- **预期**：token 文件位于用户级目录（`%LOCALAPPDATA%` / `~/.pulsepet`）；文档已知 mode 0600 无效（无 POSIX 语义），依靠单用户登录 + ACL 默认仅本用户可见（v1 不实装 ACL 强化，无测试失败项，仅核对位置正确）。
+- **预期**：token 文件位于 `%LOCALAPPDATA%\pulsepet\runtime\`（DESIGN §3.1 定案）；文档已知 mode 0600 无效（无 POSIX 语义），依靠单用户登录 + ACL 默认仅本用户可见（v1 不实装 ACL 强化，无测试失败项，仅核对位置正确）。
 
 ### TC-SEC-06 隐私：事件不明文落盘
 
@@ -767,6 +819,7 @@
 | C11 canvas 缩放 | TC-SP-02 / TC-SP-03 |
 | C12 CI 共享文件 | TC-CI-02 |
 | C13 Windows mode 0600 | TC-SEC-05 |
+| C14 AgentAdapter 职责分裂 | TC-EV-23（接口存在 + 新增 adapter 不改主链路；DESIGN §3.4 已承认此边界） |
 | C15 跨午夜窗口 | TC-RM-06 |
 | B16 todo→调度器通道 | TC-TD-03 |
 | B17 atlas 映射表 | TC-SP-07 |

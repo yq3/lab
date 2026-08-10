@@ -2,7 +2,7 @@
 
 桌面宠物 App，监听 opencode agent 工作状态并以宠物动画呈现，附带 token 消耗本地统计、喝水/休息提醒（气泡 + 可选烟花模式）、轻量 todo 插件。v1 仅支持 opencode，但架构上预留多 agent 扩展通道。
 
-> 项目范围与决策依据见 [DECISIONS.md](./DECISIONS.md)，行业调研见 [desktop-pet-research.md](./desktop-pet-research.md)。本文只讲技术方案。
+> 项目范围与决策依据见 [DECISIONS.md](./DECISIONS.md)，行业调研见 [desktop-pet-research.md](./desktop-pet-research.md)，测试用例与用例评审见 [TEST-CASES.md](./TEST-CASES.md) / [TEST-CASES-REVIEW.md](./TEST-CASES-REVIEW.md)（设计缺口小节）。本文只讲技术方案。
 
 ---
 
@@ -102,12 +102,20 @@ Tauri 一个 App 可挂多个 webview 窗口。v1 三个窗口：
 
 > **状态复位约定**：`editing`/`thinking`/`testing`/`waiting-permission` 为瞬态。复位优先级：① 收到 `tool.execute.after`（若 opencode 提供）→ `working`；② 收到 `chat.message` 完成 → `working`（由 `session.status` 非 idle 兜底）；③ App 侧状态超时兜底——任一瞬态若 N 秒（默认 30s，可配）内无新事件则回退到 `working`，再无事件 30s 回退到 `idle`。M2 第一步实测 `session.status` 实际发送频率与 `tool.execute.after` 是否存在；据此二选一作为主复位信号，另一个作为兜底。
 
-- **节流**（学习 openpets）：speech 20s / permission 3s / reaction 10s 冷却，原子写 JSON 状态文件防并发。
+- **节流**（学习 openpets）：speech 20s / permission 3s / reaction 10s 冷却，原子写 JSON 状态文件防并发。归一化 kind → 冷却分类映射（v1 定案）：
+
+| 冷却分类 | 间隔 | 覆盖的归一化 kind | 说明 |
+|---|---|---|---|
+| speech | 20s | thinking / success / error | 气泡语音类 |
+| permission | 3s | waiting-permission | 权限请求气泡 |
+| reaction | 10s | working / editing / testing / idle | 动画反应类 |
+
+三类冷却互不干扰（如 waiting-permission 只占 permission 冷却，不占 speech 冷却）。`idle` 归入 reaction 类用于防止 `session.status==idle` 反复到达时的状态抖动；idle→idle 丢弃视觉上无变化，冷却无害。
 - **自忽略**：正则跳过 `pulsepet_status/say/react` 工具，防回环（openpets 已踩过的坑）。
 - **消息净化**：气泡文案只能来自白名单语音池（thinking/success/error/permission/waiting 五类模板），**不展示原始 prompt/输出/路径/URL/secret 样式 token**。命令行具体内容仅用于归一化分类，**不发给宠物**。
-- **token 文件**：`~/.pulsepet/runtime/update-token` mode 0600（POSIX 端），由 Tauri App 启动时生成并写文件，插件每次启动读 token。App 退出时清除，下次启动重新生成。Windows 无 POSIX 权限语义，mode 0600 无效——Windows 端仅靠"用户级目录（`%LOCALAPPDATA%` / `~/.pulsepet`）+ 单用户登录假设 + ACL 默认仅本用户可见"保护，不在 v1 实装 ACL 强化。
-- **端口文件**：`~/.pulsepet/runtime/endpoint` 存 `127.0.0.1:<port>`，端口冲突时 App 会换端口并更新此文件；插件每次发请求前先读最新端口。
-- **killswitch**：`~/.pulsepet/runtime/hooks-disabled` 文件存在则插件整体跳过，便于排障。
+- **runtime 目录与 token 文件**：runtime 目录 POSIX 端为 `~/.pulsepet/runtime/`，Windows 端为 `%LOCALAPPDATA%\pulsepet\runtime\`（两平台目录内含相同的三个运行时文件：`update-token` / `endpoint` / `hooks-disabled`）。`update-token` 存随机 token，mode 0600（POSIX 端），由 Tauri App 启动时生成并写文件，插件每次启动读 token。App 退出时清除，下次启动重新生成。Windows 无 POSIX 权限语义，mode 0600 无效——Windows 端仅靠"用户级目录（`%LOCALAPPDATA%\pulsepet\runtime`）+ 单用户登录假设 + ACL 默认仅本用户可见"保护，不在 v1 实装 ACL 强化。
+- **端口文件**：runtime 目录下 `endpoint` 存 `127.0.0.1:<port>`，端口冲突时 App 会换端口并更新此文件；插件每次发请求前先读最新端口。
+- **killswitch**：runtime 目录下 `hooks-disabled` 文件存在则插件整体跳过，便于排障。
 - **App 退出/未启动时的失败处理**：endpoint 文件或 token 文件不存在、连接拒绝、超时、401 一律视为"App 不在"，**静默跳过该次事件**（不打日志、不报错给 opencode 终端），并用指数退避（首次立即重试 1 次，之后间隔 1s→2s→5s→30s 封顶）避免高频事件打爆日志。endpoint/token 文件重新出现后下次事件即恢复立即投递。
 
 ### 3.2 HTTP server（Rust 侧，端口 + token 鉴权）
@@ -276,7 +284,7 @@ CREATE TABLE reminder_logs (
 
 历史统计（喝水次数 / 休息次数）从 `reminder_logs` 聚合。
 
-**todo 派生提醒约定**：todo 写入/修改 `due_date` 且 `remind_before_minutes > 0` 时，Rust 侧 todo command 同步 upsert 一行 `kind='todo'`、`source_todo_id=<todo.id>`、`interval_minutes=0`、`start_time` 为 `due_date - remind_before_minutes` 的 reminder；todo 删除/完成时级联删该行。`kind='todo'` 的 reminder 仅触发一次（非周期），触发后由 `reminders` 调度器根据 `last_triggered_at` 与当前时间判断是否再发。
+**todo 派生提醒约定**：todo 写入/修改 `due_date` 且 `remind_before_minutes > 0` 时，Rust 侧 todo command 同步 upsert 一行 `kind='todo'`、`source_todo_id=<todo.id>`、`interval_minutes=0`、`start_time` 为 `due_date - remind_before_minutes` 的 reminder；`remind_before_minutes = 0` 时不派生（`reminders` 表不出现该行，完全无提醒）；todo 删除/完成时级联删该行。`kind='todo'` 的 reminder 仅触发一次（非周期），触发后由 `reminders` 调度器根据 `last_triggered_at` 与当前时间判断是否再发。**todo 派生提醒的防重以 `reminders.last_triggered_at` 为唯一来源**（与 §8.3"调度器单一数据源"一致）；`todos.remind_last_triggered_at` 字段保留但 v1 不写入不读取。
 
 ---
 
@@ -287,7 +295,7 @@ CREATE TABLE reminder_logs (
 - v1 起步用 1 张 PNG（128×128 单图，draw 几帧切换）打通链路。占位用一只简洁像素风小猫（姿势力求中性：坐姿 + 单眨眼），作者自备或用开源 CC0 素材（避免许可问题）。
 - 渲染：canvas 2D，按 60fps 切帧（占位阶段帧切换极简，主要验证状态机驱动）。
 - **canvas 缩放策略**（占位 + atlas 一致适用）：pet 窗口 220×220 逻辑尺寸，canvas 内部分辨率 = 220 × `window.devicePixelRatio`（HiDPI 下 2×→440），CSS 尺寸固定 220×220。帧图按 `min(canvasW/frameW, canvasH/frameH)` 居中绘制（占位 128×128 / atlas 单帧 192×208 都会被放大到 canvas 内），不裁剪保持比例。窗口 resize 不触发（v1 `resizable:false`），dpr 变化（拖到外接屏）时监听 `window.matchMedia` 重设画布尺寸。
-- 占位精灵只覆盖最常用 5 状态：`idle / thinking / working / success / error`，其余状态映射到最近的同类（如 `waiting-permission→thinking`、`testing→working`）。
+- 占位精灵只覆盖最常用 5 状态：`idle / thinking / working / success / error`，未覆盖的 3 个状态降级映射到最近同类：`waiting-permission→thinking`、`testing→working`、`editing→working`（M5 切 atlas 起改用 §6.2 完整 8→9 映射表，降级映射届时作废）。
 
 ### 6.2 atlas 加载器（M5 补入）
 
@@ -450,7 +458,7 @@ CREATE TABLE todos (
   notes TEXT,
   priority INTEGER NOT NULL DEFAULT 0,    -- 0/1/2/3
   due_date TEXT,                          -- YYYY-MM-DD 或 YYYY-MM-DDTHH:MM（带时间时按时间触发提醒）
-  remind_before_minutes INTEGER NOT NULL DEFAULT 5,  -- 到点前 N 分钟气泡提醒，0 = 不提前提醒
+  remind_before_minutes INTEGER NOT NULL DEFAULT 5,  -- 到点前 N 分钟气泡提醒，0 = 不派生提醒（完全无提醒）
   remind_last_triggered_at TEXT,           -- 防同条 todo 重复触发提醒
   completed_at TEXT,
   sort_order INTEGER NOT NULL DEFAULT 0,
@@ -471,7 +479,7 @@ CREATE TABLE todo_tags (
 
 - 任务到点前 X 分钟（`remind_before_minutes`，默认 5 min，0 表示不提前提醒），宠物气泡显示"还有 X 分钟要完成「任务名」"。
 - 任务完成时宠物播放 `waving` 动画 + 气泡"干得漂亮 🎉"。
-- 完成今日全部任务，宠物头顶气泡显示今日完成数。
+- 完成今日全部任务，宠物头顶气泡显示今日完成数；"今日"按用户本地时区自然日（00:00 起）统计 `completed_at`（与 token 聚合的 `localtime` 语义一致）。
 - **调度器集成通道**：v1 不让调度器另查 `todos` 表，而是 todo 写入/修改时由 Rust 侧 todo command 同步往 `reminders` 表插/改一行 `kind='todo'` 派生提醒（带 `reminder_id → todo_id` 反向引用字段，见 §5.4 扩展），由 §5.1 调度器统一消费。删除：todo 删除时级联删对应 reminder。优点：调度器逻辑保持单一数据源，todo 模块只负责往 reminders 表注入。M7 前确认此通道定案。
 - 这些联动通过 §5.1 调度器 + 宠物 webview 的 Tauri event 走，不引入新通道。
 
