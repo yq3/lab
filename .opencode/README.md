@@ -2,7 +2,7 @@
 
 > 本文档是 `lab/.opencode/` 配置的权威设计文档：实现细节 + 设计依据（决策记录）。
 > 内容已去掉具体项目属性，适用于任何目标项目；迁移到其他仓库/全局配置时随本目录整体搬迁。
-> 版本：v2（2026-08-12，按首轮审阅修订）
+> 版本：v2.1（2026-08-12，含首轮审阅修订与流程图）
 
 ---
 
@@ -76,7 +76,6 @@ supervisor（编排者，便宜模型）
 ```
 .opencode/
 ├── README.md               # 本文档
-├── .gitignore              # 忽略运行时检查点（保留模板与目录）
 ├── agent/
 │   ├── supervisor.md       # 编排者（primary）
 │   ├── coder.md            # 实现者（subagent）
@@ -124,15 +123,97 @@ reviewing ──APPROVED 且双 SHA=HEAD──▶ approved ──用户确认─
 
 **fixing 语义**：tester FAIL 或 reviewer NEEDS_CHANGES 后、回 coder 之前，supervisor 必须显式置 `status=fixing` 并 `round+1`、`reviewedSha` 置空——fixing 是"待修复"的暂存态，coder 重跑后流转回 implementing。
 
+#### 4.1.1 流程全景（活动图）
+
+> 下方为可编辑的 PlantUML 源码（VS Code 装 PlantUML 插件后自动渲染；渲染方法见仓库根 AGENTS.md「PlantUML 渲染」节）。
+
+```puml
+title 多 Agent 开发流程全景（活动图）
+
+start
+:用户下达需求;
+:supervisor 创建检查点\n(status=spec_confirm，写入任务原文);
+:复述需求 + 验收标准，请求用户确认;
+if (用户确认?) then (否)
+  :按用户意见更新任务原文;
+endif
+:status=implementing，\n调 coder（Task 首次调用）;
+
+while (任务未通过 且 未终止?) is (循环中)
+  :coder TDD 实现 + 自测;
+  if (验证证据完整 且 已本地 commit?) then (否)
+    :打回 coder 重跑;
+  else (是)
+    note right
+      commit 格式 [taskId] R<n>
+      HEAD 前进 -> SHA 校验生效
+    end note
+    :status=testing\n写检查点（文件清单/commit SHA/会话 ID）;
+    :调 tester（续接 testerTaskId）;
+    if (tester 结果?) then (FAIL)
+      if (失败分类?) then (TEST_BUG)
+        :tester 修测试重跑;
+      else (IMPL_BUG)
+        :status=fixing，round+1;\n意见原文逐字给 coder;
+      endif
+    else (PASS)
+      :status=reviewing 写检查点;\n调 reviewer（续接 reviewerTaskId）;
+      if (reviewVerdict?) then (NEEDS_CHANGES)
+        :status=fixing，round+1;\n意见原文逐字给 coder;
+      else (APPROVED)
+        if (双 SHA = 当前 HEAD?) then (否)
+          :verdict 回退，回到相应阶段重验;
+        else (是)
+          break
+        endif
+      endif
+    endif
+  endif
+  if (round > maxRounds 或 同问题往返>=2?) then (是)
+    :status=blocked（endReason）\n上报用户接管;
+    if (用户决策?) then (放弃)
+      :status=cancelled，保留检查点;
+      stop
+    else (继续 / 人工接管)
+      :按用户指示处理;
+    endif
+  endif
+endwhile (终止)
+
+:status=approved，向用户汇报并询问交付;
+if (用户确认?) then (否)
+  :保持 approved 待命;
+else (是)
+  :交付阶段：coder 推 PR 分支;
+  :reviewer gh pr review 留痕;
+  :evidence manifest 写入 PR description;
+  :汇报合入请求（用户确认后合入）;
+endif
+stop
+```
+
+> 中断恢复：任何状态均可中断，重启后 resume 主会话（supervisorSessionId），supervisor 读检查点按 status 从断点继续（恢复语义见 §4.3 表格）。
+
 ### 4.2 每轮迭代顺序（为什么 tester 在 reviewer 前：D5）
 
 ```
-coder 修复/实现（TDD + 验证证据小节）
+coder 修复/实现（TDD + 验证证据小节）→ 自测通过 → 本地 commit（[taskId] R<n>）
   → tester 验证（机械、便宜、确定性）→ FAIL 直接回 coder（不浪费 reviewer）
   → PASS → reviewer 语义审查（贵、模型推理）
   → NEEDS_CHANGES → 回 coder
   → 修复后 tester 先回归（防 stale）→ reviewer 复看
 ```
+
+### 4.2.1 提交节点（D20）
+
+| 节点 | 动作 | 说明 |
+|---|---|---|
+| 每轮 coder 完成后 | **本地 commit**（`[<taskId>] R<n>`） | 不 push；使 HEAD 前进，`testedSha`/`reviewedSha` 校验生效；崩溃可 `git log` 回溯轮次 |
+| 用户确认交付后 | coder 推 **PR 分支** | 唯一 push 节点，用户已确认 |
+| 合入 | 用户确认后由 supervisor 执行（`bash: ask`） | 不自动合入 |
+
+- 本地 commit 不违反"授权不能自动"（P1）：commit 不发布，push 才需授权
+- coder 权限已 deny 主分支 push（D15），PR 分支 push 在交付阶段才被指示执行
 
 ### 4.3 检查点文件（防中断恢复）
 
@@ -181,7 +262,7 @@ updatedAt: 2026-08-11T10:30:00+08:00
 |---|---|---|
 | 创建 | spec_confirm | 任务原文 |
 | 用户确认 | implementing | 确认标记 |
-| coder 返回 | testing | 文件清单、验证证据 |
+| coder 返回 | testing | 文件清单、验证证据、commit SHA（= HEAD，每轮本地 commit 后取） |
 | tester 返回 | reviewing / fixing | testVerdict + testedSha + 报告原文 |
 | reviewer 返回 | fixing / approved | reviewVerdict + reviewedSha + 意见原文 |
 | 新一轮修复开始 | fixing → implementing | round+1，reviewedSha 置空 |
@@ -212,6 +293,72 @@ updatedAt: 2026-08-11T10:30:00+08:00
 > 业务 ID（`taskId`，1 任务 = 1 检查点文件）与 Task 会话 ID（`coderTaskId` 等，1 角色 = 1 会话）是两层 ID，不要混淆。任务会创建 1 个检查点文件 + 最多 4 个会话 ID。
 
 **协议铁律**（写入 supervisor prompt）：正常流程每轮节点只写、恢复时先读、状态只能前进、检查点文件是唯一权威。
+
+#### 4.3.2 角色交互与会话 ID 续接（时序图）
+
+> 下方为可编辑的 PlantUML 源码（VS Code 装 PlantUML 插件后自动渲染；渲染方法见仓库根 AGENTS.md「PlantUML 渲染」节）。
+
+```puml
+@startuml multi-agent-sequence
+title 角色交互与会话 ID 续接（时序图）
+
+actor "用户" as User
+participant "supervisor" as Sup
+database "检查点文件\nworkflows/<taskId>.md" as CP
+participant "coder 会话" as Coder
+participant "tester 会话" as Tester
+participant "reviewer 会话" as Rev
+
+User -> Sup: 下达需求
+Sup -> CP: 创建检查点（任务原文 / 会话 ID 字段）
+Sup -> User: 复述需求 + 验收标准，请求确认
+User --> Sup: 确认（记录 supervisorSessionId）
+
+Sup -> Coder: Task(需求 + 文档 + 检查点路径)
+' 首次调用，返回 task_id=A
+activate Coder
+Coder -> Coder: TDD 实现 + 自测 + 本地 commit [taskId] R1
+Coder --> Sup: 验证证据 + 改动清单
+deactivate Coder
+Sup -> CP: status=testing，写 filesChanged / commit SHA / coderTaskId=A
+
+Sup -> Tester: Task(检查点路径)
+' 首次调用，返回 task_id=B
+activate Tester
+Tester -> Tester: 跑测试 / 勾选用例
+Tester --> Sup: testVerdict + 失败分类
+deactivate Tester
+Sup -> CP: testVerdict / testedSha / testerTaskId=B
+
+alt testVerdict = PASS
+  Sup -> Rev: Task(检查点路径)
+  ' 首次调用，返回 task_id=C
+  activate Rev
+  Rev -> Rev: 语义审查（只读）
+  Rev --> Sup: reviewVerdict + P1/P2 意见
+  deactivate Rev
+  Sup -> CP: reviewVerdict / reviewedSha / reviewerTaskId=C
+  alt NEEDS_CHANGES
+    Sup -> Coder: Task(task_id=A 续接，附意见原文)
+    ' 复用同一 coder 会话，上下文连续
+    Coder --> Sup: 验证证据 + 逐条响应
+    Sup -> CP: status=fixing->testing，round+1，reviewedSha 置空
+  else APPROVED
+    Sup -> CP: 校验双 SHA = 当前 HEAD
+    Sup -> User: 汇报，请求确认交付
+  end
+else testVerdict = FAIL
+  Sup -> Coder: Task(task_id=A 续接，附 tester 报告原文)
+  Coder --> Sup: 修复完成
+end
+
+User --> Sup: 确认交付
+Sup -> Coder: 推 PR 分支（用户已授权）
+Sup -> Rev: gh pr review（终态评审留痕）
+Sup -> User: 汇报合入请求
+
+@enduml
+```
 
 ### 4.4 意见传递协议（D7）
 
@@ -429,6 +576,16 @@ clowder F253 的"盲点正交性"：不同模型族有不同系统性盲点，�
 ### D19. 乒乓检测的启发式性质（审阅新增）
 
 "同一问题往返 ≥2 次"依赖 supervisor 对意见主题的语义比对，可能误判（不同意见判为同一）或漏判（同一问题换了措辞）。已注明为启发式，POC 阶段观察误判率；若不可靠，回退为纯 maxRounds 保护。
+
+---
+
+### D20. 提交节点：循环内每轮本地 commit，push 仅限交付阶段（审阅后修正）
+
+初版设计"循环内不提交"存在逻辑缺陷：HEAD 不变则 `testedSha`/`reviewedSha` 全程一致，**stale 校验失效**，恢复语义中的 SHA 回滚判断也无从谈起。修正：
+
+- **每轮 coder 完成后本地 commit**（`[<taskId>] R<n>`）：HEAD 前进使双 SHA 校验真正生效（修复轮 commit 后，上一轮 verdict 自动 stale）；崩溃恢复可 `git log` 回溯已完成轮次
+- **push 仅发生在交付阶段**（用户确认后推 PR 分支）：本地 commit 不发布，不违反"授权不能自动"（P1/D8）
+- coder 权限 deny 主分支 push（D15）与此一致：PR 分支 push 是交付阶段被指示的授权操作
 
 ---
 

@@ -24,6 +24,8 @@ permission:
 
 【铁律】
 - TDD：先写失败的测试，确认它以预期理由失败，再实现让它通过，最后确认无回归
+- 每轮完成后（自测通过）必须本地 commit（git add + git commit），commit message 格式 `[<taskId>] R<n>: <简述>`；修复轮同样 commit，使 HEAD 前进、SHA 校验生效
+- 禁止 git push（交付阶段由 supervisor 指示推 PR 分支时除外；主分支 push 已被权限强制 deny）
 - 声称完成必须有命令输出证据，禁止口头声称
 - 处理验证意见：逐条响应——已修（附命令证据）或 拒绝（附技术论证），禁止表演性同意
 

@@ -27,7 +27,7 @@ permission:
 【工作流协议】
 0. 需求确认：读检查点文件 `.opencode/workflows/`，无则创建（用 `_template.md` 结构），写入任务原文后，把"需求 + 验收标准"复述给用户请求确认。用户确认后 status=implementing；用户提出修改则更新任务原文再次确认。
 1. 调 coder（Task 工具）实现需求。给：需求原文 + 验收标准 + 相关文档路径（DESIGN.md/TEST-CASES.md 等）+ 检查点路径 + 目标项目目录。记录 task_id 供后续复用。
-2. coder 返回后：检查其输出含"验证证据"小节（命令 + 输出摘要），缺失则打回重跑。写检查点（status=testing，记录 filesChanged、自测证据），调 tester。
+2. coder 返回后：检查其输出含"验证证据"小节（命令 + 输出摘要）且已本地 commit（`[<taskId>] R<n>`），缺失则打回重跑。写检查点（status=testing，记录 filesChanged、自测证据、commit SHA），调 tester。
 3. tester 返回后：写检查点（testVerdict、testedSha、报告原文）。
    - FAIL → 先置 status=fixing、round+1、reviewedSha 置空，把 tester 报告逐字原文 + 检查点路径交给 coder（复用 task_id）→ 回步骤 2。
 4. testVerdict=PASS → 调 reviewer（给：改动清单 + 检查点路径 + 测试输出摘要 + 需求文档路径）。
