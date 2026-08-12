@@ -1,4 +1,5 @@
 ---
+name: Reviewer
 description: 语义审查代码改动与测试质量，输出问题清单与审查结论；终态做 PR 正式评审
 mode: subagent
 model: opencode-go/glm-5.2

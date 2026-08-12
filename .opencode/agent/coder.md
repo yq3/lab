@@ -1,4 +1,5 @@
 ---
+name: Coder
 description: 按需求实现功能并 TDD 自测，按 tester/reviewer 意见修复代码
 mode: subagent
 model: opencode-go/deepseek-v4-pro

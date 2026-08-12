@@ -1,4 +1,5 @@
 ---
+name: Tester
 description: 把验收用例文档转化为可执行测试并执行验证，输出验证报告
 mode: subagent
 model: deepseek/deepseek-v4-flash
