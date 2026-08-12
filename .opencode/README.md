@@ -2,7 +2,7 @@
 
 > 本文档是 `lab/.opencode/` 配置的权威设计文档：实现细节 + 设计依据（决策记录）。
 > 内容已去掉具体项目属性，适用于任何目标项目；迁移到其他仓库/全局配置时随本目录整体搬迁。
-> 版本：v2.1（2026-08-12，含首轮审阅修订与流程图）
+> 版本：v3（2026-08-12，二次迭代：改名体系、skill 体系调研 D21-D25）
 
 ---
 
@@ -444,7 +444,7 @@ Sup -> User: 汇报合入请求
 
 ## 8. 设计依据（决策记录）
 
-> 本文档由 2026-08 的多轮讨论与首轮审阅沉淀。D1-D12 为初版决策，D13-D19 为审阅修订决策。
+> 本文档由 2026-08 的多轮讨论沉淀。D1-D12 为初版决策，D13-D20 为首轮审阅修订，D21-D25 为二次迭代（改名体系、命名划分、skill 体系调研）。
 
 ### D1. 为什么不用 GitHub Issue/PR 作为 agent 间通信媒介
 
@@ -587,6 +587,62 @@ clowder F253 的"盲点正交性"：不同模型族有不同系统性盲点，�
 - **push 仅发生在交付阶段**（用户确认后推 PR 分支）：本地 commit 不发布，不违反"授权不能自动"（P1/D8）
 - coder 权限 deny 主分支 push（D15）与此一致：PR 分支 push 是交付阶段被指示的授权操作
 
+### D21. 模式族命名：agent 名 = 工作模式（2026-08-12 二次迭代）
+
+编排者原名为 supervisor，后改名 `supervised-coding`。动机：
+
+- opencode 内置 plan/build 本质是**工作模式**而非"代理身份"，编排者采用同样的模式命名风格，Tab 切换时一目了然
+- 为未来其他领域预留同族命名：`supervised-design` / `supervised-ops` / `supervised-research`——一套模式族，各自配套领域 subagent
+- 文件名用小写连字符（opencode 惯例），显示名用 frontmatter `name`（见 D22）；prompt 内部角色语义（编排者）保留
+
+### D22. frontmatter name：文件名 ID 与显示名解耦（2026-08-12 二次迭代）
+
+**需求**：agent 名（如 `supervised-coding`）保持小写稳定 ID，但 TUI/@mention 显示首字母大写（`Supervised-Coding`）。
+
+**机制**（源码验证，`packages/opencode/src/config/agent.ts`）：加载时 `{ name: 文件名推导, ...md.data }` —— frontmatter 的 `name` 字段**覆盖**文件名，成为注册名。注册名用于：Tab 切换、@mention、Task 工具 `subagent_type` 匹配、`permission.task` 匹配（大小写敏感）。
+
+**配套规则**：
+- 4 个 agent 全部显式写 `name`：`Supervised-Coding` / `Coder` / `Tester` / `Committer`
+- 引用注册名的地方必须同步（task 权限、调用方 prompt 中的 Task 调用词）——曾因漏改 tester/coder prompt 里的角色引用导致不一致（已修）
+- 检查点字段名（`supervisorSessionId`、`coderTaskId` 等）与注册名解耦，可保留原样
+
+### D23. 角色可见性：谁可以调用谁（2026-08-12 二次迭代）
+
+机制（源码验证）：
+- Task 工具**默认对所有 agent（含 build/plan）开放全部 subagent**；`permission.task` 只限制"调用方"，`hidden: true` 只隐藏 @ 菜单、不阻止 Task 调用
+- subagent 的 `description` 是模型判断"何时调用"的**唯一信号**——工作流专用 subagent 的 description 写清楚"由 Supervised-Coding 编排"，build/plan 便不会误调
+- 结论：POC 保持默认开放（Coder/Tester/Committer 是模式内角色，被乱调会丢上下文，但 description 已天然防误用）；未来收紧时在调用方加 `permission.task: {"*": "deny"}`
+
+### D24. Committer 命名体系：角色名与动作/状态分离（2026-08-12 二次迭代）
+
+reviewer 改名为 committer（代码审查 + 交付把关人），并确立**命名划分原则**：
+
+| 类别 | 命名 | 示例 |
+|---|---|---|
+| 角色 | committer | agent 文件、显示名、task 权限、prompt 调用引用、`committerTaskId` |
+| 动作/状态 | review / reviewing | `reviewVerdict`、`reviewedSha`、`status: reviewing` |
+| 外部术语 | 原样 | clowder `reviewer delta metric`、`gh pr review`、`receive-review` |
+
+**教训**：全局替换时先分类"角色引用 vs 动作/状态引用"，曾误把 `reviewVerdict`/`reviewedSha` 改成 `committerVerdict`/`committerSha`（审查动作与角色无关），后回退。检查点字段 `committerTaskId` 与 `reviewVerdict`/`reviewedSha` 并存是刻意设计（会话 ID 属角色、verdict/SHA 属动作）。
+
+### D25. clowder skill 体系借鉴分析（2026-08-12 调研结论）
+
+clowder（Cat Cafe）的能力沉淀在 **skill 体系**而非 agent prompt 中，架构为三层信息架构（F042）：
+
+- **L0 家规/身份**：始终注入（少量常驻）
+- **SOP 定义**：`sop-definitions/development.yaml`——流程机器真相源（stage / suggested_skill / hard_rules / pitfalls）
+- **Skills 知识库**：按需加载（单个 skill 可达 600+ 行，如 merge-gate 662 行，不占常驻上下文）
+
+**SKILL.md 标准契约**：frontmatter 含 `Use when / Not for / Output` 三段式 description + triggers + refs；正文沉淀领域 know-how、历史坑、证据标准、行为刹车（如 F168 云审 21 轮循环教训 → "封板协议"：5 轮或假阳性 >50% 强制停止）。**价值门禁**（writing-skills 铁律）："好 skill 不是教聪明猫写 for 循环，是把领域 know-how、历史坑、证据标准、行为刹车放到猫会自然经过的位置"。
+
+**opencode 侧机制验证**（源码确认）：skill 列表 `<available_skills>` 注入所有会话的 system prompt（含 subagent，共用 `session/prompt.ts` 请求路径）；`skill.available(agent)` 仅按 `permission.skill` 显式 deny 过滤（默认全可见）；skill 工具全局注册；skill 目录自动加入 external_directory 白名单（skill 引用的本地文件免授权读取）。
+
+**借鉴结论**（已认可、待实施）：
+1. 拆分 prompt → skills：`tdd`（Coder）/ `code-review`（Committer）/ `test-execution`（Tester）/ `checkpoint-protocol`（Supervised-Coding），prompt 只留身份 + 路由指令
+2. 历史教训入 skill（乒乓启发式误判、CASE_BUG 裁定边界、reviewedSha 置空时机等写成行为刹车）
+3. 产出契约：description 用 Use when / Not for / Output 三段式（opencode 的 skill 发现靠 description）
+4. 不做 SOP 层：单模式 POC 不需要机器可解析的流程定义，supervised-coding prompt 即 SOP
+
 ---
 
 ## 9. 已知限制与后续演进
@@ -604,6 +660,8 @@ clowder F253 的"盲点正交性"：不同模型族有不同系统性盲点，�
 ### 演进方向
 
 1. 效果验证通过后，整体迁移全局配置 `~/.config/opencode/`
-2. 用 `@opencode-ai/sdk` 将流程固化为脚本（硬循环 + structured output），支持 CI/无人值守
-3. 每轮写检查点时生成 evidence manifest，交付阶段自动组装进 PR description（可脚本化）
-4. 支持多技术栈时，引入 per-target 测试命令配置（如 `opencode-test-config.json`），替代静态 bash 白名单
+2. **skill 化拆分（D25，优先）**：4 个 agent 的知识沉淀为 `tdd` / `code-review` / `test-execution` / `checkpoint-protocol` skill，prompt 瘦身为身份 + 路由；跑几轮后把实战教训回写进 skill
+3. 用 `@opencode-ai/sdk` 将流程固化为脚本（硬循环 + structured output），支持 CI/无人值守
+4. 每轮写检查点时生成 evidence manifest，交付阶段自动组装进 PR description（可脚本化）
+5. 支持多技术栈时，引入 per-target 测试命令配置（如 `opencode-test-config.json`），替代静态 bash 白名单
+6. 新领域监督模式（`supervised-design` 等）按 D21 模式族扩展，subagent 按需复用（D23 默认开放）
