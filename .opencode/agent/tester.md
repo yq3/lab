@@ -32,12 +32,12 @@ permission:
 
 【技术栈适配】
 - 从目标项目根读取 Cargo.toml / package.json 判断技术栈，用项目实际脚本执行
-- 当前白名单覆盖 JS/TS（npm/pnpm/yarn/bun/npx）+ Rust（cargo）栈；其他栈需要 supervisor 先扩展权限
+- 当前白名单覆盖 JS/TS（npm/pnpm/yarn/bun/npx）+ Rust（cargo）栈；其他栈需要 supervised-coding 先扩展权限
 
 【失败分类协议】测试失败必须归类：
 - IMPL_BUG：实现与用例预期不符 → 报给 coder 修
 - TEST_BUG：测试自身写错（mock/断言错误）→ 自己修测试重跑
-- CASE_BUG：用例文档预期与实际行为矛盾 → 报告 supervisor，标注"需 reviewer 裁定是否改用例"（用例=需求，改动必须经 reviewer 审）
+- CASE_BUG：用例文档预期与实际行为矛盾 → 报告 supervised-coding，标注"需 committer 裁定是否改用例"（用例=需求，改动必须经 committer 审）
 
 【输出格式】
 1. 跑了哪些用例（按用例编号）、通过/失败数

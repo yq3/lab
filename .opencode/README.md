@@ -40,13 +40,13 @@ supervised-coding（编排者，便宜模型）
    │  ② Task 调用（会话内直连，复用 task_id 保持子会话上下文）
    ├─▶ coder（实现者）：实现 + TDD 自测，只碰业务/测试代码
    ├─▶ tester（验证执行者）：用例文档 → 可执行测试 + 验收勾验
-   └─▶ reviewer（审查者）：语义审查 + CASE_BUG 裁定 + 终态 PR 评审，全只读
+   └─▶ committer（审查+把关）：代码语义审查 + CASE_BUG 裁定 + 终态 PR 评审，全只读
    │
    ├─ 每轮关键节点 ──写──▶ .opencode/workflows/<task>.md（检查点）
    │
    ▼ 全部通过（双 verdict + 双 SHA = 当前 HEAD）→ 用户确认
    │
-   ▼ 交付阶段：coder 推 PR 分支 → reviewer gh pr review → evidence manifest 写 PR description
+   ▼ 交付阶段：coder 推 PR 分支 → committer gh pr review → evidence manifest 写 PR description
 ```
 
 ### 2.2 角色职责矩阵
@@ -56,16 +56,16 @@ supervised-coding（编排者，便宜模型）
 | supervised-coding | primary | 需求确认、调度、写检查点、传意见、收敛保护 | 写代码、测试、审查 |
 | coder | subagent | 实现需求、TDD 自测、按意见修复 | 改验收用例/设计文档、推主分支、merge |
 | tester | subagent | 用例文档→可执行测试、跑验证、里程碑勾验 | 改业务代码、改用例文档 |
-| reviewer | subagent | 语义审查、CASE_BUG 裁定、终态 PR 评审 | 改任何代码 |
+| committer | subagent | 代码语义审查、CASE_BUG 裁定、终态 PR 评审（交付把关） | 改任何代码 |
 
 ### 2.3 职责边界的核心设计
 
-借鉴 clowder F253 的三层分离：**tester/reviewer 只产出验证结论，不修改业务代码**。
+借鉴 clowder F253 的三层分离：**tester/committer 只产出验证结论，不修改业务代码**。
 
 - tester 拥有 `edit` 权限但限定测试文件路径（`**/tests/**`、`**/test/**`、`**/*.test.*`、`**/*.spec.*`，glob 支持 workspace 多 crate 场景）
-- reviewer `edit: deny`，bash 只放行只读 git 命令 + gh 只读/评审命令
-- 测试用例文档（如 `TEST-CASES.md`）是**验收依据，等同需求**：tester 发现"用例预期与实际矛盾"时不能自己改，报告 supervised-coding 后由 reviewer 裁定
-- reviewer 兼任 CASE_BUG 裁定与终态 PR 评审（见 D18）：两者均为顺带职责，不扩大审查主循环的上下文负担
+- committer `edit: deny`，bash 只放行只读 git 命令 + gh 只读/评审命令
+- 测试用例文档（如 `TEST-CASES.md`）是**验收依据，等同需求**：tester 发现"用例预期与实际矛盾"时不能自己改，报告 supervised-coding 后由 committer 裁定
+- committer 兼任 CASE_BUG 裁定与终态 PR 评审（见 D18）：两者均为顺带职责，不扩大审查主循环的上下文负担
 
 ---
 
@@ -75,14 +75,14 @@ supervised-coding（编排者，便宜模型）
 
 ```
 .opencode/
-├── README.md               # 本文档
+├── README.md                 # 本文档
 ├── agent/
-│   ├── supervised-coding.md    # 编排者（primary，显示名 Supervised-Coding）
-│   ├── coder.md            # 实现者（subagent，显示名 Coder）
-│   ├── tester.md           # 验证执行者（subagent，显示名 Tester）
-│   └── reviewer.md         # 审查者（subagent，显示名 Reviewer）
-├── workflows/              # 检查点存档
-│   └── _template.md        # 检查点模板
+│   ├── supervised-coding.md  # 编排者（primary，显示名 Supervised-Coding）
+│   ├── coder.md              # 实现者（subagent，显示名 Coder）
+│   ├── tester.md             # 验证执行者（subagent，显示名 Tester）
+│   └── committer.md          # 审查者（subagent，显示名 Committer）
+├── workflows/                # 检查点存档
+│   └── _template.md          # 检查点模板
 ```
 
 ### 3.2 放置位置与加载规则
@@ -98,9 +98,9 @@ supervised-coding（编排者，便宜模型）
 | 角色 | 模型 | 定位理由 |
 |---|---|---|
 | supervised-coding | `deepseek/deepseek-v4-flash` | 只做调度与状态机，便宜快 |
-| coder | `opencode-go/deepseek-v4-pro` | 主力实现，能力强 |
+| coder | `deepseek/deepseek-v4-pro` | 主力实现，能力强 |
 | tester | `deepseek/deepseek-v4-flash` | 跑命令+写测试为主，便宜；质量不足可升级 |
-| reviewer | `opencode-go/glm-5.2` | 独立模型族，审慎推理（跨族盲点正交，见 D11） |
+| committer | `opencode-go/glm-5.2` | 独立模型族，审慎推理（跨族盲点正交，见 D11） |
 
 > 模型 ID 已用 `opencode models` 验证存在（2026-08-12）。⚠️ subagent 不显式写 `model` 会**继承调用者的模型**，三个 subagent 必须各自写死。
 
@@ -121,7 +121,7 @@ reviewing ──APPROVED 且双 SHA=HEAD──▶ approved ──用户确认─
 任何状态 ──用户放弃──▶ cancelled（endReason=user_cancelled，保留检查点）
 ```
 
-**fixing 语义**：tester FAIL 或 reviewer NEEDS_CHANGES 后、回 coder 之前，supervised-coding 必须显式置 `status=fixing` 并 `round+1`、`reviewedSha` 置空——fixing 是"待修复"的暂存态，coder 重跑后流转回 implementing。
+**fixing 语义**：tester FAIL 或 committer NEEDS_CHANGES 后、回 coder 之前，supervised-coding 必须显式置 `status=fixing` 并 `round+1`、`reviewedSha` 置空——fixing 是"待修复"的暂存态，coder 重跑后流转回 implementing。
 
 #### 4.1.1 流程全景（活动图）
 
@@ -157,7 +157,7 @@ while (任务未通过 且 未终止?) is (循环中)
         :status=fixing，round+1;\n意见原文逐字给 coder;
       endif
     else (PASS)
-      :status=reviewing 写检查点;\n调 reviewer（续接 reviewerTaskId）;
+      :status=reviewing 写检查点;\n调 committer（续接 committerTaskId）;
       if (reviewVerdict?) then (NEEDS_CHANGES)
         :status=fixing，round+1;\n意见原文逐字给 coder;
       else (APPROVED)
@@ -185,7 +185,7 @@ if (用户确认?) then (否)
   :保持 approved 待命;
 else (是)
   :交付阶段：coder 推 PR 分支;
-  :reviewer gh pr review 留痕;
+  :committer gh pr review 留痕;
   :evidence manifest 写入 PR description;
   :汇报合入请求（用户确认后合入）;
 endif
@@ -194,14 +194,14 @@ stop
 
 > 中断恢复：任何状态均可中断，重启后 resume 主会话（supervisorSessionId），supervised-coding 读检查点按 status 从断点继续（恢复语义见 §4.3 表格）。
 
-### 4.2 每轮迭代顺序（为什么 tester 在 reviewer 前：D5）
+### 4.2 每轮迭代顺序（为什么 tester 在 committer 前：D5）
 
 ```
 coder 修复/实现（TDD + 验证证据小节）→ 自测通过 → 本地 commit（[taskId] R<n>）
-  → tester 验证（机械、便宜、确定性）→ FAIL 直接回 coder（不浪费 reviewer）
-  → PASS → reviewer 语义审查（贵、模型推理）
+  → tester 验证（机械、便宜、确定性）→ FAIL 直接回 coder（不浪费 committer）
+  → PASS → committer 语义审查（贵、模型推理）
   → NEEDS_CHANGES → 回 coder
-  → 修复后 tester 先回归（防 stale）→ reviewer 复看
+  → 修复后 tester 先回归（防 stale）→ committer 复看
 ```
 
 ### 4.2.1 提交节点（D20）
@@ -222,11 +222,11 @@ coder 修复/实现（TDD + 验证证据小节）→ 自测通过 → 本地 com
 ```markdown
 ---
 taskId: task-001
-target: <目标项目目录>      # coder/tester/reviewer 以此作为工作根
+target: <目标项目目录>      # coder/tester/committer 以此作为工作根
 supervisorSessionId: null   # supervised-coding 所在的 opencode 会话（恢复时 resume 主会话用）
 coderTaskId: null           # Task 工具返回的 coder 会话 ID（续接用，见 §4.3.1）
 testerTaskId: null          # 同上，tester
-reviewerTaskId: null        # 同上，reviewer
+committerTaskId: null        # 同上，committer
 status: reviewing           # created→spec_confirm→implementing→testing→reviewing→fixing→approved→blocked→cancelled→done
 round: 2
 maxRounds: 3
@@ -250,13 +250,13 @@ updatedAt: 2026-08-11T10:30:00+08:00
 ## 轮次记录
 - R1: coder 完成（改动…，自测：cargo test 12/12 通过）
 - R1: tester PASS（TC-EV-01~05 通过）
-- R1: reviewer NEEDS_CHANGES（P1×1: src/lib/events.rs:42 …）
+- R1: committer NEEDS_CHANGES（P1×1: src/lib/events.rs:42 …）
 
 ## 最新验证意见原文
-（tester/reviewer 报告逐字保留——恢复时给 coder 的修复依据）
+（tester/committer 报告逐字保留——恢复时给 coder 的修复依据）
 ```
 
-**写入时机**（supervised-coding 每轮节点落盘；tester/reviewer 无写权限，天然由 supervised-coding 代写）：
+**写入时机**（supervised-coding 每轮节点落盘；tester/committer 无写权限，天然由 supervised-coding 代写）：
 
 | 节点 | status | 写入内容 |
 |---|---|---|
@@ -264,7 +264,7 @@ updatedAt: 2026-08-11T10:30:00+08:00
 | 用户确认 | implementing | 确认标记 |
 | coder 返回 | testing | 文件清单、验证证据、commit SHA（= HEAD，每轮本地 commit 后取） |
 | tester 返回 | reviewing / fixing | testVerdict + testedSha + 报告原文 |
-| reviewer 返回 | fixing / approved | reviewVerdict + reviewedSha + 意见原文 |
+| committer 返回 | fixing / approved | reviewVerdict + reviewedSha + 意见原文 |
 | 新一轮修复开始 | fixing → implementing | round+1，reviewedSha 置空 |
 | 超轮/乒乓 | blocked | endReason |
 | 用户放弃 | cancelled | endReason |
@@ -276,16 +276,16 @@ updatedAt: 2026-08-11T10:30:00+08:00
 | spec_confirm | 复述需求重新请求用户确认 |
 | implementing | coder 重做该轮（SHA 校验：改了一半的文件回滚） |
 | testing | 从 tester 继续 |
-| reviewing | 校验 reviewedSha vs HEAD：一致→reviewer 继续；不一致→回 implementing 重做修复轮 |
-| fixing | 校验 testedSha vs HEAD：一致→直接从 reviewer 继续；不一致→coder 重做修复 |
+| reviewing | 校验 reviewedSha vs HEAD：一致→committer 继续；不一致→回 implementing 重做修复轮 |
+| fixing | 校验 testedSha vs HEAD：一致→直接从 committer 继续；不一致→coder 重做修复 |
 | blocked / cancelled | 不自动继续，等待用户指示 |
 
 ### 4.3.1 会话 ID 管理
 
-一项任务内，coder / tester / reviewer **各自始终只维持一个 Task 会话**（对应检查点中的 `coderTaskId` / `testerTaskId` / `reviewerTaskId`，即 Task 工具返回的 task_id）：
+一项任务内，coder / tester / committer **各自始终只维持一个 Task 会话**（对应检查点中的 `coderTaskId` / `testerTaskId` / `committerTaskId`，即 Task 工具返回的 task_id）：
 
 - **首次调用**：Task 调用后把返回的 task_id 写入检查点
-- **二次调用**：必须携带对应 task_id 续接同一会话（coder 记得自己上一轮的实现与思路；tester 记得自己写过的测试；reviewer 记得自己提过的意见），**禁止新开**
+- **二次调用**：必须携带对应 task_id 续接同一会话（coder 记得自己上一轮的实现与思路；tester 记得自己写过的测试；committer 记得自己提过的意见），**禁止新开**
 - **续接失败**（进程重启 / compaction 导致会话失效）：新开会话，更新检查点中的 task_id，并告知该角色"从检查点文件恢复上下文"
 - **supervised-coding 自身**：主会话由 opencode session 管理，记录到 `supervisorSessionId`（中断后用户据此 resume 主会话），未知则留空
 - 会话 ID 是"每轮节点写入检查点"的一部分：每次 Task 调用后立即更新
@@ -307,7 +307,7 @@ participant "supervised-coding" as Sup
 database "检查点文件\nworkflows/<taskId>.md" as CP
 participant "coder 会话" as Coder
 participant "tester 会话" as Tester
-participant "reviewer 会话" as Rev
+participant "committer 会话" as Rev
 
 User -> Sup: 下达需求
 Sup -> CP: 创建检查点（任务原文 / 会话 ID 字段）
@@ -337,7 +337,7 @@ alt testVerdict = PASS
   Rev -> Rev: 语义审查（只读）
   Rev --> Sup: reviewVerdict + P1/P2 意见
   deactivate Rev
-  Sup -> CP: reviewVerdict / reviewedSha / reviewerTaskId=C
+  Sup -> CP: reviewVerdict / reviewedSha / committerTaskId=C
   alt NEEDS_CHANGES
     Sup -> Coder: Task(task_id=A 续接，附意见原文)
     ' 复用同一 coder 会话，上下文连续
@@ -362,7 +362,7 @@ Sup -> User: 汇报合入请求
 
 ### 4.4 意见传递协议（D7）
 
-- supervised-coding 将 tester/reviewer 报告**逐字原文**传给 coder，不做语义汇总、不删减
+- supervised-coding 将 tester/committer 报告**逐字原文**传给 coder，不做语义汇总、不删减
 - coder 对每条意见逐条响应：**已修（附证据）/ 拒绝（附技术论证）**，禁止表演性同意
 
 ### 4.5 任务终止与放弃
@@ -380,7 +380,7 @@ Sup -> User: 汇报合入请求
 ```
 ① coder TDD 自测（L1 机械）→ 必须输出"验证证据"小节（命令 + 输出摘要），缺失打回
 ② tester 验收执行（L2 机械+模型）→ testVerdict + 失败分类（IMPL_BUG / TEST_BUG / CASE_BUG）
-③ reviewer 语义审查（L3 模型）→ 只给 finding 不改码，reviewVerdict
+③ committer 语义审查（L3 模型）→ 只给 finding 不改码，reviewVerdict
 ④ evidence manifest（交付阶段）→ 写 PR description（机器可读 JSON）
 ⑤ stale 保护 → 双 SHA ≠ 当前 HEAD 时 verdict 自动回退，强制重验
 ⑥ 收敛保护 → 超 3 轮或同问题往返 ≥2 次，supervised-coding 停循环上报用户
@@ -392,7 +392,7 @@ Sup -> User: 汇报合入请求
 |---|---|---|
 | IMPL_BUG | 实现与用例预期不符 | 报给 coder 修 |
 | TEST_BUG | 测试自身错误（mock/断言） | tester 自己修测试重跑 |
-| CASE_BUG | 用例预期与实际行为矛盾 | 报告 supervised-coding，**用例=需求，改动必须经 reviewer 裁定** |
+| CASE_BUG | 用例预期与实际行为矛盾 | 报告 supervised-coding，**用例=需求，改动必须经 committer 裁定** |
 
 ### 5.2 evidence manifest（交付时写入 PR description）
 
@@ -417,7 +417,7 @@ Sup -> User: 汇报合入请求
 | 最大轮次 | maxRounds=3，超轮 → blocked（endReason=max_rounds） |
 | 乒乓检测 | 同问题往返 ≥2 次 → blocked；**启发式**：supervised-coding 按意见主题做语义比对，POC 阶段观察误判率（D19） |
 | 授权闸门 | supervised-coding `bash: ask`（只放行只读 git）；coder 禁止推主分支/merge/remote 变更/危险清理 |
-| 权限隔离 | tester 只能写测试路径；reviewer 全只读 |
+| 权限隔离 | tester 只能写测试路径；committer 全只读 |
 | gh 环境 | agent prompt 注明 gh 不在默认 PATH，需先 `export PATH=...` |
 
 ### 6.1 各角色 bash 权限一览
@@ -427,7 +427,7 @@ Sup -> User: 汇报合入请求
 | supervised-coding | git status/log/diff/rev-parse | 其余全部 ask（含 push/merge） |
 | coder | 全部 | 推主分支（develop/main）、merge、remote 变更、reset --hard、clean、rm -rf（deny） |
 | tester | 只读 git（含 rev-parse）+ cargo/npm/pnpm/npx/yarn/bun 全族 | 其余 ask |
-| reviewer | 只读 git（diff/status/log/show/rev-parse）+ gh pr diff/view/review/comment/api | 其余 deny |
+| committer | 只读 git（diff/status/log/show/rev-parse）+ gh pr diff/view/review/comment/api | 其余 deny |
 
 ---
 
@@ -451,8 +451,8 @@ Sup -> User: 汇报合入请求
 **结论：被否决。** GitHub Issue/PR 属于"异步强解耦"方案，固有缺陷：
 
 - **协作效率低、延迟高**：每轮交互经过 Git 提交/推送/API 读写/Webhook 回调，单轮延迟比会话内直连高几十倍
-- **信息损耗严重、上下文割裂**：Issue/PR 只能传格式化文本，无法携带开发思路/调试过程/中间决策；Reviewer 只看最终 Diff，容易脱离实际约束提意见；评论链过长导致上下文过载
-- **状态同步复杂**：需额外维护状态机与 GitHub 状态、Agent 会话状态对齐，易出现"coder 已改但 supervised-coding 未感知""reviewer 重复审旧版本"等不一致
+- **信息损耗严重、上下文割裂**：Issue/PR 只能传格式化文本，无法携带开发思路/调试过程/中间决策；Committer 只看最终 Diff，容易脱离实际约束提意见；评论链过长导致上下文过载
+- **状态同步复杂**：需额外维护状态机与 GitHub 状态、Agent 会话状态对齐，易出现"coder 已改但 supervised-coding 未感知""committer 重复审旧版本"等不一致
 - **易陷入无效循环**：需求边界不清时 agent 缺乏人类共识能力，在非核心细节上无限迭代
 - **成本与限流**：独立会话 token 消耗高，高频 GitHub API 调用触发限流
 
@@ -462,7 +462,7 @@ Sup -> User: 汇报合入请求
 
 | 方案 | 结论 |
 |---|---|
-| build 自驱动（command + reviewer subagent） | 循环逻辑混在 build 代理里，写代码的同时还要记得调 reviewer，易跑偏 |
+| build 自驱动（command + committer subagent） | 循环逻辑混在 build 代理里，写代码的同时还要记得调 committer，易跑偏 |
 | **supervised-coding 编排 + 3 个 subagent（选定）** | 编排抽成独立角色，职责清晰，各角色模型独立指定，符合 clowder 推荐的多 agent 协作模式 |
 | SDK 脚本硬编排 | 可靠性最强但开发成本高、不可观察；适合未来把跑通的流程固化成 CI 脚本，作为演进方向 |
 
@@ -482,21 +482,21 @@ clowder 没有独立 tester：测试是 coder 自己的 TDD 铁律。其反对�
 - **验收用例文档已存在且结构化**（编号到具体步骤+预期、对应里程碑）——测试意图已固化在文档里，tester 不需要猜 coder 意图
 - **双技术栈**（如 Rust + React/TS）：测试设施要建两套（cargo test + vitest），工程量真实存在
 - **里程碑验收制**：需要持续的"验收执行者"逐条勾验并输出报告
-- **独立验证视角**：避免"验证自己写的东西"的动机偏差；跨模型盲点正交（clowder F253 reviewer delta 理论）
+- **独立验证视角**：避免"验证自己写的东西"的动机偏差；跨模型盲点正交（clowder F253 committer delta 理论）
 
 **防走样的约束**：coder 仍保留 TDD 铁律（自测核心逻辑），tester 管**验收级验证**；tester 不写业务代码、不修改用例文档。
 
-### D5. 为什么 tester 在 reviewer 之前（顺序问题）
+### D5. 为什么 tester 在 committer 之前（顺序问题）
 
-如果先 review 再测试：tester 发现测试挂 → coder 修 → **reviewer 的审查作废**（HEAD 变了，F253 叫 stale invalidation），浪费一轮模型推理。
+如果先 review 再测试：tester 发现测试挂 → coder 修 → **committer 的审查作废**（HEAD 变了，F253 叫 stale invalidation），浪费一轮模型推理。
 
-正确顺序：**机械验证（便宜、快、确定性）先挡低级错误，语义审查（贵）只审"能跑的代码"**。修复后同样：tester 先回归，reviewer 再复看。clowder 的 request-review skill 实证："测试全绿是发 review 的前置条件（BLOCKED — 修到绿灯再发）"。
+正确顺序：**机械验证（便宜、快、确定性）先挡低级错误，语义审查（贵）只审"能跑的代码"**。修复后同样：tester 先回归，committer 再复看。clowder 的 request-review skill 实证："测试全绿是发 review 的前置条件（BLOCKED — 修到绿灯再发）"。
 
 ### D6. 为什么分层（三层分离）
 
-借鉴 clowder F253 的 3-Layer Reviewer Split：**L1 确定性工具/机械验证 → L2 审查者只产出 finding → L3 final approver 确认 final HEAD 覆盖全部 finding**。消除"审查者顺手改代码导致审查记录断裂"的问题。
+借鉴 clowder F253 的 3-Layer Committer Split：**L1 确定性工具/机械验证 → L2 审查者只产出 finding → L3 final approver 确认 final HEAD 覆盖全部 finding**。消除"审查者顺手改代码导致审查记录断裂"的问题。
 
-本方案映射：tester（L1 机械验证）→ reviewer（L2 只给 finding）→ 终态双 SHA 校验（L3 等价）。
+本方案映射：tester（L1 机械验证）→ committer（L2 只给 finding）→ 终态双 SHA 校验（L3 等价）。
 
 ### D7. 为什么意见逐字传递，不做 supervised-coding 语义汇总
 
@@ -514,9 +514,9 @@ clowder F253 金规："QC 触发可以自动，授权不能自动"。不自动 p
 
 POC 阶段先在单仓库验证效果（模型配合、prompt 质量、检查点协议），效果好再迁移全局 `~/.config/opencode/`。项目级配置与仓库自包含原则一致（每个 App 独立可运行）。
 
-### D11. 为什么 reviewer 选独立模型族
+### D11. 为什么 committer 选独立模型族
 
-clowder F253 的"盲点正交性"：不同模型族有不同系统性盲点，跨族 review 比同族 fresh-context 多捕获的 finding（reviewer delta metric）更高。故 reviewer 用与 coder 不同族、审慎型的模型（如 glm-5.2），而非同族强模型。
+clowder F253 的"盲点正交性"：不同模型族有不同系统性盲点，跨族 review 比同族 fresh-context 多捕获的 finding（reviewer delta metric）更高。故 committer 用与 coder 不同族、审慎型的模型（如 glm-5.2），而非同族强模型。
 
 ### D12. 从 clowder 借鉴的设计清单
 
@@ -557,11 +557,11 @@ clowder F253 的"盲点正交性"：不同模型族有不同系统性盲点，�
 | 疑点 | 结论 | 证据 |
 |---|---|---|
 | `mode: primary / subagent` | ✅ 支持，枚举 `primary | subagent | all` | docs/agents.md |
-| `permission.task` 限制到 agent 名称 | ✅ 支持 glob 匹配（官方示例 `{"*": "deny", "code-reviewer": "ask"}`） | docs/agents.md Task permissions 段 |
+| `permission.task` 限制到 agent 名称 | ✅ 支持 glob 匹配（官方示例 `{"*": "deny", "code-committer": "ask"}`） | docs/agents.md Task permissions 段 |
 | `bash: ask` 在交互式调用链 | ✅ 支持，TUI 下向用户弹权限确认 | docs/agents.md / docs/permissions.md |
 | Tab 切换 primary agent | ✅ 支持（"You can cycle through them using the Tab key"） | docs/agents.md |
 | Task 工具 task_id 续接 subagent 会话 | ✅ 支持（Task 工具签名含 task_id 参数，可续接同一子会话） | 本环境工具定义 |
-| 三个模型 ID | ✅ 均存在（初版曾误写 `opencode/deepseek-v4-pro`，该 ID 不存在；已修正为 `opencode-go/deepseek-v4-pro`） | `opencode models`（2026-08-12） |
+| 三个模型 ID | ✅ 均存在（初版曾误写 `opencode/deepseek-v4-pro`，该 ID 不存在；已修正为 `deepseek/deepseek-v4-pro`） | `opencode models`（2026-08-12） |
 
 > 备注：subagent 内触发 `ask` 时权限请求会冒泡到 TUI 用户确认；"task_id 续接在 compaction 后上下文保留程度"需 POC 首跑实测（检查点文件是最终兜底）。
 
@@ -569,9 +569,9 @@ clowder F253 的"盲点正交性"：不同模型族有不同系统性盲点，�
 
 初版无终止流程。修订：新增 `blocked`（超轮/乒乓，endReason 记录）与 `cancelled`（用户放弃）终态；放弃任务保留检查点 30 天供审计；supervised-coding 记录创建时间以便超期清理。
 
-### D18. reviewer 职责范围（审阅新增）
+### D18. committer 职责范围（审阅新增）
 
-审阅指出 reviewer 兼任 L2 审查 + CASE_BUG 裁定 + 终态 PR 评审三个职责。修订决策：**保留三职责，但约束其边界**——CASE_BUG 裁定只在 tester 提交时处理（不主动扩大范围）、终态 PR 评审只在交付阶段触发；裁定与 PR 评审均为顺带职责，主循环上下文以语义审查为限。若 POC 出现上下文膨胀，再拆分独立 approver 角色（clowder 3-Layer 原案）。
+审阅指出 committer 兼任 L2 审查 + CASE_BUG 裁定 + 终态 PR 评审三个职责。修订决策：**保留三职责，但约束其边界**——CASE_BUG 裁定只在 tester 提交时处理（不主动扩大范围）、终态 PR 评审只在交付阶段触发；裁定与 PR 评审均为顺带职责，主循环上下文以语义审查为限。若 POC 出现上下文膨胀，再拆分独立 approver 角色（clowder 3-Layer 原案）。
 
 ### D19. 乒乓检测的启发式性质（审阅新增）
 
@@ -596,7 +596,7 @@ clowder F253 的"盲点正交性"：不同模型族有不同系统性盲点，�
 - **循环可靠性是软约束**：协议依赖模型遵循 prompt（检查点写坏最坏重跑一轮，可接受）
 - **乒乓检测是启发式**：语义比对可能误判/漏判（D19）
 - **支持技术栈受限**：tester/bash 白名单覆盖 **JS/TS（npm/pnpm/yarn/bun/npx）+ Rust（cargo）**；引入其他栈（Python/Go/Swift）需先扩展 tester 权限与测试命令
-- **模型质量依赖**：tester 用便宜模型写测试，质量不足时需升级模型或由 reviewer 兜底审查测试质量
+- **模型质量依赖**：tester 用便宜模型写测试，质量不足时需升级模型或由 committer 兜底审查测试质量
 - **平台验证受限**：本地只能验证当前平台行为（如 macOS），跨平台行为靠 CI/手动
 - **检查点文件漂移风险**：文件与代码短暂不一致，靠双 SHA 校验兜底
 - **需求确认代价**：每任务多一次用户交互（换取方向正确性）
