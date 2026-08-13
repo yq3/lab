@@ -2,7 +2,7 @@
 
 > 本文档是 `lab/.opencode/` 配置的权威设计文档：实现细节 + 设计依据（决策记录）。
 > 内容已去掉具体项目属性，适用于任何目标项目；迁移到其他仓库/全局配置时随本目录整体搬迁。
-> 版本：v3（2026-08-12，二次迭代：改名体系、skill 体系调研 D21-D25）
+> 版本：v4（2026-08-13，三轮修订：护栏加固 D15、状态机一致性、需求边界回 spec D26-D27）
 
 ---
 
@@ -54,7 +54,7 @@ supervised-coding（编排者，便宜模型）
 | 角色 | mode | 职责 | 不做 |
 |---|---|---|---|
 | supervised-coding | primary | 需求确认、调度、写检查点、传意见、收敛保护 | 写代码、测试、审查 |
-| coder | subagent | 实现需求、TDD 自测、按意见修复 | 改验收用例/设计文档、推主分支、merge |
+| coder | subagent | 实现需求、TDD 自测、按意见修复 | 改验收用例/设计文档、未经确认推送、merge |
 | tester | subagent | 用例文档→可执行测试、跑验证、里程碑勾验 | 改业务代码、改用例文档 |
 | committer | subagent | 代码语义审查、CASE_BUG 裁定、终态 PR 评审（交付把关） | 改任何代码 |
 
@@ -111,17 +111,18 @@ supervised-coding（编排者，便宜模型）
 ### 4.1 主流程状态机
 
 ```
-created ──写入任务原文──▶ spec_confirm ──用户确认──▶ implementing
+spec_confirm ──用户确认──▶ implementing
 implementing ──coder 返回──▶ testing
 testing ──tester FAIL──▶ fixing（round+1）──回 coder──▶ implementing
 testing ──tester PASS──▶ reviewing
 reviewing ──NEEDS_CHANGES──▶ fixing（round+1）──回 coder──▶ implementing
+reviewing ──NEEDS_CHANGES（需求边界问题）──▶ spec_confirm ──用户确认/更新──▶ implementing
 reviewing ──APPROVED 且双 SHA=HEAD──▶ approved ──用户确认──▶ 交付阶段 ──▶ done
 任何状态 ──超轮/乒乓──▶ blocked（endReason=max_rounds / ping_pong，上报用户接管）
 任何状态 ──用户放弃──▶ cancelled（endReason=user_cancelled，保留检查点）
 ```
 
-**fixing 语义**：tester FAIL 或 committer NEEDS_CHANGES 后、回 coder 之前，supervised-coding 必须显式置 `status=fixing` 并 `round+1`、`reviewedSha` 置空——fixing 是"待修复"的暂存态，coder 重跑后流转回 implementing。
+**fixing 语义**：tester FAIL 或 committer NEEDS_CHANGES 后、回 coder 之前，supervised-coding 必须显式置 `status=fixing` 并 `round+1`、`reviewedSha` 置空——fixing 是"待修复"的暂存态；**调用 coder 前置回 `implementing`**（coder 重跑完成后写 testing 继续流转）。
 
 #### 4.1.1 流程全景（活动图）
 
@@ -154,12 +155,17 @@ while (任务未通过 且 未终止?) is (循环中)
       if (失败分类?) then (TEST_BUG)
         :tester 修测试重跑;
       else (IMPL_BUG)
-        :status=fixing，round+1;\n意见原文逐字给 coder;
+        :status=fixing→implementing，round+1;\n意见原文逐字给 coder;
       endif
     else (PASS)
       :status=reviewing 写检查点;\n调 committer（续接 committerTaskId）;
       if (reviewVerdict?) then (NEEDS_CHANGES)
-        :status=fixing，round+1;\n意见原文逐字给 coder;
+        if (需求边界问题?) then (是)
+          :status=spec_confirm;\n问题原文复述给用户确认/更新任务原文;
+          :确认后 status=implementing;
+        else (否)
+          :status=fixing→implementing，round+1;\n意见原文逐字给 coder;
+        endif
       else (APPROVED)
         if (双 SHA = 当前 HEAD?) then (否)
           :verdict 回退，回到相应阶段重验;
@@ -213,7 +219,7 @@ coder 修复/实现（TDD + 验证证据小节）→ 自测通过 → 本地 com
 | 合入 | 用户确认后由 supervised-coding 执行（`bash: ask`） | 不自动合入 |
 
 - 本地 commit 不违反"授权不能自动"（P1）：commit 不发布，push 才需授权
-- coder 权限已 deny 主分支 push（D15），PR 分支 push 在交付阶段才被指示执行
+- coder 权限 push 全 ask（D15）与此一致：PR 分支 push 是交付阶段被指示的授权操作，推送时弹用户确认
 
 ### 4.3 检查点文件（防中断恢复）
 
@@ -227,7 +233,7 @@ supervisorSessionId: null   # supervised-coding 所在的 opencode 会话（恢�
 coderTaskId: null           # Task 工具返回的 coder 会话 ID（续接用，见 §4.3.1）
 testerTaskId: null          # 同上，tester
 committerTaskId: null        # 同上，committer
-status: reviewing           # created→spec_confirm→implementing→testing→reviewing→fixing→approved→blocked→cancelled→done
+status: reviewing           # spec_confirm→implementing→testing→reviewing→fixing→approved→blocked→cancelled→done
 round: 2
 maxRounds: 3
 testVerdict: PASS
@@ -236,6 +242,7 @@ testedSha: a1b2c3d
 reviewedSha: a1b2c3d        # 修复后置空，待重审
 filesChanged: ["src/lib/events.rs", "src/store/usePetStore.ts"]
 endReason: null             # blocked/cancelled 时记录原因
+createdAt: 2026-08-11T09:00:00+08:00  # 创建时间（30 天清理审计用，见 §4.5）
 updatedAt: 2026-08-11T10:30:00+08:00
 ---
 
@@ -264,7 +271,7 @@ updatedAt: 2026-08-11T10:30:00+08:00
 | 用户确认 | implementing | 确认标记 |
 | coder 返回 | testing | 文件清单、验证证据、commit SHA（= HEAD，每轮本地 commit 后取） |
 | tester 返回 | reviewing / fixing | testVerdict + testedSha + 报告原文 |
-| committer 返回 | fixing / approved | reviewVerdict + reviewedSha + 意见原文 |
+| committer 返回 | fixing / spec_confirm / approved | reviewVerdict + reviewedSha + 意见原文（需求边界问题 → spec_confirm） |
 | 新一轮修复开始 | fixing → implementing | round+1，reviewedSha 置空 |
 | 超轮/乒乓 | blocked | endReason |
 | 用户放弃 | cancelled | endReason |
@@ -338,11 +345,15 @@ alt testVerdict = PASS
   Rev --> Sup: reviewVerdict + P1/P2 意见
   deactivate Rev
   Sup -> CP: reviewVerdict / reviewedSha / committerTaskId=C
-  alt NEEDS_CHANGES
+  alt NEEDS_CHANGES（纯代码问题）
     Sup -> Coder: Task(task_id=A 续接，附意见原文)
     ' 复用同一 coder 会话，上下文连续
     Coder --> Sup: 验证证据 + 逐条响应
     Sup -> CP: status=fixing->testing，round+1，reviewedSha 置空
+  else NEEDS_CHANGES（需求边界问题）
+    Sup -> User: 复述问题原文，请求确认/更新任务原文
+    User --> Sup: 确认/更新
+    Sup -> CP: status=spec_confirm->implementing
   else APPROVED
     Sup -> CP: 校验双 SHA = 当前 HEAD
     Sup -> User: 汇报，请求确认交付
@@ -416,7 +427,7 @@ Sup -> User: 汇报合入请求
 |---|---|
 | 最大轮次 | maxRounds=3，超轮 → blocked（endReason=max_rounds） |
 | 乒乓检测 | 同问题往返 ≥2 次 → blocked；**启发式**：supervised-coding 按意见主题做语义比对，POC 阶段观察误判率（D19） |
-| 授权闸门 | supervised-coding `bash: ask`（只放行只读 git）；coder 禁止推主分支/merge/remote 变更/危险清理 |
+| 授权闸门 | supervised-coding `bash: ask`（只放行只读 git）；coder push/pull/cherry-pick/revert 一律 ask，merge/remote 变更/危险清理 deny |
 | 权限隔离 | tester 只能写测试路径；committer 全只读 |
 | gh 环境 | agent prompt 注明 gh 不在默认 PATH，需先 `export PATH=...` |
 
@@ -425,9 +436,9 @@ Sup -> User: 汇报合入请求
 | 角色 | 放行 | 拦截/询问 |
 |---|---|---|
 | supervised-coding | git status/log/diff/rev-parse | 其余全部 ask（含 push/merge） |
-| coder | 全部 | 推主分支（develop/main）、merge、remote 变更、reset --hard、clean、rm -rf（deny） |
+| coder | 全部 | push/pull/cherry-pick/revert 弹确认（ask）；merge、remote 变更、reset --hard、clean、rm -rf（deny） |
 | tester | 只读 git（含 rev-parse）+ cargo/npm/pnpm/npx/yarn/bun 全族 | 其余 ask |
-| committer | 只读 git（diff/status/log/show/rev-parse）+ gh pr diff/view/review/comment/api | 其余 deny |
+| committer | 只读 git（diff/status/log/show/rev-parse）+ gh pr diff/view/review/comment | 其余 deny |
 
 ---
 
@@ -444,7 +455,7 @@ Sup -> User: 汇报合入请求
 
 ## 8. 设计依据（决策记录）
 
-> 本文档由 2026-08 的多轮讨论沉淀。D1-D12 为初版决策，D13-D20 为首轮审阅修订，D21-D25 为二次迭代（改名体系、命名划分、skill 体系调研）。
+> 本文档由 2026-08 的多轮讨论沉淀。D1-D12 为初版决策，D13-D20 为首轮审阅修订，D21-D25 为二次迭代（改名体系、命名划分、skill 体系调研），D26-D27 为三轮修订（护栏加固、状态机一致性、回 spec 路径）。
 
 ### D1. 为什么不用 GitHub Issue/PR 作为 agent 间通信媒介
 
@@ -531,7 +542,7 @@ clowder F253 的"盲点正交性"：不同模型族有不同系统性盲点，�
 | receive-review 逐条响应协议 | §4.4 意见传递协议 |
 | request-review 五件套（gate 报告/测试输出/需求引用/架构归属/实测证据） | 检查点中的"任务原文 + 验证证据 + 意见原文"，构成 review 的完整上下文包 |
 | TDD 铁律 / quality-gate 证据原则 | coder/tester prompt 铁律（P2/P3） |
-| 金规：触发可自动、授权不能自动 | supervised-coding `bash: ask` + coder 主分支 push deny |
+| 金规：触发可自动、授权不能自动 | supervised-coding `bash: ask` + coder push 全 ask |
 
 ### D13. 需求确认节点（审阅新增）
 
@@ -543,12 +554,15 @@ clowder F253 的"盲点正交性"：不同模型族有不同系统性盲点，�
 - `bash` 白名单从枚举命令改为**族级匹配**（`cargo *`、`npm *`、`pnpm *`、`npx *`、`yarn *`、`bun *`）：不再随项目脚本演化补名单；补充 `git rev-parse*`（写 testedSha 必须）
 - 技术栈适配：tester 从目标项目根读 Cargo.toml / package.json 判断栈；当前白名单覆盖 **JS/TS + Rust** 栈（见 §9 限制声明）
 
-### D15. coder 权限收紧（审阅新增）
+### D15. coder 权限收紧（审阅新增 + 三轮修订）
 
-初版 coder `bash: allow` 全开，可自主 push/merge/改仓库配置，与"授权不能自动"矛盾。修订（deny 列表，opencode 权限"最后匹配生效"，deny 置于 allow 之后）：
+初版 coder `bash: allow` 全开，可自主 push/merge/改仓库配置，与"授权不能自动"矛盾。首轮修订用 deny 前缀匹配（`git push origin develop*`），但**字符串前缀可被绕过**：`git push`（无参数推 upstream）、`git push -u origin develop`、`git push origin HEAD:main` 均不匹配模式而被 `*: allow` 放行；`git pull`（隐含 merge）、`git cherry-pick`、`git revert` 同样漏网。
 
-- 推主分支（`git push origin develop*` / `git push origin main*`）deny——PR 分支推送仍允许（交付阶段经用户确认）
-- `git merge*`、`git remote*`、`git reset --hard*`、`git clean*`、`rm -rf*` deny
+三轮修订（本次）：授权闸门从"匹配分支名"改为"匹配动作"——
+
+- `git push*` → **ask**：任何推送都弹用户确认，与 P1 语义一致（授权在动作，不在分支名；PR 分支推送交付阶段被指示执行时同样弹确认）
+- `git pull*` / `git cherry-pick*` / `git revert*` → ask：隐式 merge / 改动本地历史前让用户知情
+- deny 保留：`git merge*`、`git remote*`、`git reset --hard*`、`git clean*`、`rm -rf*`
 
 ### D16. opencode 能力验证结论（审阅新增）
 
@@ -585,7 +599,7 @@ clowder F253 的"盲点正交性"：不同模型族有不同系统性盲点，�
 
 - **每轮 coder 完成后本地 commit**（`[<taskId>] R<n>`）：HEAD 前进使双 SHA 校验真正生效（修复轮 commit 后，上一轮 verdict 自动 stale）；崩溃恢复可 `git log` 回溯已完成轮次
 - **push 仅发生在交付阶段**（用户确认后推 PR 分支）：本地 commit 不发布，不违反"授权不能自动"（P1/D8）
-- coder 权限 deny 主分支 push（D15）与此一致：PR 分支 push 是交付阶段被指示的授权操作
+- coder 权限 push 全 ask（D15）与此一致：PR 分支 push 是交付阶段被指示的授权操作，推送时弹用户确认
 
 ### D21. 模式族命名：agent 名 = 工作模式（2026-08-12 二次迭代）
 
@@ -639,9 +653,23 @@ clowder（Cat Cafe）的能力沉淀在 **skill 体系**而非 agent prompt 中�
 
 **借鉴结论**（已认可、待实施）：
 1. 拆分 prompt → skills：`tdd`（Coder）/ `code-review`（Committer）/ `test-execution`（Tester）/ `checkpoint-protocol`（Supervised-Coding），prompt 只留身份 + 路由指令
-2. 历史教训入 skill（乒乓启发式误判、CASE_BUG 裁定边界、reviewedSha 置空时机等写成行为刹车）
+2. 历史教训入 skill（乒乓启发式误判、CASE_BUG 裁定边界、reviewedSha 置空时机等写成行为刹车）；code-review skill 落地时须含 clowder **F168 封板协议**：5 轮或假阳性 >50% 强制停止（云审 21 轮循环教训）
 3. 产出契约：description 用 Use when / Not for / Output 三段式（opencode 的 skill 发现靠 description）
 4. 不做 SOP 层：单模式 POC 不需要机器可解析的流程定义，supervised-coding prompt 即 SOP
+
+### D26. committer 会话续接 vs clowder fresh-context-review（2026-08-13 三轮修订）
+
+clowder `fresh-context-review` 硬规则与本方案方向相反：clowder 要求**fresh context**（未参与开发的个体或新 session 扫 diff），理由是防**锚定偏差**（同一会话里 reviewer 会渐进接受反复出现的东西），且明确"finding generator ≠ approval authority"。本方案刻意复用 task_id 续接 committer 会话，理由：追踪上轮意见处置（防漏改）、保持审查标准一致。
+
+**修订决策**：保留续接 + 防锚定硬规则——committer 每轮以"HEAD vs 上一轮 reviewedSha"的 diff 为审查对象，先逐条核对上轮意见处置，禁止因"上轮已看过"跳过区域（已写入 committer prompt）。
+
+**POC 观察指标**：committer 是否漏掉修复轮新引入的问题。若锚定偏差显著，改回每轮新开 fresh 会话——检查点文件（任务原文 + 轮次记录 + 意见原文）足以交接上下文。
+
+### D27. 需求边界问题回 spec 层（2026-08-13 三轮修订）
+
+借鉴 clowder F253 触发策略："同类 finding 连续 ≥3 轮退回 plan/spec 层"。原设计 `spec_confirm` 只在任务开头一次，循环内出现需求歧义/验收标准矛盾时没有出路，只能走到 blocked。
+
+**修订**：committer 输出新增"需求边界问题"分类（验收标准与实现行为矛盾、需求歧义/不自洽——与代码问题分开）；supervised-coding 检测到 → 回 `spec_confirm` 把问题原文复述给用户确认/更新任务原文，**不经 coder**；纯代码问题才走 fixing。round 计数不清零（回 spec 是修正方向，不是重来）。
 
 ---
 
@@ -652,6 +680,7 @@ clowder（Cat Cafe）的能力沉淀在 **skill 体系**而非 agent prompt 中�
 - **循环可靠性是软约束**：协议依赖模型遵循 prompt（检查点写坏最坏重跑一轮，可接受）
 - **乒乓检测是启发式**：语义比对可能误判/漏判（D19）
 - **支持技术栈受限**：tester/bash 白名单覆盖 **JS/TS（npm/pnpm/yarn/bun/npx）+ Rust（cargo）**；引入其他栈（Python/Go/Swift）需先扩展 tester 权限与测试命令
+- **Rust 测试边界**：`#[cfg(test)]` 单元测试内联在 src/ 业务文件中，tester 权限写不到，由 coder TDD 自测覆盖；tester 的 Rust 验证限于 `tests/` 集成测试与用例勾验
 - **模型质量依赖**：tester 用便宜模型写测试，质量不足时需升级模型或由 committer 兜底审查测试质量
 - **平台验证受限**：本地只能验证当前平台行为（如 macOS），跨平台行为靠 CI/手动
 - **检查点文件漂移风险**：文件与代码短暂不一致，靠双 SHA 校验兜底

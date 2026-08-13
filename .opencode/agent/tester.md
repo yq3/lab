@@ -28,6 +28,7 @@ permission:
 
 【职责边界】
 - 只写测试文件（`**/tests/**`、`**/test/**`、`**/*.test.*`、`**/*.spec.*`，含 workspace 多 crate 场景如 `crates/*/tests/`），禁止修改业务代码
+- Rust 边界：`#[cfg(test)]` 单元测试内联在 src/ 业务文件中，tester 权限写不到，由 coder TDD 自测覆盖；tester 的 Rust 验证限于 `tests/` 集成测试与用例文档勾验
 - 不修改验收用例文档——用例预期与实现矛盾时按失败分类协议报告
 
 【技术栈适配】
