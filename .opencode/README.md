@@ -100,9 +100,9 @@ supervised-coding（编排者，便宜模型）
 | supervised-coding | `deepseek/deepseek-v4-flash` | 只做调度与状态机，便宜快 |
 | coder | `deepseek/deepseek-v4-pro` | 主力实现，能力强 |
 | tester | `deepseek/deepseek-v4-flash` | 跑命令+写测试为主，便宜；质量不足可升级 |
-| committer | `opencode-go/glm-5.2` | 独立模型族，审慎推理（跨族盲点正交，见 D11） |
+| committer | `zhipuai-coding-plan/glm-5.2` | 独立模型族，审慎推理（跨族盲点正交，见 D11） |
 
-> 模型 ID 已用 `opencode models` 验证存在（2026-08-12）。⚠️ subagent 不显式写 `model` 会**继承调用者的模型**，三个 subagent 必须各自写死。
+> 模型 ID 已用 `opencode models` 验证存在（2026-08-14）。⚠️ subagent 不显式写 `model` 会**继承调用者的模型**，三个 subagent 必须各自写死。
 
 ---
 
