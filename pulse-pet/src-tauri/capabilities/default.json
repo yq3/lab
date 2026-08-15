@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Default capability for all PulsePet windows",
+  "windows": ["pet", "panel", "fireworks"],
+  "permissions": ["core:default"]
+}

@@ -71,7 +71,7 @@ Tauri 一个 App 可挂多个 webview 窗口。v1 三个窗口：
 
 | 窗口 | 用途 | 关键配置 |
 |---|---|---|
-| `pet` | 宠物精灵 + 气泡（主可见 UI） | `transparent:true`、`decorations:false`、`alwaysOnTop:true`、`skipTaskbar:true`、`resizable:false`、默认 `ignoreCursorEvents:false`（**不穿透，可拖拽/右键**）；M6 穿透可切换功能上线后，默认仍是 `false`，切换为 `true` 时进入"纯展示"模式（右键菜单改由托盘/全局热键唤起，见 §7.2/§7.3） |
+| `pet` | 宠物精灵 + 气泡（主可见 UI） | `transparent:true`、`decorations:false`、`alwaysOnTop:true`、`skipTaskbar:true`、`resizable:false`、运行时默认非穿透（`ignoreCursorEvents` 非配置字段，可拖拽/右键）；M6 穿透切换上线后默认仍非穿透，运行时经 `setIgnoreCursorEvents` 切为穿透时进入"纯展示"模式（右键菜单改由托盘/全局热键唤起，见 §7.2/§7.3） |
 | `panel` | 控制面板（设置/Token/Todo/提醒） | 普通窗口、`visible:false` 默认隐藏，托盘"设置"或右键菜单唤起 |
 | `fireworks` | 烟花粒子动画 | `transparent:true`、`decorations:false`、`alwaysOnTop:true`、`skipTaskbar:true`、`fullscreen:true` 或跨屏最大化；播放完成（约 3-5s）后 `hide`，下次 `show` |
 
@@ -337,8 +337,8 @@ CREATE TABLE reminder_logs (
 
 ### 6.3 渲染细节精致化（M6）
 
-- **拖拽**：v1 pet 窗口默认 `ignoreCursorEvents=false`（非穿透），webview 可直接收 mousedown → 触发 Tauri `window.startDrag()`（或 Rust 侧监听 `WindowEvent::CursorMove` + `set_position`）。若用户在 M6 后切换到穿透态，则拖拽不可用——此时只能通过托盘/热键切回非穿透态再拖。文档此前"穿透时临时关闭穿透、释放恢复"的设想无法成立（穿透态下根本收不到 mousedown），故 v1 不做该路径。
-- **位置记忆**：宠物位置 + 所在显示器 id 写入 `pulsepet.db` 的 `app_state` 表，启动时还原。
+- **拖拽**：v1 pet 窗口运行时默认非穿透（可交互），webview 可直接收 mousedown → 触发 Tauri `window.startDrag()`（或 Rust 侧监听 `WindowEvent::CursorMove` + `set_position`）。若用户在 M6 后切换到穿透态，则拖拽不可用——此时只能通过托盘/热键切回非穿透态再拖。文档此前"穿透时临时关闭穿透、释放恢复"的设想无法成立（穿透态下根本收不到 mousedown），故 v1 不做该路径。
+- **位置记忆**：宠物位置 + 所在显示器 id 写入 `pulsepet.db` 的 `app_state` 表，启动时还原。**坐标单位约定**：宠物位置存物理像素坐标（`PhysicalPosition` / `outer_position`），M6 跨显示器记忆/回退按此单位语义实现（不同 dpr 屏间换算、屏幕边界 clamp 等 M6 处理）。
 - **跨显示器拖拽**：Tauri `availableMonitors()` API 计算屏幕边界，跨屏拖拽实时更新窗口位置。
 - **启动定位**：上次所在显示器 + 上次坐标；若该显示器已不存在则回退主显示器。
 - **点击穿透可切换**：穿透态下右键菜单不可达，故切换通道为"全局热键 + 托盘菜单"双通道（热键 `⌘+Shift+Alt+P` Mac / `Ctrl+Shift+Alt+P` Win，与 §7.3 一致）；托盘右键菜单的"切换交互模式"项两条通道都可用（穿透态下托盘仍是系统级菜单不受影响）。穿透开 = 纯展示（鼠标穿透 + 不可拖拽），穿透关 = 可拖拽 / 右键。
@@ -353,6 +353,7 @@ CREATE TABLE reminder_logs (
 ```jsonc
 {
   "app": {
+    "macOSPrivateApi": true,        // macOS 透明窗口必需：启用 macos-private-api feature
     "windows": [
       {
         "label": "pet",
@@ -360,6 +361,7 @@ CREATE TABLE reminder_logs (
         "title": "PulsePet",
         "width": 220, "height": 220,
         "transparent": true,
+        "backgroundColor": "#00000000", // macOS 透明窗口必需：显式透明背景，否则 WKWebView 内容不渲染（见下）
         "decorations": false,
         "alwaysOnTop": true,
         "skipTaskbar": true,
@@ -378,6 +380,7 @@ CREATE TABLE reminder_logs (
         "label": "fireworks",
         "url": "index.html#/fireworks",
         "transparent": true,
+        "backgroundColor": "#00000000",
         "decorations": false,
         "alwaysOnTop": true,
         "skipTaskbar": true,
@@ -390,7 +393,9 @@ CREATE TABLE reminder_logs (
 }
 ```
 
-`pet` 与 `fireworks` 默认 `ignoreCursorEvents=false`（关闭穿透，可交互）；运行时通过 `setIgnoreCursorEvents` 动态切换。M1-M5 阶段不做切换，pet 窗口始终为可交互态；M6 引入穿透开关后，开启穿透时鼠标事件全部透出，pet 窗口的右键菜单不再可达——此时右键菜单只通过托盘（§7.2）和全局热键（§7.3）唤起。
+> **macOS 透明窗口两个必要项（实测踩坑）**：① app 级 `macOSPrivateApi: true`（启用 `macos-private-api` feature，`transparent` 在 macOS 依赖它）；② 透明窗口（pet/fireworks）加 `backgroundColor: "#00000000"`。仅设 `transparent: true` 时 wry 只禁用 WKWebView 的 `drawsBackground`（白底消失），但 macOS 上缺 `underPageBackgroundColor` 会导致 WKWebView 内容（canvas 精灵等）整体不渲染——`backgroundColor` 让 wry 走完整透明路径（`drawsBackground` + `underPageBackgroundColor`），透明与内容两者兼得。
+
+`pet` 与 `fireworks` 运行时默认非穿透（可交互）；`ignoreCursorEvents` 不是 tauri.conf.json 配置字段（Tauri 2 schema 无此项），穿透仅通过运行时 `setIgnoreCursorEvents` 动态切换。M1-M5 阶段不做切换，pet 窗口始终为可交互态；M6 引入穿透开关后，开启穿透时鼠标事件全部透出，pet 窗口的右键菜单不再可达——此时右键菜单只通过托盘（§7.2）和全局热键（§7.3）唤起。
 
 ### 7.2 托盘
 
@@ -408,7 +413,7 @@ CREATE TABLE reminder_logs (
 | 热键 | macOS | Windows / Linux | 功能 |
 |---|---|---|---|
 | 唤起控制面板 | `⌘+Shift+P` | `Ctrl+Shift+P` | 切换 panel 可见 |
-| 切换宠物穿透 | `⌘+Shift+Alt+P` | `Ctrl+Shift+Alt+P` | 切换 ignoreCursorEvents |
+| 切换宠物穿透 | `⌘+Shift+Alt+P` | `Ctrl+Shift+Alt+P` | 切换穿透（运行时 `setIgnoreCursorEvents`） |
 | 测试烟花 | `⌘+Shift+Alt+F` | `Ctrl+Shift+Alt+F` | 调试用：手动放一束烟花 |
 
 避免与 opencode 默认热键冲突（opencode 用 `Ctrl+O` 等）；调试烟花热键 v1 release 时移除。

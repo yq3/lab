@@ -28,8 +28,8 @@
 - **前置**：App 首次启动，无历史状态。
 - **步骤**：启动 App。
 - **预期**：
-  1. `pet` 窗口显示（220×220、透明、无边框、置顶、不在任务栏、不可 resize、无阴影）；
-  2. `pet` 初始 `ignoreCursorEvents=false`（非穿透，可拖拽/右键；对应 DESIGN-REVIEW A1 修正后的默认值，运行时查询确认）；
+  1. `pet` 窗口显示（220×220、**视觉透明**——截屏/目视确认窗口区域除宠物像素外背景透出桌面内容，非白/灰/黑底、无窗口框感、无边框、置顶、不在任务栏、不可 resize、无阴影）；
+  2. `pet` 初始运行时非穿透（`ignoreCursorEvents` 非 tauri.conf.json 配置字段，运行时默认 `false` 可拖拽/右键；对应 DESIGN-REVIEW A1 修正后的默认值，运行时查询确认）；
   3. `panel` 窗口隐藏（`visible:false`）；
   4. `fireworks` 窗口隐藏；
   5. 托盘图标出现。
@@ -594,7 +594,7 @@
 
 ### TC-WIN-01 拖拽
 
-- **前置**：pet 窗口非穿透态（默认 `ignoreCursorEvents=false`）。
+- **前置**：pet 窗口非穿透态（运行时默认，可交互）。
 - **步骤**：鼠标按住宠物拖动。
 - **预期**：窗口跟随移动（`window.startDrag()` 或 Rust 侧监听生效）；松开停止。
 
@@ -624,7 +624,7 @@
 ### TC-WIN-06 宠物窗口配置核对
 
 - **步骤**：对照 tauri.conf.json 检查三窗口。
-- **预期**：pet（220×220、transparent、decorations:false、alwaysOnTop、skipTaskbar、resizable:false、visible:true、shadow:false、**ignoreCursorEvents:false**、url `#/pet`）；panel（900×640、visible:false、url `#/panel`）；fireworks（transparent、decorations:false、alwaysOnTop、skipTaskbar、visible:false、shadow:false、maximized:true、url `#/fireworks`）。
+- **预期**：pet（220×220、transparent、decorations:false、alwaysOnTop、skipTaskbar、resizable:false、visible:true、shadow:false、url `#/pet`；`ignoreCursorEvents` 非配置字段、运行时默认 false 非穿透）；panel（900×640、visible:false、url `#/panel`）；fireworks（transparent、decorations:false、alwaysOnTop、skipTaskbar、visible:false、shadow:false、maximized:true、url `#/fireworks`）。
 
 ### TC-WIN-07 调试烟花热键
 
