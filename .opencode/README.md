@@ -280,6 +280,8 @@ updatedAt: 2026-08-11T10:30:00+08:00
 
 **写入时机**（supervised-coding 每轮节点落盘；tester/committer 无写权限，天然由 supervised-coding 代写）：
 
+> **updatedAt 铁律**：上表每次写入（无论改动大小，包括只改 status/轮次记录/遗留事项小节）都必须同步把 frontmatter `updatedAt` 更新为当前时间（ISO 8601 含时区），禁止沿用旧值——这是判断检查点新鲜度与恢复时序的依据，已写入 supervised-coding prompt 与模板注释。
+
 | 节点 | status | 写入内容 |
 |---|---|---|
 | 创建 | spec_confirm | 任务原文 |
