@@ -1,0 +1,58 @@
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  background: transparent;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* pet 窗口：220×220 透明画布 */
+.pet-root {
+  width: 220px;
+  height: 220px;
+  overflow: hidden;
+  background: transparent;
+}
+
+.pet-canvas {
+  display: block;
+  width: 220px;
+  height: 220px;
+}
+
+/* panel 窗口：普通不透明控制面板 */
+.panel {
+  min-height: 100%;
+  background: #f5f6f8;
+  color: #1f2937;
+  padding: 24px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+}
+
+.panel h1 {
+  margin: 0 0 12px;
+  font-size: 22px;
+}
+
+.panel p {
+  color: #4b5563;
+  line-height: 1.6;
+}
+
+.panel ul {
+  color: #4b5563;
+  line-height: 1.8;
+}
+
+/* fireworks 窗口：透明占位 */
+.fireworks {
+  width: 100%;
+  height: 100%;
+  background: transparent;
+}
