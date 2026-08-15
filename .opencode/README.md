@@ -2,7 +2,7 @@
 
 > 本文档是 `lab/.opencode/` 配置的权威设计文档：实现细节 + 设计依据（决策记录）。
 > 内容已去掉具体项目属性，适用于任何目标项目；迁移到其他仓库/全局配置时随本目录整体搬迁。
-> 版本：v4（2026-08-13，三轮修订：护栏加固 D15、状态机一致性、需求边界回 spec D26-D27）
+> 版本：v5（2026-08-15，四轮修订：subagent 调用前用户确认 D28、新任务遗留事项检查 D29、develop_opencode 分支策略 D30；前三轮见 D15/D26-D27）
 
 ---
 
@@ -36,9 +36,11 @@
    │
    ▼
 supervised-coding（编排者，便宜模型）
-   │  ① 需求确认（复述需求+验收标准，用户确认后才开工）
-   │  ② Task 调用（会话内直连，复用 task_id 保持子会话上下文）
-   ├─▶ coder（实现者）：实现 + TDD 自测，只碰业务/测试代码
+   │  ⓪ 遗留事项检查（扫历史检查点，未了结事项默认并入本任务，D29）
+   │  ⓪.5 需求确认（复述需求+验收标准+遗留事项清单，用户确认后才开工）
+   │  ⓪.8 调用预告（每次调 subagent 前先向用户确认：角色+目的+要点，D28）
+   │  ① Task 调用（会话内直连，复用 task_id 保持子会话上下文）
+   ├─▶ coder（实现者）：实现 + TDD 自测，只碰业务/测试代码；固定在 develop_opencode 分支开发/提交（D30）
    ├─▶ tester（验证执行者）：用例文档 → 可执行测试 + 验收勾验
    └─▶ committer（审查+把关）：代码语义审查 + CASE_BUG 裁定 + 终态 PR 评审，全只读
    │
@@ -46,15 +48,15 @@ supervised-coding（编排者，便宜模型）
    │
    ▼ 全部通过（双 verdict + 双 SHA = 当前 HEAD）→ 用户确认
    │
-   ▼ 交付阶段：coder 推 PR 分支 → committer gh pr review → evidence manifest 写 PR description
+   ▼ 交付阶段：coder 同步 origin/develop 后推 develop_opencode → 开 PR（base=develop）→ committer gh pr review → evidence manifest 写 PR description
 ```
 
 ### 2.2 角色职责矩阵
 
 | 角色 | mode | 职责 | 不做 |
 |---|---|---|---|
-| supervised-coding | primary | 需求确认、调度、写检查点、传意见、收敛保护 | 写代码、测试、审查 |
-| coder | subagent | 实现需求、TDD 自测、按意见修复 | 改验收用例/设计文档、未经确认推送、merge |
+| supervised-coding | primary | 遗留事项检查、需求确认、调用预告确认、调度、写检查点、传意见、收敛保护 | 写代码、测试、审查 |
+| coder | subagent | 实现需求、TDD 自测、按意见修复（固定 develop_opencode 分支，commit 前同步 develop） | 改验收用例/设计文档、未经确认推送、merge（同步 origin/develop 除外） |
 | tester | subagent | 用例文档→可执行测试、跑验证、里程碑勾验 | 改业务代码、改用例文档 |
 | committer | subagent | 代码语义审查、CASE_BUG 裁定、终态 PR 评审（交付把关） | 改任何代码 |
 
@@ -124,6 +126,10 @@ reviewing ──APPROVED 且双 SHA=HEAD──▶ approved ──用户确认─
 
 **fixing 语义**：tester FAIL 或 committer NEEDS_CHANGES 后、回 coder 之前，supervised-coding 必须显式置 `status=fixing` 并 `round+1`、`reviewedSha` 置空——fixing 是"待修复"的暂存态；**调用 coder 前置回 `implementing`**（coder 重跑完成后写 testing 继续流转）。
 
+**调用确认闸门（D28）**：supervised-coding 每次 Task 调用（coder/tester/committer，含首次、续接、打回重跑、恢复场景）前，必须先向用户发"调用预告"（目标角色 + 目的 + 传入要点），用户同意后才执行。
+
+**新任务开工闸门（D29）**：创建新检查点前必扫历史检查点的遗留事项，未了结事项默认并入本任务范围（含相应测试用例更新），详见 §4.6。
+
 #### 4.1.1 流程全景（活动图）
 
 > 下方为可编辑的 PlantUML 源码（VS Code 装 PlantUML 插件后自动渲染；渲染方法见仓库根 AGENTS.md「PlantUML 渲染」节）。
@@ -133,12 +139,13 @@ title 多 Agent 开发流程全景（活动图）
 
 start
 :用户下达需求;
+:扫描历史检查点，汇总遗留事项;
 :supervised-coding 创建检查点\n(status=spec_confirm，写入任务原文);
-:复述需求 + 验收标准，请求用户确认;
+:复述需求 + 验收标准 + 遗留事项清单，\n请求用户确认;
 if (用户确认?) then (否)
   :按用户意见更新任务原文;
 endif
-:status=implementing，\n调 coder（Task 首次调用）;
+:用户确认调用后 status=implementing，\n调 coder（Task 首次调用）;
 
 while (任务未通过 且 未终止?) is (循环中)
   :coder TDD 实现 + 自测;
@@ -150,21 +157,21 @@ while (任务未通过 且 未终止?) is (循环中)
       HEAD 前进 -> SHA 校验生效
     end note
     :status=testing\n写检查点（文件清单/commit SHA/会话 ID）;
-    :调 tester（续接 testerTaskId）;
+    :用户确认后调 tester（续接 testerTaskId）;
     if (tester 结果?) then (FAIL)
       if (失败分类?) then (TEST_BUG)
         :tester 修测试重跑;
       else (IMPL_BUG)
-        :status=fixing→implementing，round+1;\n意见原文逐字给 coder;
+        :status=fixing→implementing，round+1;\n用户确认后意见原文逐字给 coder;
       endif
     else (PASS)
-      :status=reviewing 写检查点;\n调 committer（续接 committerTaskId）;
+      :status=reviewing 写检查点;\n用户确认后调 committer（续接 committerTaskId）;
       if (reviewVerdict?) then (NEEDS_CHANGES)
         if (需求边界问题?) then (是)
           :status=spec_confirm;\n问题原文复述给用户确认/更新任务原文;
           :确认后 status=implementing;
         else (否)
-          :status=fixing→implementing，round+1;\n意见原文逐字给 coder;
+          :status=fixing→implementing，round+1;\n用户确认后意见原文逐字给 coder;
         endif
       else (APPROVED)
         if (双 SHA = 当前 HEAD?) then (否)
@@ -190,9 +197,10 @@ endwhile (终止)
 if (用户确认?) then (否)
   :保持 approved 待命;
 else (是)
-  :交付阶段：coder 推 PR 分支;
+  :交付阶段：coder 同步 origin/develop 后\n推 develop_opencode，开 PR（base=develop）;
   :committer gh pr review 留痕;
   :evidence manifest 写入 PR description;
+  :回写检查点遗留事项（清偿/移交）;
   :汇报合入请求（用户确认后合入）;
 endif
 stop
@@ -214,12 +222,14 @@ coder 修复/实现（TDD + 验证证据小节）→ 自测通过 → 本地 com
 
 | 节点 | 动作 | 说明 |
 |---|---|---|
-| 每轮 coder 完成后 | **本地 commit**（`[<taskId>] R<n>`） | 不 push；使 HEAD 前进，`testedSha`/`reviewedSha` 校验生效；崩溃可 `git log` 回溯轮次 |
-| 用户确认交付后 | coder 推 **PR 分支** | 唯一 push 节点，用户已确认 |
+| coder 开工 | 切到 `develop_opencode` 分支 | 固定提交分支（D30）；本地无此分支则自 `origin/develop` 创建 |
+| 每轮 coder 完成后 | **本地 commit 到 develop_opencode**（`[<taskId>] R<n>`） | **commit 前先同步**：`git fetch origin` → merge/rebase `origin/develop`（D30）；不 push；HEAD 前进使 `testedSha`/`reviewedSha` 校验生效；崩溃可 `git log` 回溯轮次 |
+| 用户确认交付后 | coder 同步后推 **develop_opencode**，开 PR（base=`develop`） | 唯一 push 节点，用户已确认 |
 | 合入 | 用户确认后由 supervised-coding 执行（`bash: ask`） | 不自动合入 |
 
 - 本地 commit 不违反"授权不能自动"（P1）：commit 不发布，push 才需授权
-- coder 权限 push 全 ask（D15）与此一致：PR 分支 push 是交付阶段被指示的授权操作，推送时弹用户确认
+- coder 权限 push 全 ask（D15）与此一致：`develop_opencode` 推送是交付阶段被指示的授权操作，推送时弹用户确认
+- 分支策略（D30）：`develop_opencode` 合并后远端保留不删，后续任务继续在此分支上开发，PR 目标始终是 `develop`
 
 ### 4.3 检查点文件（防中断恢复）
 
@@ -253,6 +263,11 @@ updatedAt: 2026-08-11T10:30:00+08:00
 
 ## 需求确认
 - [ ] 用户已确认
+- 历史遗留事项清单：（扫历史检查点汇总，默认并入本任务，见 §4.6）
+
+## 遗留事项（跨任务移交）
+- [ ] 无
+（处理完毕回写勾选并注来源任务 ID；继续移交的注明去向）
 
 ## 轮次记录
 - R1: coder 完成（改动…，自测：cargo test 12/12 通过）
@@ -275,6 +290,7 @@ updatedAt: 2026-08-11T10:30:00+08:00
 | 新一轮修复开始 | fixing → implementing | round+1，reviewedSha 置空 |
 | 超轮/乒乓 | blocked | endReason |
 | 用户放弃 | cancelled | endReason |
+| 交付/终态 | approved 交付后 | 遗留事项小节回写：已清偿勾选（注来源任务 ID）；新移交注明去向 |
 
 **恢复语义**（借鉴 clowder F048：cancel old + replay new）：
 
@@ -316,9 +332,16 @@ participant "coder 会话" as Coder
 participant "tester 会话" as Tester
 participant "committer 会话" as Rev
 
+note over Sup, Rev
+  每次 Task 调用前 supervised-coding 先向用户发
+  "调用预告"（角色+目的+要点）并获同意后才调用
+  （D28 确认闸门，下文箭头略）
+end note
+
 User -> Sup: 下达需求
+Sup -> CP: 扫描历史检查点遗留事项
 Sup -> CP: 创建检查点（任务原文 / 会话 ID 字段）
-Sup -> User: 复述需求 + 验收标准，请求确认
+Sup -> User: 复述需求 + 验收标准 + 遗留事项清单，请求确认
 User --> Sup: 确认（记录 supervisorSessionId）
 
 Sup -> Coder: Task(需求 + 文档 + 检查点路径)
@@ -364,8 +387,10 @@ else testVerdict = FAIL
 end
 
 User --> Sup: 确认交付
-Sup -> Coder: 推 PR 分支（用户已授权）
+Sup -> Coder: 同步 origin/develop 后推 develop_opencode，\n开 PR（base=develop，用户已授权）
 Sup -> Rev: gh pr review（终态评审留痕）
+Sup -> Coder: evidence manifest 写 PR description
+Sup -> CP: 回写遗留事项（清偿/移交）
 Sup -> User: 汇报合入请求
 
 @enduml
@@ -381,6 +406,16 @@ Sup -> User: 汇报合入请求
 - **用户中途放弃**：告知 supervised-coding"放弃任务 <task-id>" → 置 `status=cancelled`、`endReason=user_cancelled` → 检查点保留 30 天供审计（supervised-coding 记录创建时间，超期后可清理）
 - **超轮/乒乓**：置 `status=blocked` + endReason → 停止循环 → 上报用户，用户决定"继续（提高 maxRounds）/ 放弃 / 人工接管"
 - 已 approved 但用户不确认交付：保持 approved 状态，检查点不删除
+
+### 4.6 新任务开工：历史遗留事项检查（D29）
+
+原设计各检查点彼此独立，"P2 清单移交 M2"类事项只活在旧文件里、靠人记。修订为开工强制清偿检查：
+
+- supervised-coding 在创建新检查点前，扫 `.opencode/workflows/` 既有检查点（`_template.md` 除外）：逐个读 status 与"遗留事项"小节，以及轮次记录中"移交/待办"类条目
+- **未了结判定**：status ∉ {done, cancelled}，或"遗留事项"小节存在未勾选项
+- 有未了结事项 → 并入需求确认：与"需求 + 验收标准"一起复述给用户，**默认并入本次任务范围处理，含相应测试用例的更新**（验收口径变化经用户确认后由 supervised-coding 用 edit 落笔到用例文档——coder 仍禁改验收依据）
+- 用户明示豁免/再移交 → 在新检查点记录去向；处理完毕后回写原检查点（勾选 + 来源任务 ID）
+- 交付/终态时反向回写本任务检查点的"遗留事项"小节：本轮清偿了哪些、新移交哪些（模板已内置该小节）
 
 ---
 
@@ -436,7 +471,7 @@ Sup -> User: 汇报合入请求
 | 角色 | 放行 | 拦截/询问 |
 |---|---|---|
 | supervised-coding | git status/log/diff/rev-parse | 其余全部 ask（含 push/merge） |
-| coder | 全部 | push/pull/cherry-pick/revert 弹确认（ask）；merge、remote 变更、reset --hard、clean、rm -rf（deny） |
+| coder | 全部 | push/pull/cherry-pick/revert 弹确认（ask）；merge、remote 变更、reset --hard、clean、rm -rf（deny）；**例外（D30）**：`git merge origin/develop*`、`git merge --no-edit origin/develop*`、`git rebase origin/develop*`（同步 develop 进 develop_opencode 专用，allow） |
 | tester | 只读 git（含 rev-parse）+ cargo/npm/pnpm/npx/yarn/bun 全族 | 其余 ask |
 | committer | 只读 git（diff/status/log/show/rev-parse）+ gh pr diff/view/review/comment | 其余 deny |
 
@@ -446,16 +481,17 @@ Sup -> User: 汇报合入请求
 
 1. 在仓库根启动 opencode（配置加载前提）
 2. Tab 切换到 supervised-coding 直接下达"目标项目与需求"
-3. supervised-coding 会先**复述需求请求确认**，确认后开始循环；push/merge 时 opencode 会弹出确认
-4. **中断恢复**：重启 opencode → 重新进入 supervised-coding → 输入"继续任务 <task-id>" → supervised-coding 读检查点按 §4.3 恢复语义继续
-5. **放弃任务**：告诉 supervised-coding"放弃任务 <task-id>"
-6. 观察点：检查点文件 `workflows/<task-id>.md` 实时更新
+3. supervised-coding 会先**扫历史检查点的遗留事项**，连同"需求 + 验收标准"复述请求确认（未了结事项默认并入本任务）；确认后开始循环
+4. **每次调用 subagent 前 supervised-coding 会先发调用预告（角色+目的+要点），等你确认后才调用**（D28）；push/merge 时 opencode 会弹出确认
+5. **中断恢复**：重启 opencode → 重新进入 supervised-coding → 输入"继续任务 <task-id>" → supervised-coding 读检查点按 §4.3 恢复语义继续（恢复场景同样逐次调用预告）
+6. **放弃任务**：告诉 supervised-coding"放弃任务 <task-id>"
+7. 观察点：检查点文件 `workflows/<task-id>.md` 实时更新
 
 ---
 
 ## 8. 设计依据（决策记录）
 
-> 本文档由 2026-08 的多轮讨论沉淀。D1-D12 为初版决策，D13-D20 为首轮审阅修订，D21-D25 为二次迭代（改名体系、命名划分、skill 体系调研），D26-D27 为三轮修订（护栏加固、状态机一致性、回 spec 路径）。
+> 本文档由 2026-08 的多轮讨论沉淀。D1-D12 为初版决策，D13-D20 为首轮审阅修订，D21-D25 为二次迭代（改名体系、命名划分、skill 体系调研），D26-D27 为三轮修订（护栏加固、状态机一致性、回 spec 路径），D28-D30 为四轮修订（调用前确认、遗留事项清偿、develop_opencode 分支策略）。
 
 ### D1. 为什么不用 GitHub Issue/PR 作为 agent 间通信媒介
 
@@ -598,7 +634,7 @@ clowder F253 的"盲点正交性"：不同模型族有不同系统性盲点，�
 初版设计"循环内不提交"存在逻辑缺陷：HEAD 不变则 `testedSha`/`reviewedSha` 全程一致，**stale 校验失效**，恢复语义中的 SHA 回滚判断也无从谈起。修正：
 
 - **每轮 coder 完成后本地 commit**（`[<taskId>] R<n>`）：HEAD 前进使双 SHA 校验真正生效（修复轮 commit 后，上一轮 verdict 自动 stale）；崩溃恢复可 `git log` 回溯已完成轮次
-- **push 仅发生在交付阶段**（用户确认后推 PR 分支）：本地 commit 不发布，不违反"授权不能自动"（P1/D8）
+- **push 仅发生在交付阶段**（用户确认后推 `develop_opencode`，见 D30）：本地 commit 不发布，不违反"授权不能自动"（P1/D8）
 - coder 权限 push 全 ask（D15）与此一致：PR 分支 push 是交付阶段被指示的授权操作，推送时弹用户确认
 
 ### D21. 模式族命名：agent 名 = 工作模式（2026-08-12 二次迭代）
@@ -671,6 +707,22 @@ clowder `fresh-context-review` 硬规则与本方案方向相反：clowder 要�
 
 **修订**：committer 输出新增"需求边界问题"分类（验收标准与实现行为矛盾、需求歧义/不自洽——与代码问题分开）；supervised-coding 检测到 → 回 `spec_confirm` 把问题原文复述给用户确认/更新任务原文，**不经 coder**；纯代码问题才走 fixing。round 计数不清零（回 spec 是修正方向，不是重来）。
 
+### D28. subagent 调用前用户确认（2026-08-15 四轮修订）
+
+编排自动化跑通后用户要求收紧观察粒度：supervised-coding 每次 Task 调用（coder/tester/committer，含首次、续接、打回重跑、恢复场景）前，先向用户发"调用预告"（目标角色 + 本次目的 + 传入要点），用户同意后才执行。代价是每轮 2-3 次额外交互；收益是每个角色介入前用户可纠偏（改输入、改范围、跳过），也为人工观察模型行为留出决策点。预告是轻量文本确认，不新增状态机状态。
+
+### D29. 新任务开工必读历史检查点（遗留事项清偿，2026-08-15 四轮修订）
+
+原设计检查点彼此独立，上一任务"移交 M2 / P2 清单"类事项只活在旧文件里，靠人记。修订（见 §4.6）：新任务开工（步骤 0）先扫 `.opencode/workflows/` 历史检查点的 status 与"遗留事项"小节，未了结事项默认并入本次任务范围处理，**含相应测试用例的更新**——验收口径变化经用户确认后由 supervised-coding 用 edit 落笔到用例文档（coder 仍禁改验收依据，维持三层分离）；处理完毕回写原检查点。模板新增"遗留事项（跨任务移交）"小节，使移交显式化、后续任务机器可读。
+
+### D30. develop_opencode 固定提交分支 + 提交前同步 develop（2026-08-15 四轮修订）
+
+task-pulsepet-m1 交付后用户定案（该检查点"交付后约定"节）固化为长期协议：
+
+- **固定分支**：coder 的开发/提交/推送一律在 `develop_opencode`；PR 目标固定 `develop`；合并后远端分支保留不删，后续任务继续使用
+- **提交前同步**：每次本地 commit 前 `git fetch origin` → 将 `origin/develop` merge（或 rebase）进 `develop_opencode`，确保分支不落后于 develop；交付 push 前同样先同步再推
+- **权限例外**：`git merge*` 整体 deny 不变（D15），仅精确放行 `git merge origin/develop*` / `git merge --no-edit origin/develop*` / `git rebase origin/develop*`（同步专用动作，allow）——延续 D15"匹配动作而非分支名"的思路，授权粒度收到最小；其余 merge（任意分支）仍 deny
+
 ---
 
 ## 9. 已知限制与后续演进
@@ -685,6 +737,8 @@ clowder `fresh-context-review` 硬规则与本方案方向相反：clowder 要�
 - **平台验证受限**：本地只能验证当前平台行为（如 macOS），跨平台行为靠 CI/手动
 - **检查点文件漂移风险**：文件与代码短暂不一致，靠双 SHA 校验兜底
 - **需求确认代价**：每任务多一次用户交互（换取方向正确性）
+- **调用确认交互成本**：每次 subagent 调用前需用户确认（D28），任务耗时随人工响应增加
+- **同步冲突成本**：commit 前同步 develop（D30）可能引入冲突，由 coder 当轮消化；develop 频繁变动时同步开销放大
 
 ### 演进方向
 
