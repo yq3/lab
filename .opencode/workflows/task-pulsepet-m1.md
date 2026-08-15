@@ -61,6 +61,12 @@ updatedAt: 2026-08-15T00:45:00+08:00
 1. **状态圆点移除 → M2 待办（用户明确要求）**：宠物左上角状态圆点（idle 灰色圆点等）用户要求去掉，**在 M2 阶段移除**（更新原 P2-7：不再留待 M5，提前到 M2 修复；同时 TEST-CASES 补"画布无文字、无状态圆点"口径，原 P2-8 一并 M2 落实）。
 2. **交付执行（方式 C）**：coder 建分支 **`develop_opencode`**（自当前 HEAD efd67f1 创建，包含 R1-R4 全部提交）推远端（SSH，push 弹用户确认）→ 开 PR 到 `develop`（远端 develop 位于 4772e05，PR diff = M1 全部 4 个提交）→ Committer 执行 `gh pr review` 留痕 → Coder 写 evidence manifest JSON 进 PR description → 汇报合入请求。不自动合入。
 
+## 交付后约定（2026-08-15 用户定案，长期生效）
+
+1. **远端分支 `develop_opencode` 固定为 coder 的提交分支**（PR #1 合并后保留不删）：后续任务 coder 的开发/提交/推送一律在 `develop_opencode` 上进行，PR 目标始终是 `develop`。
+2. **coder 每次提交前必须先拉取 develop 的最新代码**：`git fetch origin` 后将 `origin/develop` 最新内容合并（或变基）进 `develop_opencode`，确保分支不落后；交付 push 前同样先同步再推。
+3. 已执行：`origin/develop` 已同步检查点提交（2610ef8 → 39eda2b）。
+
 ## R4 变更（2026-08-15 用户批准超轮继续，新增 3 项）
 
 1. **内容渲染缺陷按用户实测判定为已解决**：用户从应用程序实际启动 pulse-pet，确认**宠物可见且周围透明**（R3 的 `backgroundColor` 修复在真实环境有效）。Tester R3 自动化测量（移窗 diff=0 / bright=0 / DOM 空）与真实视觉不符——判定为 Tester 无头测量方法问题（透明合成窗口截图捕获不可靠），**不再是待修缺陷**。要求：coder 分析并说明 Tester 自动化测量出现假阴性的原因（透明窗口合成截图/CGWindowList 捕获的局限），给出**可信的运行时验证方法**（供 tester 复验复用）；tester 复验按用户实测为准。
