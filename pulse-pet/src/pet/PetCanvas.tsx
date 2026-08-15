@@ -49,7 +49,6 @@ function draw(
   ctx: CanvasRenderingContext2D,
   img: HTMLImageElement,
   sprite: SpriteState,
-  raw: string,
   now: number,
 ): void {
   const dpr = window.devicePixelRatio || 1;
@@ -73,67 +72,31 @@ function draw(
     );
   }
 
-  drawStatusBadge(ctx, sprite, raw);
+  drawStatusDot(ctx, sprite);
 }
 
-function drawStatusBadge(
-  ctx: CanvasRenderingContext2D,
-  sprite: SpriteState,
-  raw: string,
-): void {
+/**
+ * 画一个极小的彩色状态圆点（无文字、无白色底），用于 5 状态切换的可视验证。
+ *
+ * 正式 UI 不显示任何文字——状态通过动画表现（DESIGN §6.1 语义）；占位阶段
+ * 仅有 1 张 PNG，5 状态的视觉差异暂以颜色圆点标识，M5 切 atlas 后由动画本身区分。
+ */
+function drawStatusDot(ctx: CanvasRenderingContext2D, sprite: SpriteState): void {
   const color = STATE_COLORS[sprite];
-  const label = `${raw}\u2192${sprite}`;
-
-  ctx.font = "11px monospace";
-  const textW = ctx.measureText(label).width;
-  const chipW = textW + 28;
-  const chipH = 18;
-  const chipX = 6;
-  const chipY = 6;
-
-  ctx.fillStyle = "rgba(255,255,255,0.82)";
   ctx.beginPath();
-  roundRect(ctx, chipX, chipY, chipW, chipH, 9);
-  ctx.fill();
-
-  ctx.beginPath();
-  ctx.arc(chipX + 11, chipY + chipH / 2, 5, 0, Math.PI * 2);
+  ctx.arc(10, 10, 5, 0, Math.PI * 2);
   ctx.fillStyle = color;
   ctx.fill();
-
-  ctx.fillStyle = "#374151";
-  ctx.textAlign = "left";
-  ctx.textBaseline = "middle";
-  ctx.fillText(label, chipX + 21, chipY + chipH / 2 + 1);
-}
-
-function roundRect(
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  w: number,
-  h: number,
-  r: number,
-): void {
-  ctx.moveTo(x + r, y);
-  ctx.arcTo(x + w, y, x + w, y + h, r);
-  ctx.arcTo(x + w, y + h, x, y + h, r);
-  ctx.arcTo(x, y + h, x, y, r);
-  ctx.arcTo(x, y, x + w, y, r);
-  ctx.closePath();
 }
 
 export default function PetCanvas() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const raw = usePetStore((s) => s.raw);
   const sprite = usePetStore((s) => s.sprite);
   const next = usePetStore((s) => s.next);
 
-  // rAF 循环读取最新的 sprite/raw，避免每帧重建 effect
+  // rAF 循环读取最新的 sprite，避免每帧重建 effect
   const spriteRef = useRef(sprite);
-  const rawRef = useRef(raw);
   spriteRef.current = sprite;
-  rawRef.current = raw;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -170,7 +133,7 @@ export default function PetCanvas() {
     loadCatImage().then((img) => {
       const loop = (now: number) => {
         if (disposed) return;
-        draw(ctx, img, spriteRef.current, rawRef.current, now);
+        draw(ctx, img, spriteRef.current, now);
         rafId = requestAnimationFrame(loop);
       };
       rafId = requestAnimationFrame(loop);
