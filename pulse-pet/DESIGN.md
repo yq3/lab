@@ -353,6 +353,7 @@ CREATE TABLE reminder_logs (
 ```jsonc
 {
   "app": {
+    "macOSPrivateApi": true,        // macOS 透明窗口必需：启用 macos-private-api feature
     "windows": [
       {
         "label": "pet",
@@ -360,6 +361,7 @@ CREATE TABLE reminder_logs (
         "title": "PulsePet",
         "width": 220, "height": 220,
         "transparent": true,
+        "backgroundColor": "#00000000", // macOS 透明窗口必需：显式透明背景，否则 WKWebView 内容不渲染（见下）
         "decorations": false,
         "alwaysOnTop": true,
         "skipTaskbar": true,
@@ -378,6 +380,7 @@ CREATE TABLE reminder_logs (
         "label": "fireworks",
         "url": "index.html#/fireworks",
         "transparent": true,
+        "backgroundColor": "#00000000",
         "decorations": false,
         "alwaysOnTop": true,
         "skipTaskbar": true,
@@ -389,6 +392,8 @@ CREATE TABLE reminder_logs (
   }
 }
 ```
+
+> **macOS 透明窗口两个必要项（实测踩坑）**：① app 级 `macOSPrivateApi: true`（启用 `macos-private-api` feature，`transparent` 在 macOS 依赖它）；② 透明窗口（pet/fireworks）加 `backgroundColor: "#00000000"`。仅设 `transparent: true` 时 wry 只禁用 WKWebView 的 `drawsBackground`（白底消失），但 macOS 上缺 `underPageBackgroundColor` 会导致 WKWebView 内容（canvas 精灵等）整体不渲染——`backgroundColor` 让 wry 走完整透明路径（`drawsBackground` + `underPageBackgroundColor`），透明与内容两者兼得。
 
 `pet` 与 `fireworks` 运行时默认非穿透（可交互）；`ignoreCursorEvents` 不是 tauri.conf.json 配置字段（Tauri 2 schema 无此项），穿透仅通过运行时 `setIgnoreCursorEvents` 动态切换。M1-M5 阶段不做切换，pet 窗口始终为可交互态；M6 引入穿透开关后，开启穿透时鼠标事件全部透出，pet 窗口的右键菜单不再可达——此时右键菜单只通过托盘（§7.2）和全局热键（§7.3）唤起。
 
