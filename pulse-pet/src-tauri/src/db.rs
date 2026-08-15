@@ -26,6 +26,10 @@ pub fn init(app: &tauri::AppHandle) -> Result<Connection, String> {
 
 /// 幂等迁移：`PRAGMA user_version` 已到版本则跳过（后续启动无副作用）。
 pub fn migrate(conn: &Connection) -> Result<(), String> {
+    // P2-1：每次连接开启外键约束，否则 schema 里 `ON DELETE CASCADE` 不生效
+    // （M4/M7 的 reminders/todos 级联删除会静默失败）。
+    conn.execute_batch("PRAGMA foreign_keys=ON")
+        .map_err(|e| format!("enable foreign_keys: {e}"))?;
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .map_err(|e| format!("read user_version: {e}"))?;
@@ -113,5 +117,37 @@ mod tests {
         set_state(&conn, "pet.position.x", "456").unwrap();
         assert_eq!(get_state(&conn, "pet.position.x").as_deref(), Some("456"));
         assert_eq!(get_state(&conn, "pet.position.y"), None);
+    }
+
+    #[test]
+    fn foreign_keys_enabled_cascade_works() {
+        // P2-1：migrate 后外键约束开启，ON DELETE CASCADE 生效
+        let conn = Connection::open_in_memory().unwrap();
+        migrate(&conn).unwrap();
+        let fk: i64 = conn
+            .query_row("PRAGMA foreign_keys", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(fk, 1, "foreign_keys should be ON");
+
+        conn.execute(
+            "INSERT INTO reminders (kind, label, interval_minutes) VALUES ('hydration', '喝水', 30)",
+            [],
+        )
+        .unwrap();
+        let rid: i64 = conn.query_row("SELECT last_insert_rowid()", [], |r| r.get(0)).unwrap();
+        conn.execute(
+            "INSERT INTO reminder_logs (reminder_id, triggered_at) VALUES (?1, 'now')",
+            [rid],
+        )
+        .unwrap();
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM reminder_logs", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
+        conn.execute("DELETE FROM reminders WHERE id = ?1", [rid]).unwrap();
+        let after: i64 = conn
+            .query_row("SELECT COUNT(*) FROM reminder_logs", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(after, 0, "reminder_logs should cascade-delete with reminder");
     }
 }

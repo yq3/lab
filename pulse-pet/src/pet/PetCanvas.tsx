@@ -12,14 +12,6 @@ const EYE_LEFT = { x: 44, y: 40, w: 8, h: 8 };
 
 const FUR_COLOR = "#f4f4f7";
 
-const STATE_COLORS: Record<SpriteState, string> = {
-  idle: "#9ca3af",
-  thinking: "#3b82f6",
-  working: "#f59e0b",
-  success: "#22c55e",
-  error: "#ef4444",
-};
-
 let catImage: HTMLImageElement | null = null;
 let catImagePromise: Promise<HTMLImageElement> | null = null;
 
@@ -47,7 +39,7 @@ function isBlinking(now: number): boolean {
 
 function draw(
   ctx: CanvasRenderingContext2D,
-  img: HTMLImageElement,
+  img: HTMLImageElement | null,
   sprite: SpriteState,
   now: number,
 ): void {
@@ -55,6 +47,15 @@ function draw(
   const canvasW = computeCanvasSize(CSS_SIZE, dpr);
   const canvasH = canvasW;
   ctx.clearRect(0, 0, canvasW, canvasH);
+
+  if (!img) {
+    // P2-3：素材缺失时的纯色兜底——画一个居中圆（宠物轮廓占位），不崩、不白屏。
+    ctx.fillStyle = FUR_COLOR;
+    ctx.beginPath();
+    ctx.arc(canvasW / 2, canvasH / 2, canvasW / 2.6, 0, Math.PI * 2);
+    ctx.fill();
+    return;
+  }
 
   // 帧图按 min(canvasW/frameW, canvasH/frameH) 居中绘制，保持比例不裁剪
   const { dx, dy, dw, dh } = computeFrameRect(canvasW, canvasH, FRAME_W, FRAME_H);
@@ -71,22 +72,6 @@ function draw(
       EYE_LEFT.h * scale,
     );
   }
-
-  drawStatusDot(ctx, sprite);
-}
-
-/**
- * 画一个极小的彩色状态圆点（无文字、无白色底），用于 5 状态切换的可视验证。
- *
- * 正式 UI 不显示任何文字——状态通过动画表现（DESIGN §6.1 语义）；占位阶段
- * 仅有 1 张 PNG，5 状态的视觉差异暂以颜色圆点标识，M5 切 atlas 后由动画本身区分。
- */
-function drawStatusDot(ctx: CanvasRenderingContext2D, sprite: SpriteState): void {
-  const color = STATE_COLORS[sprite];
-  ctx.beginPath();
-  ctx.arc(10, 10, 5, 0, Math.PI * 2);
-  ctx.fillStyle = color;
-  ctx.fill();
 }
 
 export default function PetCanvas() {
@@ -117,9 +102,11 @@ export default function PetCanvas() {
       canvas.style.height = `${CSS_SIZE}px`;
     };
 
-    // 监听 dpr 变化（拖到不同缩放比的屏幕）重设画布尺寸（TC-SP-03）
+    // 监听 dpr 变化（拖到不同缩放比的屏幕）重设画布尺寸（TC-SP-03）。
+    // P2-4：rAF 延迟一帧再 resize，防 dpr 回落竞态（matchMedia 触发时
+    // window.devicePixelRatio 可能仍是旧值，等一帧让其稳定）。
     const onDprChange = () => {
-      resize();
+      requestAnimationFrame(resize);
       if (media) media.removeEventListener("change", onDprChange);
       media = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
       media.addEventListener("change", onDprChange);
@@ -130,14 +117,21 @@ export default function PetCanvas() {
     media.addEventListener("change", onDprChange);
     window.addEventListener("resize", onDprChange);
 
-    loadCatImage().then((img) => {
-      const loop = (now: number) => {
-        if (disposed) return;
-        draw(ctx, img, spriteRef.current, now);
+    // P2-3：加载失败时 console.error 并用纯色兜底（img 置 null 后 draw 走纯色分支），
+    // 不再产生 unhandled rejection。
+    loadCatImage()
+      .catch((err) => {
+        console.error("[pulsepet] placeholder image load failed:", err);
+        return null;
+      })
+      .then((img) => {
+        const loop = (now: number) => {
+          if (disposed) return;
+          draw(ctx, img, spriteRef.current, now);
+          rafId = requestAnimationFrame(loop);
+        };
         rafId = requestAnimationFrame(loop);
-      };
-      rafId = requestAnimationFrame(loop);
-    });
+      });
 
     return () => {
       disposed = true;
