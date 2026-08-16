@@ -32,7 +32,8 @@
   2. `pet` 初始运行时非穿透（`ignoreCursorEvents` 非 tauri.conf.json 配置字段，运行时默认 `false` 可拖拽/右键；对应 DESIGN-REVIEW A1 修正后的默认值，运行时查询确认）；
   3. `panel` 窗口隐藏（`visible:false`）；
   4. `fireworks` 窗口隐藏；
-  5. 托盘图标出现。
+  5. 托盘图标出现；
+  6. **pet 画布无任何文字渲染、无状态圆点**（M1 R4 已移除状态文字；M2 起移除状态圆点，画布仅显示宠物本身；状态通过动画表现，DESIGN §6.1）。
 
 ### TC-APP-02 单实例锁
 
@@ -126,7 +127,7 @@
 - **追加步骤**：在用户 `opencode.json` 的 plugin 段前后加注释行与尾逗号 → 再次运行 install.sh。
 - **预期**：
   1. `pulse-pet-hook.js` 拷贝到 `~/.config/opencode/plugins/`；
-  2. `opencode.json` 的 `plugin` 数组合并 `pulse-pet` 一项，带 `--pulse-pet-managed` 标记；
+  2. `opencode.json` 的 `plugin` 数组合并 `pulse-pet` 一项，带 `--pulse-pet-managed` 标记；本地项为路径 spec（如 `./plugins/pulse-pet-hook.js`，裸名会被 opencode 当 npm 包——M2 实测修正）；
   3. 用户原有 plugin 项保留不误删；
   4. 重复安装幂等（不产生重复项）；
   5. JSONC 感知：注释行与尾逗号保留，合并后文件仍为合法 opencode 配置（参考 openpets `opencode-config.ts`）。
@@ -264,7 +265,7 @@
 - **步骤**：模拟慢连接与长响应（可用测试客户端拖慢）：
   1. 连接建立后迟迟不发请求；
   2. 请求后迟迟不读响应。
-- **预期**：连接 ~2s 超时断开；响应 ~3s 超时；单次连接 `Connection: close`（一次性）。
+- **预期**（M2 实测后措辞）：服务端 accept 周期 2s（`recv_timeout`，保证线程不阻塞、抗慢连接打挂）；响应超时由插件侧 `AbortSignal.timeout(3000)` 客户端兜底（服务端处理为纯内存操作无慢路径）；单次连接 `Connection: close`（一次性，响应后连接关闭，同 socket 复用被拒）。
 
 ### TC-EV-15 body 上限
 
@@ -510,6 +511,7 @@
 - **前置**：M1-M4 占位阶段（内置 1 张 PNG 128×128）。
 - **步骤**：依次驱动 idle / thinking / working / success / error。
 - **预期**：5 种状态均有对应画面；占位阶段每状态渲染单帧（单图 PNG，无多帧可切），状态切换时画面立即更换；rAF 循环按 60fps 维持动画时序；状态降级映射单独验证见 TC-SP-01b。
+- **追加（M1 R4 用户意见 / M2 P2-7 定案）**：画布无任何文字渲染、无状态圆点（状态文字 M1 已移除；状态圆点 M2 移除）——状态只通过动画/画面表现，正式 UI 不显示调试徽标。
 
 ### TC-SP-01b 占位阶段状态降级映射
 
