@@ -2,7 +2,7 @@
 
 > 本文档是 `lab/.opencode/` 配置的权威设计文档：实现细节 + 设计依据（决策记录）。
 > 内容已去掉具体项目属性，适用于任何目标项目；迁移到其他仓库/全局配置时随本目录整体搬迁。
-> 版本：v9（2026-08-16，八轮修订：D36 模型 variant 修正 + 配置落项目级 `.opencode/opencode.json`；七轮见 D35，六轮见 D32-D34，五轮见 D31，四轮见 D28-D30，前三轮见 D15/D26-D27）
+> 版本：v9（2026-08-16，八轮修订：D36 推理强度改用官方 agent 选项 `reasoningEffort`，零额外配置；七轮见 D35，六轮见 D32-D34，五轮见 D31，四轮见 D28-D30，前三轮见 D15/D26-D27）
 
 ---
 
@@ -99,13 +99,13 @@ supervised-coding（编排者，便宜模型）
 
 | 角色 | 模型 | 定位理由 |
 |---|---|---|
-| supervised-coding | `deepseek/deepseek-v4-flash` + `variant: max` | 只做调度与状态机，便宜快 |
-| coder | `zhipuai-coding-plan/glm-5.3` + `variant: max` | 主力实现，能力强 |
-| tester | `deepseek/deepseek-v4-flash` + `variant: max` | 跑命令+写测试为主，便宜；质量不足可升级 |
-| committer | `deepseek/deepseek-v4-pro` + `variant: max` | 独立模型族，审慎推理（跨族盲点正交，见 D11） |
+| supervised-coding | `deepseek/deepseek-v4-flash` + `reasoningEffort: max` | 只做调度与状态机，便宜快 |
+| coder | `zhipuai-coding-plan/glm-5.3` + `reasoningEffort: max` | 主力实现，能力强 |
+| tester | `deepseek/deepseek-v4-flash` + `reasoningEffort: max` | 跑命令+写测试为主，便宜；质量不足可升级 |
+| committer | `deepseek/deepseek-v4-pro` + `reasoningEffort: max` | 独立模型族，审慎推理（跨族盲点正交，见 D11） |
 
 > 模型 ID 已用 `opencode models` 验证存在（2026-08-14）。⚠️ subagent 不显式写 `model` 会**继承调用者的模型**，三个 subagent 必须各自写死。
-> **max 用独立 `variant:` 字段指定，不要写 `model@max`**（D36）：官方文档（/docs/agents）里 agent 的 model 格式就是 `provider/model-id`，没有 `@variant` 后缀写法；v1.18.18 实现也只按 `/` 切分，`model: deepseek/deepseek-v4-flash@max` 会把 `@max` 留在模型 id 里 → TUI 报 "configured model ... is not valid"。正确写法是 `model:` 只写基础 id，另起一行 `variant: max`。deepseek-v4* 的 max variant 由 opencode 内置插件自动生成（/docs/models 的 Built-in variants："Many other providers have built-in defaults too"）；glm-5.3 被插件排除规则拦截，max 需按官方 Custom variants 格式注册在**项目级配置** `.opencode/opencode.json`（`provider.zhipuai-coding-plan.models.glm-5.3.variants.max.reasoningEffort = "max"`），随仓库搬迁，无需额外同步。
+> **推理强度用官方 agent 选项 `reasoningEffort: max` 直接指定**（D36 终版）：官方文档 /docs/agents "Additional" 一节——agent 配置里未列出的字段会作为模型选项直通 provider（camelCase，请求体转 `reasoning_effort`，mock API 实测生效，可覆盖模型级默认值）。**不要写 `model@max`**：v1.18.18 的 agent model 解析只按 `/` 切分，`model: deepseek/deepseek-v4-flash@max` 会把 `@max` 留在模型 id 里 → 目录查不到 → TUI 报 "configured model ... is not valid"。也不需要 `variant:` 字段或 variants 注册——零额外配置，随仓库搬迁即用。
 
 ---
 
@@ -740,18 +740,17 @@ task-pulsepet-m1 交付后用户定案（该检查点"交付后约定"节）固�
 
 注意：variant 支持列表随 models.dev 数据更新（opencode 每 5 分钟刷新缓存），换模型时须重新确认目标 variant 存在（`~/.cache/opencode/models.json` 或 TUI `/models`）。
 
-### D36. `variant:` 是独立字段，`model@max` 写法无效（2026-08-16 八轮修订）
+### D36. 推理强度用 agent 选项 `reasoningEffort`，`model@max` 与 `variant:` 均弃用（2026-08-16 八轮修订）
 
 D31 落地后切换到任一 agent 即报错：`Agent Supervised-Coding's configured model deepseek/deepseek-v4-flash@max is not valid`（TUI 切换 agent 时校验模型 ID，不合法拒绝启用）。
 
-**根因（两层）**：
+**第一层根因（写法）**：agent 的 model 解析（`ModelV2.parse`）只按 `/` 切分，`deepseek/deepseek-v4-flash@max` 解析为 `{providerID: deepseek, id: "deepseek-v4-flash@max", variant: undefined}`——`@max` 留在模型 id 里，目录中不存在该 id 的条目 → 服务端 `ModelUnavailableError`、TUI 判无效。官方文档 /docs/agents 的 model 格式也只有 `provider/model-id`，无 `@variant` 后缀写法。
 
-1. **`model@max` 后缀写法在 v1.18.18 不生效**：agent 的 model 解析（`ModelV2.parse`）只按 `/` 切分，`deepseek/deepseek-v4-flash@max` 解析为 `{providerID: deepseek, id: "deepseek-v4-flash@max", variant: undefined}`——`@max` 留在模型 id 里，目录中不存在该 id 的条目 → 服务端 `ModelUnavailableError`、TUI 判无效。正确姿势是 `model:` 只写基础 id，用**独立 `variant:` 字段**（config 插件读 `variant` 设置 `h.model.variant`，产物为 `{id: base, variant: "max"}`，目录查得到、`withVariant` 正常应用）。
-2. **max variant 的来源**：v1.18.18 二进制内置 variant 插件（比 GitHub tag 源码更全）对 `@ai-sdk/openai-compatible` 且 api.id 含 `deepseek-v4` 的模型自动生成 `low/medium/high/max`（`reasoningEffort`）——deepseek-v4-flash / deepseek-v4-pro 的 max 免配置；`glm-5.3` 被排除规则（`id 含 "glm"` 且非 glm-5.2 族）拦截 → 无任何 variant，max 需注册在**项目级配置** `.opencode/opencode.json`：`provider.zhipuai-coding-plan.models.glm-5.3.variants.max.reasoningEffort = "max"`（**官方 Custom variants 格式**：variant 值直接写选项，camelCase，/docs/models；不要包 `body:` 再写 snake_case，那样请求里不会带出 `reasoning_effort`）。
+**中间探索（弃用）**：曾试独立 `variant: max` 字段 + 项目级 `.opencode/opencode.json` 注册自定义 variants。`variant:` 是真实 schema 字段（config 插件支持），deepseek-v4* 的 max 也确有内置插件自动生成（openai-compatible + api.id 含 deepseek-v4 → 生成 low/medium/high/max），glm-5.3 被插件排除规则拦截需配置注册——**能跑但绕远**。
 
-**修订**：4 个 agent 的 frontmatter 改为 `model: <base id>` + `variant: max` 两行；三模型的 max 注册落在**项目级配置** `.opencode/opencode.json`（deepseek 冗余但无害，glm-5.3 必需；随仓库搬迁免同步，全局配置已还原为空壳）。README §3.3 表格与注记同步更正。
+**终版（选定）**：直接按官方文档 /docs/agents "Additional" 一节，把 `reasoningEffort: max` 写在 agent frontmatter（未列出的字段 → 迁移进 agent request → 作为模型选项直通 provider，camelCase 在 openai-compatible 协议层转 `reasoning_effort`）。**mock API 实测（2026-08-16）**：agent 带 `reasoningEffort: max` 时主调用请求体含 `reasoning_effort: max`（覆盖模型级默认 default），不带时无该覆盖——确认生效链路完整。4 个 agent 统一为 `model: <base id>` + `reasoningEffort: max`，删除 `.opencode/opencode.json`（零额外配置，随仓库搬迁即用）。
 
-**经验**：① agent 指定 variant 用独立 `variant:` 字段（/docs/agents 未提及，但 schema 与实现支持），不要拼进 model id；② variant 可用性以运行版二进制内置插件 + 配置合并结果为准（插件规则因版本而异，升级后须复测）；③ 自定义 variants 按官方格式写（/docs/models Custom variants：对象形式、值直接写 camelCase 选项），v1 config 迁移会转成 v2 内部数组。
+**经验**：① 控制推理强度首选官方 agent 选项 `reasoningEffort`（docs/agents Additional），与模型/版本无关、零配置；② 不要拼 `model@max`（v1.18.18 解析只切 `/`）；③ 验证配置是否真的生效：本地 mock OpenAI-compatible 服务 + 抓请求体（`opencode run --agent` 实测），不要只看配置校验通过。
 
 ### D32. tester 权限扩容：放行只读探查与 node（2026-08-16 六轮修订，首跑实测反馈）
 
