@@ -14,8 +14,8 @@ testedSha: 53f495b9f9159c09ce7153073ed6e08d887ca0eb
 reviewedSha: 53f495b9f9159c09ce7153073ed6e08d887ca0eb
 filesChanged: [pulse-pet/src-tauri/src/http_server.rs, pulse-pet/src-tauri/src/session_state.rs, pulse-pet/src-tauri/src/runtime.rs, pulse-pet/src-tauri/src/lib.rs, pulse-pet/src-tauri/src/db.rs, pulse-pet/src-tauri/src/windows.rs, pulse-pet/src-tauri/Cargo.toml, pulse-pet/src-tauri/Cargo.lock, pulse-pet/opencode-plugin/pulse-pet-hook.js, pulse-pet/opencode-plugin/pulse-pet-hook.d.ts, pulse-pet/opencode-plugin/opencode-config.mjs, pulse-pet/opencode-plugin/opencode-config.d.mts, pulse-pet/opencode-plugin/install.sh, pulse-pet/opencode-plugin/install.ps1, pulse-pet/opencode-plugin/README.md, pulse-pet/src/lib/http-bridge.ts, pulse-pet/src/lib/agent-adapter.ts, pulse-pet/src/lib/adapters/opencode.ts, pulse-pet/src/pet/petStore.ts, pulse-pet/src/pet/PetCanvas.tsx, pulse-pet/src/main.tsx, pulse-pet/package.json, pulse-pet/package-lock.json, pulse-pet/src/lib/opencode.test.ts, pulse-pet/src/lib/http-bridge.test.ts, pulse-pet/src/lib/opencode-config.test.ts, pulse-pet/src/lib/plugin-hook.test.ts, pulse-pet/src/lib/plugin-http.test.ts]
 endReason: null
-createdAt: 2026-08-15T23:00:00+08:00
-updatedAt: 2026-08-16T01:05:00+08:00
+createdAt: 2026-08-15T22:43:26+08:00
+updatedAt: 2026-08-16T08:44:20+08:00
 ---
 
 # task-pulsepet-m2: pulse-pet M2 事件链路开发
