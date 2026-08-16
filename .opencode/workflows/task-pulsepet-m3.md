@@ -13,10 +13,10 @@ reviewVerdict: APPROVED
 testedSha: affe86a3bca255a34c5f0ed03520dfac588e89a5
 reviewedSha: affe86a3bca255a34c5f0ed03520dfac588e89a5
 # 以上 SHA = coder 最近一轮本地 commit（[taskId] R<n>）后的 HEAD；修复轮 commit 后 reviewedSha 置空待重审
-filesChanged: []
+filesChanged: [pulse-pet/README.md, pulse-pet/opencode-plugin/opencode-config.mjs, pulse-pet/opencode-plugin/pulse-pet-hook.d.ts, pulse-pet/opencode-plugin/pulse-pet-hook.js, pulse-pet/src-tauri/Cargo.lock, pulse-pet/src-tauri/Cargo.toml, pulse-pet/src-tauri/src/http_server.rs, pulse-pet/src-tauri/src/lib.rs, pulse-pet/src-tauri/src/runtime.rs, pulse-pet/src-tauri/src/session_state.rs, pulse-pet/src-tauri/src/token_stats.rs, pulse-pet/src/lib/bubble.test.ts, pulse-pet/src/lib/bubble.ts, pulse-pet/src/lib/http-bridge.ts, pulse-pet/src/lib/opencode-config.test.ts, pulse-pet/src/lib/plugin-hook.test.ts, pulse-pet/src/lib/plugin-http.test.ts, pulse-pet/src/lib/token-chart.test.ts, pulse-pet/src/lib/token-chart.ts, pulse-pet/src/lib/token-stats.test.ts, pulse-pet/src/lib/token-stats.ts, pulse-pet/src/panel/Panel.tsx, pulse-pet/src/panel/TokenStats.tsx, pulse-pet/src/pet/Bubble.tsx, pulse-pet/src/pet/Pet.tsx, pulse-pet/src/pet/petStore.test.ts, pulse-pet/src/pet/petStore.ts, pulse-pet/src/styles/global.css]
 endReason: null
 createdAt: 2026-08-16T08:58:21+08:00
-updatedAt: 2026-08-16T10:15:26+08:00
+updatedAt: 2026-08-16T10:17:41+08:00
 ---
 
 # task-pulsepet-m3: pulse-pet M3 token 统计
