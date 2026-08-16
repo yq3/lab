@@ -212,15 +212,16 @@ function blitCat(cells, ox, oy, { eyes = "open", headShift = 0, slump = 0 } = {}
   }
   const adj = (p) => ({ x: p.x + ox + headShift, y: p.y + oy + slump });
   if (eyes === "blink") {
-    for (const p of eyePts) {
-      const q = adj(p);
-      put(cells, q.x, q.y, ".");
-    }
-    // 下眼皮一条线
+    // 闭眼视觉增强（R1 修复轮 4）：眼位 + 左右各 1 格整块画 K 色横条
+    //（2 格高 × 4 格宽 ≈ 8×16px 深色条），替代旧"清空 + 1 格下眼皮细线"——
+    // 旧画法在 220px 窗口几乎不可见（眨眼仅占 idle 循环 20% 时间）。
     for (const e of [EYE_L, EYE_R]) {
-      const q = adj({ x: e.x, y: e.y + 1 });
-      put(cells, q.x, q.y, "K");
-      put(cells, q.x + 1, q.y, "K");
+      for (let dy = 0; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 2; dx++) {
+          const q = adj({ x: e.x + dx, y: e.y + dy });
+          put(cells, q.x, q.y, "K");
+        }
+      }
     }
   } else if (eyes === "x") {
     for (const p of eyePts) {
@@ -256,11 +257,20 @@ function motionDashes(cells, side, frame) {
   if (side === "right" || side === "both") draw(CELL_W - 4);
 }
 
-/** 挥手：身体右侧举起的手臂（waving 行 3），高低交替。 */
+/**
+ * 挥手：猫身右侧外部举起的 K 线手臂（waving 行 3），高低交替。
+ * R1 修复轮 4：旧版画在格 x23-24/y12-17 —— 落在猫头正中且 W2 与行色同色
+ * 融为一体（"手臂长在头上"）。新版画在格 x34-44（猫头右缘 x33、猫身右缘
+ * x30 之外，与猫体无重叠），从肩侧 (34,29) 斜上举，K 色线条与尾巴同风格、
+ * 与浅色身体强对比。
+ */
 function waveArm(cells, frame) {
-  const top = frame % 2 === 0 ? 12 : 15;
-  for (let y = top; y <= 17; y++) put(cells, 23, y, y === 17 ? "K" : "W2");
-  put(cells, 24, top, "K");
+  const high = frame % 2 === 0;
+  const handY = high ? 20 : 23;
+  // 起点 (35,27)：身体顶行高度、猫头右缘(x33)与尾巴(y28+)之外——与猫体无重叠
+  thickLine(cells, 35, 27, 43, handY, "K");
+  // 手爪：末端 2×2 K 块（在斜线端点上再加大一点，提高可读性）
+  fillRectC(cells, 43, handY, 44, handY + 1, "K");
 }
 
 /** review：头顶感叹号，左右交替。 */
@@ -487,15 +497,15 @@ function drawDogFront(
   // 眼睛覆盖层（正面双眼，随头部平移）
   const adj = (p) => ({ x: p.x + ox + headShift, y: p.y + oy });
   if (eyes === "blink") {
+    // 闭眼视觉增强（与猫同款 K 横条，风格统一；R1 修复轮 4）：
+    // 眼位 + 左右各 1 格整块 K 横条（2 格高 × 4 格宽），替代旧"清空 + 细线"
     for (const e of [DOG_EYE_L, DOG_EYE_R]) {
-      for (let ey = 0; ey <= 1; ey++)
-        for (let ex = 0; ex <= 1; ex++) {
-          const q = adj({ x: e.x + ex, y: e.y + ey });
-          put(cells, q.x, q.y, ".");
+      for (let dy = 0; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 2; dx++) {
+          const q = adj({ x: e.x + dx, y: e.y + dy });
+          put(cells, q.x, q.y, "K");
         }
-      const q = adj({ x: e.x, y: e.y + 1 });
-      put(cells, q.x, q.y, "K"); // 下眼皮一条线
-      put(cells, q.x + 1, q.y, "K");
+      }
     }
   } else if (eyes === "x") {
     for (const e of [DOG_EYE_L, DOG_EYE_R]) {
