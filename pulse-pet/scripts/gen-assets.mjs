@@ -212,15 +212,19 @@ function blitCat(cells, ox, oy, { eyes = "open", headShift = 0, slump = 0 } = {}
   }
   const adj = (p) => ({ x: p.x + ox + headShift, y: p.y + oy + slump });
   if (eyes === "blink") {
-    // 闭眼视觉增强（R1 修复轮 4）：眼位 + 左右各 1 格整块画 K 色横条
-    //（2 格高 × 4 格宽 ≈ 8×16px 深色条），替代旧"清空 + 1 格下眼皮细线"——
-    // 旧画法在 220px 窗口几乎不可见（眨眼仅占 idle 循环 20% 时间）。
+    // 闭眼 = 单只眼睛变一条缝（R1 修复轮 5，用户最终口径 22:09）：
+    // 眼位保持原宽度（2 格），高度压成 1 格细缝——顶行清除、眼底行画 K 色缝。
+    // （e97a4ac 的 4 格宽整块 K 横条作废：不要横向拉长。）
     for (const e of [EYE_L, EYE_R]) {
-      for (let dy = 0; dy <= 1; dy++) {
-        for (let dx = -1; dx <= 2; dx++) {
-          const q = adj({ x: e.x + dx, y: e.y + dy });
-          put(cells, q.x, q.y, "K");
-        }
+      // 顶行（y）清除为透明
+      for (let dx = 0; dx <= 1; dx++) {
+        const q = adj({ x: e.x + dx, y: e.y });
+        put(cells, q.x, q.y, ".");
+      }
+      // 底行（y+1）K 色细缝（2 格宽 × 1 格高）
+      for (let dx = 0; dx <= 1; dx++) {
+        const q = adj({ x: e.x + dx, y: e.y + 1 });
+        put(cells, q.x, q.y, "K");
       }
     }
   } else if (eyes === "x") {
@@ -497,14 +501,17 @@ function drawDogFront(
   // 眼睛覆盖层（正面双眼，随头部平移）
   const adj = (p) => ({ x: p.x + ox + headShift, y: p.y + oy });
   if (eyes === "blink") {
-    // 闭眼视觉增强（与猫同款 K 横条，风格统一；R1 修复轮 4）：
-    // 眼位 + 左右各 1 格整块 K 横条（2 格高 × 4 格宽），替代旧"清空 + 细线"
+    // 闭眼 = 单只眼睛变一条缝（与猫同款 2 格宽 × 1 格高 K 细缝；R1 修复轮 5）。
+    // 注：wagging-doggy 定案不眨眼（idle 全程睁眼，见 dogFrameCells case 0），
+    // 此分支保留仅为与猫风格统一（如后续需要）。
     for (const e of [DOG_EYE_L, DOG_EYE_R]) {
-      for (let dy = 0; dy <= 1; dy++) {
-        for (let dx = -1; dx <= 2; dx++) {
-          const q = adj({ x: e.x + dx, y: e.y + dy });
-          put(cells, q.x, q.y, "K");
-        }
+      for (let dx = 0; dx <= 1; dx++) {
+        const q = adj({ x: e.x + dx, y: e.y });
+        put(cells, q.x, q.y, ".");
+      }
+      for (let dx = 0; dx <= 1; dx++) {
+        const q = adj({ x: e.x + dx, y: e.y + 1 });
+        put(cells, q.x, q.y, "K");
       }
     }
   } else if (eyes === "x") {
@@ -536,10 +543,10 @@ function dogFrameCells(row, col) {
   let dx = 0;
   let dy = 0;
   switch (row) {
-    case 0: // idle：尾巴自然轻摆（仅 col2-3 端点下沉 2 格，其余帧中位静止）
-      // + col1-2 眨眼 + 长帧轻微下沉（呼吸感）
+    case 0: // idle：不眨眼（用户定案 22:09：idle 各帧均睁眼）；尾巴自然轻摆
+      // （仅 col2-3 端点下沉 2 格）+ 长帧轻微下沉（呼吸感）
+      opts.eyes = "open";
       opts.tail = col === 2 || col === 3 ? "down" : "mid";
-      opts.eyes = col === 1 || col === 2 ? "blink" : "open";
       dy = col >= 4 ? 1 : 0;
       break;
     case 1: // running-right：左右轻晃 + 左侧速度线
