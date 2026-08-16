@@ -54,10 +54,10 @@ describe("FireworksEngine（TC-RM-09 可断言逻辑层）", () => {
     expect(e.isDone()).toBe(true);
   });
 
-  it("炸裂点=传入的目标点（屏幕正中心，DESIGN §5.3 用户补充需求）", () => {
+  it("炸裂点=传入的目标点（屏幕中轴+0.3 屏高，DESIGN §5.3 用户定案）", () => {
     for (const target of [
-      { x: 735, y: 478 }, // 单显示器：屏幕正中心
-      { x: 100, y: 100 }, // 任意目标（如另一显示器的中心）
+      { x: 735, y: 286.8 }, // 单显示器：中轴 + 0.3 屏高（2940×1912 dpr2）
+      { x: 100, y: 100 }, // 任意目标（如另一显示器的绽放点）
     ]) {
       const e = new FireworksEngine({ ...PLAY, target_x: target.x, target_y: target.y });
       // 逐帧步进到炸裂

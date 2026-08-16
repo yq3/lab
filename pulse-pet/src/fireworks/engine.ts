@@ -2,7 +2,7 @@
  * 烟花粒子引擎（DESIGN §5.3，TC-RM-09/10）——纯逻辑、无 DOM，供 vitest 直接单测。
  *
  * - 一发"流光花瓣"烟花：上升段（shell 沿 参数化弹道从发射点飞向目标点 +
- *   拖尾流光粒子）→ **在目标点（= 宠物当前所处屏幕的正中心，Rust 侧算好经
+ *   拖尾流光粒子）→ **在目标点（= 宠物当前所处屏幕的中轴线 + 屏高 0.3 处，Rust 侧算好经
  *   payload 传入）精确炸裂**成 320-440 枚花瓣粒子（HSL 渐变 + 摇曳 + alpha fade）；
  * - 全程粒子数（含流光）峰值 ∈ [300, 500]；
  * - 总时长 ~3.8s，硬上限 5s（isDone 上界，对应 TC-RM-09 "3-5s 内自动 hide"）；
@@ -65,7 +65,7 @@ export interface Particle {
 }
 
 /**
- * 上升弹：从发射点（宠物位置）沿参数化弹道飞向目标点（屏幕正中心），
+ * 上升弹：从发射点（宠物位置）沿参数化弹道飞向目标点（屏幕中轴 + 0.3 屏高），
  * 到达即在目标点精确炸裂（DESIGN §5.3 用户补充需求）。
  */
 interface Shell {
@@ -151,7 +151,7 @@ export class FireworksEngine {
       const s = this.shell;
       s.t += dtMs / s.durMs;
       if (s.t >= 1) {
-        // 到达目标点 → 精确在该点炸裂（屏幕正中心）
+        // 到达目标点 → 精确在该点炸裂（屏幕中轴 + 0.3 屏高，DESIGN §5.3）
         this.burst(s.tx, s.ty);
       } else {
         // easeOutQuad 插值（先快后慢的"升空"观感）+ 正弦上拱弧线
@@ -203,7 +203,7 @@ export class FireworksEngine {
     }
   }
 
-  /** 在 (bx, by) 精确炸裂（= payload 目标点 = 屏幕正中心）。 */
+  /** 在 (bx, by) 精确炸裂（= payload 目标点 = 屏幕中轴 + 0.3 屏高）。 */
   private burst(bx: number, by: number): void {
     this.burstDone = true;
     this.burstPoint = { x: bx, y: by };
@@ -256,7 +256,7 @@ export class FireworksEngine {
     return this.burstDone;
   }
 
-  /** 实际炸裂点（未炸裂为 null；应等于 payload 的 target = 屏幕正中心）。 */
+  /** 实际炸裂点（未炸裂为 null；应等于 payload 的 target）。 */
   getBurstPoint(): { x: number; y: number } | null {
     return this.burstPoint;
   }

@@ -62,7 +62,7 @@ pub struct TriggerPayload {
 }
 
 /// 烟花播放指令 payload（物理→逻辑像素换算后的 CSS 坐标，前端 ×dpr 进 canvas）。
-/// `target` = 宠物当前所处显示器的正中心（DESIGN §5.3：绽放点固定于该屏中心）。
+/// `target` = 宠物当前所处显示器中轴线 + 屏高 0.3 处（DESIGN §5.3 绽放点定案）。
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct PlayPayload {
     pub log_id: i64,
@@ -598,8 +598,8 @@ fn fire_and_notify(app: &tauri::AppHandle, fired: &[ReminderRule]) {
 
 /// 计算烟花 play payload（DESIGN §5.3 用户补充需求）：
 /// - 发射点 = pet 窗口中心；
-/// - **绽放点 = pet 当前所处显示器（monitor）的正中心**（多显示器取宠物所在屏；
-///   单显示器即屏幕中心）；
+/// - **绽放点 = pet 当前所处显示器（monitor）的水平中轴 + 屏高 × 0.3**
+///   （多显示器取宠物所在屏；单显示器即当前屏）；
 /// - 坐标换算到 fireworks 窗口逻辑像素（payload 消费方 ×dpr 进 canvas）。
 fn compute_play_payload(app: &tauri::AppHandle, log_id: i64) -> PlayPayload {
     let fw = app.get_webview_window("fireworks");
@@ -639,10 +639,10 @@ fn compute_play_payload(app: &tauri::AppHandle, log_id: i64) -> PlayPayload {
     let origin_x = ox.clamp(20.0, (fw_w / sf - 20.0).max(20.0));
     let origin_y = oy.clamp(20.0, (fw_h / sf - 20.0).max(20.0));
 
-    // 4) 绽放点 = 该显示器正中心（物理 → fireworks 窗口逻辑坐标；cover 后窗口
-    //    bounds == 显示器 bounds，故 target 即窗口正中心；clamp 仅作安全兜底）
+    // 4) 绽放点 = 该显示器中轴线 + 屏高 0.3 处（物理 → fireworks 窗口逻辑坐标；
+    //    cover 后窗口 bounds == 显示器 bounds；clamp 仅作安全兜底）
     let (tx, ty) = match mon.as_ref() {
-        Some(m) => monitor_center_in_window(
+        Some(m) => monitor_burst_point_in_window(
             m.position().x,
             m.position().y,
             m.size().width,
@@ -651,12 +651,12 @@ fn compute_play_payload(app: &tauri::AppHandle, log_id: i64) -> PlayPayload {
             fw_y as i32,
             sf,
         ),
-        None => (fw_w / 2.0 / sf, fw_h / 2.0 / sf), // 兜底：窗口中心
+        None => (fw_w / 2.0 / sf, fw_h * BURST_Y_RATIO / sf), // 兜底：窗口同比例点
     };
     let target_x = tx.clamp(20.0, (fw_w / sf - 20.0).max(20.0));
     let target_y = ty.clamp(20.0, (fw_h / sf - 20.0).max(20.0));
     eprintln!(
-        "[pulsepet] fireworks target = monitor center ({target_x:.0}, {target_y:.0}) logical, origin ({origin_x:.0}, {origin_y:.0})"
+        "[pulsepet] fireworks target = monitor axis x center + y*{BURST_Y_RATIO} ({target_x:.0}, {target_y:.0}) logical, origin ({origin_x:.0}, {origin_y:.0})"
     );
     PlayPayload {
         log_id,
@@ -667,9 +667,13 @@ fn compute_play_payload(app: &tauri::AppHandle, log_id: i64) -> PlayPayload {
     }
 }
 
-/// 显示器正中心 → fireworks 窗口逻辑坐标（纯函数，可单测）。
-/// `(mon_x..mon_w)` 为显示器物理 bounds，`(win_x, win_y)` 为窗口物理左上角。
-pub fn monitor_center_in_window(
+/// 绽放点纵向比例（用户定案 2026-08-16：屏幕从上往下 0.3 倍处，中间偏上）。
+pub const BURST_Y_RATIO: f64 = 0.3;
+
+/// 绽放点 = 显示器水平中轴（x 居中）+ 屏高 × 0.3 → fireworks 窗口逻辑坐标
+/// （纯函数，可单测）。`(mon_x, mon_y, mon_w, mon_h)` 为显示器物理 bounds，
+/// `(win_x, win_y)` 为窗口物理左上角。
+pub fn monitor_burst_point_in_window(
     mon_x: i32,
     mon_y: i32,
     mon_w: u32,
@@ -679,7 +683,7 @@ pub fn monitor_center_in_window(
     sf: f64,
 ) -> (f64, f64) {
     let cx = mon_x as f64 + mon_w as f64 / 2.0;
-    let cy = mon_y as f64 + mon_h as f64 / 2.0;
+    let cy = mon_y as f64 + mon_h as f64 * BURST_Y_RATIO;
     ((cx - win_x as f64) / sf, (cy - win_y as f64) / sf)
 }
 
@@ -1406,28 +1410,28 @@ mod tests {
         assert!((0..1440).contains(&m));
     }
 
-    // ---- 绽放点 = 宠物所处显示器正中心（DESIGN §5.3 用户补充需求） ----
+    // ---- 绽放点 = 宠物所处显示器中轴 + 屏高 0.3（DESIGN §5.3 用户定案 2026-08-16） ----
 
     #[test]
-    fn monitor_center_single_display_dpr2() {
+    fn burst_point_single_display_dpr2() {
         // 本机实测配置：主屏 2940×1912 物理（dpr=2），fireworks 窗口铺满全屏
-        // → 逻辑坐标 (735, 478) = 屏幕正中心
-        let (tx, ty) = monitor_center_in_window(0, 0, 2940, 1912, 0, 0, 2.0);
+        // → 逻辑坐标 (735, 286.8) = 中轴 x=1470/2 + y=1912×0.3=573.6/2
+        let (tx, ty) = monitor_burst_point_in_window(0, 0, 2940, 1912, 0, 0, 2.0);
         assert!((tx - 735.0).abs() < 1e-9);
-        assert!((ty - 478.0).abs() < 1e-9);
+        assert!((ty - 286.8).abs() < 1e-9);
     }
 
     #[test]
-    fn monitor_center_secondary_display_relative_to_window() {
+    fn burst_point_secondary_display_relative_to_window() {
         // 次屏从 x=2940 起（2940×1912 物理），fireworks 窗口已铺到次屏
-        // → 绽放点在窗口坐标系内仍是该屏正中心 (735, 478)（与屏号无关）
-        let (tx, ty) = monitor_center_in_window(2940, 0, 2940, 1912, 2940, 0, 2.0);
+        // → 绽放点在窗口坐标系内仍是该屏中轴 + 0.3 屏高 (735, 286.8)（与屏号无关）
+        let (tx, ty) = monitor_burst_point_in_window(2940, 0, 2940, 1912, 2940, 0, 2.0);
         assert!((tx - 735.0).abs() < 1e-9);
-        assert!((ty - 478.0).abs() < 1e-9);
-        // 窗口未对齐显示器（窗口在主屏、宠物屏为中心在次屏）：坐标带偏移，
+        assert!((ty - 286.8).abs() < 1e-9);
+        // 窗口未对齐显示器（窗口在主屏、宠物所在屏为次屏）：坐标带偏移，
         // 供 clamp 前的原始值（运行时 cover_monitor 会先对齐，此分支仅兜底语义）
-        let (tx, ty) = monitor_center_in_window(2940, 0, 2940, 1912, 0, 0, 1.0);
+        let (tx, ty) = monitor_burst_point_in_window(2940, 0, 2940, 1912, 0, 0, 1.0);
         assert!((tx - 4410.0).abs() < 1e-9);
-        assert!((ty - 956.0).abs() < 1e-9);
+        assert!((ty - 573.6).abs() < 1e-9);
     }
 }
