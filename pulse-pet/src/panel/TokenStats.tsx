@@ -39,7 +39,8 @@ function errorHint(err: StatsError): string {
     case "legacy-storage":
       return "检测到旧版 opencode 存储格式（storage/session/*.json）：请升级 opencode 后使用。";
     case "schema-mismatch":
-      return `opencode.db schema 不兼容（${err.message}）：请升级 pulse-pet。`;
+      // 错误 message 自 Rust 带出（已含"请升级 pulse-pet"提示），前端不重复拼接（M3 P3-⑤）
+      return `opencode.db schema 不兼容（${err.message}）`;
     default:
       return `查询失败：${err.message}`;
   }

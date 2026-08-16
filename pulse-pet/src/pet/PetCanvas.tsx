@@ -78,6 +78,7 @@ export default function PetCanvas() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sprite = usePetStore((s) => s.sprite);
   const next = usePetStore((s) => s.next);
+  const ackReminder = usePetStore((s) => s.ackReminderBubble);
 
   // rAF 循环读取最新的 sprite，避免每帧重建 effect
   const spriteRef = useRef(sprite);
@@ -141,5 +142,15 @@ export default function PetCanvas() {
     };
   }, []);
 
-  return <canvas ref={canvasRef} className="pet-canvas" onClick={next} />;
+  // 点击宠物：有提醒气泡时视为"已确认"（TC-RM-04，提前消失 + 记 acked_at）；
+  // 否则沿用 M1 的状态轮换（占位阶段的手动驱动）。
+  return (
+    <canvas
+      ref={canvasRef}
+      className="pet-canvas"
+      onClick={() => {
+        if (!ackReminder()) next();
+      }}
+    />
+  );
 }

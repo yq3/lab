@@ -1,22 +1,23 @@
 import { useState } from "react";
 import TokenStats from "./TokenStats";
+import Reminders from "./Reminders";
 
 /**
  * 控制面板（DESIGN §2.3：设置 / Token / Todo / 提醒）。
  *
- * M3：Token 统计标签页落地（TC-TK-08/09）；其余里程碑为占位 tab。
+ * M3：Token 统计标签页落地（TC-TK-08/09）。
+ * M4：提醒标签页落地（规则 CRUD + 全局烟花开关 + 历史统计，TC-RM-07/11/13）。
  */
 type TabId = "token" | "reminders" | "settings" | "todo";
 
 const TABS: { id: TabId; label: string; milestone?: string }[] = [
   { id: "token", label: "Token" },
-  { id: "reminders", label: "提醒", milestone: "M4" },
+  { id: "reminders", label: "提醒" },
   { id: "settings", label: "设置", milestone: "M5/M6" },
   { id: "todo", label: "Todo", milestone: "M7" },
 ];
 
 const PLACEHOLDERS: Partial<Record<TabId, string>> = {
-  reminders: "提醒配置（喝水 / 休息 + 烟花）— M4",
   settings: "设置（宠物选择 / 穿透 / 烟花全局开关）— M5/M6",
   todo: "Todo 插件 — M7",
 };
@@ -41,6 +42,7 @@ export default function Panel() {
         ))}
       </nav>
       {tab === "token" && <TokenStats />}
+      {tab === "reminders" && <Reminders />}
       {PLACEHOLDERS[tab] && <p className="panel-placeholder">{PLACEHOLDERS[tab]}</p>}
     </div>
   );

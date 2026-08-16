@@ -1,5 +1,6 @@
 mod db;
 mod http_server;
+mod reminder_scheduler;
 mod runtime;
 mod session_state;
 mod token_stats;
@@ -10,6 +11,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use rusqlite::Connection;
 use tauri::{Emitter, Manager, RunEvent, WindowEvent};
 
 use session_state::{Kind, SessionStateMachine};
@@ -133,6 +135,17 @@ pub fn run() {
             // Moved 防抖保存器（P2-5）
             app.manage(windows::PositionSaver::new(app.handle().clone()));
 
+            // ---- M4 提醒调度器：读表 → in-memory 倒计时 → tokio interval（Skip） ----
+            let reminders_state = {
+                let db = app.state::<Mutex<Connection>>();
+                let conn = db.lock().map_err(|e| format!("db lock: {e}"))?;
+                reminder_scheduler::RemindersState::load(&conn)
+                    .map_err(|e| format!("load reminders: {e}"))?
+            };
+            let reminders_state = Arc::new(Mutex::new(reminders_state));
+            app.manage(reminders_state.clone());
+            reminder_scheduler::spawn_scheduler(app.handle().clone(), reminders_state);
+
             windows::restore_pet_position(app.handle());
             tray::build_tray(app.handle())?;
             Ok(())
@@ -142,6 +155,20 @@ pub fn run() {
             token_stats::token_stats_opencode_path,
             token_stats::token_stats_query,
             token_stats::token_stats_current_session,
+            reminder_scheduler::reminders_list,
+            reminder_scheduler::reminders_upsert,
+            reminder_scheduler::reminders_delete,
+            reminder_scheduler::reminders_reload,
+            reminder_scheduler::reminders_get_fireworks_global,
+            reminder_scheduler::reminders_set_fireworks_global,
+            reminder_scheduler::reminders_get_paused,
+            reminder_scheduler::reminders_stats,
+            reminder_scheduler::reminders_trigger_now,
+            reminder_scheduler::reminders_ack,
+            reminder_scheduler::reminders_dismiss,
+            reminder_scheduler::reminder_play_fireworks,
+            reminder_scheduler::fireworks_ready,
+            reminder_scheduler::fireworks_finished,
         ])
         .on_window_event(|window, event| match event {
             // 关闭控制面板 / 宠物窗口时隐藏而非销毁，托盘可再次唤起（P2-2：pet 也防护）
