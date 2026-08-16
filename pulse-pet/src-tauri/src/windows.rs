@@ -35,6 +35,22 @@ pub fn toggle_pet(app: &tauri::AppHandle) {
     }
 }
 
+/// 显示烟花窗口（M4，TC-RM-09：全屏透明置顶、无边框、无任务栏项；已可见时无害）。
+pub fn show_fireworks(app: &tauri::AppHandle) {
+    if let Some(win) = app.get_webview_window("fireworks") {
+        let _ = win.show();
+        eprintln!("[pulsepet] fireworks window show");
+    }
+}
+
+/// 隐藏烟花窗口（前端播完回报 / watchdog 兜底）。
+pub fn hide_fireworks(app: &tauri::AppHandle) {
+    if let Some(win) = app.get_webview_window("fireworks") {
+        let _ = win.hide();
+        eprintln!("[pulsepet] fireworks window hide");
+    }
+}
+
 /// 纯函数：把窗口左上角 clamp 到给定显示器可视范围（P2-6，可单测）。
 ///
 /// `(mon_x, mon_y, mon_w, mon_h)` 为显示器物理坐标与尺寸，`(win_w, win_h)` 为窗口

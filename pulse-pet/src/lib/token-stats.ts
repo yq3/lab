@@ -93,20 +93,9 @@ export async function fetchTokenRows(
   }
 }
 
-/** 调 `token_stats_current_session`（TC-TK-10/12：无记录返回 null）。 */
-export async function fetchCurrentSession(
-  sessionId: string,
-): Promise<TokenRow | null> {
-  if (!isTauriRuntime()) return null;
-  const { invoke } = await import("@tauri-apps/api/core");
-  try {
-    return await invoke<TokenRow | null>("token_stats_current_session", {
-      sessionId,
-    });
-  } catch {
-    return null; // 查询失败视同无记录（不出气泡）
-  }
-}
+// 注：M3 曾有 `fetchCurrentSession`（token_stats_current_session 的 TS 封装），前端无
+// 调用方（当前会话气泡汇报由 Rust 侧 idle hook 直接下发），按 M4 清偿 P3-② 删除；
+// Rust command 按 spec §4.2 保留注册，供后续里程碑接入。
 
 // ---- 数字格式化（与 Rust format_tokens_k / format_cost_usd 口径一致） ----
 

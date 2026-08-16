@@ -4,6 +4,7 @@ import {
   formatTokens,
   localDayEndMs,
   localDayStartMs,
+  parseStatsError,
   rangeForPreset,
   sumRows,
   type TokenRow,
@@ -88,6 +89,47 @@ describe("localDayStartMs / localDayEndMs：自定义跨度边界", () => {
     ]);
     // 单日跨度 = end - start + 1ms 恰好一整天
     expect(end - start + 1).toBe(24 * 3600 * 1000);
+  });
+});
+
+describe("parseStatsError：Rust 错误串解析（M3 P3-③，错误态 UI 关键路径）", () => {
+  it("已知 code 前缀拆出结构化错误", () => {
+    for (const code of ["no-database", "legacy-storage", "schema-mismatch", "query"] as const) {
+      const e = parseStatsError(`${code}: 详情文字`);
+      expect(e.code).toBe(code);
+      expect(e.message).toBe("详情文字");
+      expect(e.name).toBe("StatsError");
+    }
+  });
+
+  it("message 中的冒号保留", () => {
+    const e = parseStatsError("query: prepare 失败：syntax error");
+    expect(e.code).toBe("query");
+    expect(e.message).toBe("prepare 失败：syntax error");
+  });
+
+  it("未知 code 归入 query", () => {
+    const e = parseStatsError("bogus-code: xxx");
+    expect(e.code).toBe("query");
+    expect(e.message).toBe("xxx");
+  });
+
+  it("无冒号的整串当作 message（code=query）", () => {
+    const e = parseStatsError("纯文本错误");
+    expect(e.code).toBe("query");
+    expect(e.message).toBe("纯文本错误");
+  });
+
+  it("Error 实例取 message；其它类型 String() 化", () => {
+    expect(parseStatsError(new Error("no-database: x")).code).toBe("no-database");
+    const e = parseStatsError({ odd: 1 });
+    expect(e.code).toBe("query");
+    expect(e.message).toBe(String({ odd: 1 }));
+  });
+
+  it("空输入不崩（code=query）", () => {
+    const e = parseStatsError("");
+    expect(e.code).toBe("query");
   });
 });
 

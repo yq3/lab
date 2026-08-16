@@ -358,9 +358,220 @@ body,
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
-/* fireworks 窗口：透明占位 */
-.fireworks {
-  width: 100%;
-  height: 100%;
+/* fireworks 窗口：透明画布（M4 粒子烟花，TC-RM-09/16）
+   Windows 回退（TC-RM-16，M8 实机）：若透明异常改为不透明近桌面深色（DESIGN §12） */
+.fireworks-canvas {
+  display: block;
+  width: 100vw;
+  height: 100vh;
   background: transparent;
+}
+
+/* ---- 提醒配置（M4，TC-RM-07/11/13） ---- */
+
+.reminders {
+  max-width: 860px;
+}
+
+.reminder-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.reminder-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #374151;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.reminder-check.compact {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.reminder-paused-badge {
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: #fef3c7;
+  border: 1px solid #fcd34d;
+  color: #92400e;
+  font-size: 12px;
+}
+
+.reminder-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.reminder-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 6px;
+  border-bottom: 1px dashed #f3f4f6;
+  font-size: 13px;
+}
+
+.reminder-item.disabled {
+  opacity: 0.45;
+}
+
+.reminder-kind {
+  min-width: 64px;
+  color: #374151;
+}
+
+.reminder-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #111827;
+  font-weight: 500;
+}
+
+.reminder-meta {
+  color: #6b7280;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.reminder-actions {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.reminder-actions .seg,
+.reminder-templates .seg {
+  padding: 4px 10px;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: #fff;
+  font-size: 12px;
+  color: #374151;
+  cursor: pointer;
+}
+
+.reminder-actions .seg.danger {
+  color: #dc2626;
+}
+
+.reminder-actions .seg:hover,
+.reminder-templates .seg:hover {
+  background: #f3f4f6;
+}
+
+.reminder-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.reminder-templates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.reminder-form-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.reminder-form-row label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.reminder-form-row label.grow {
+  flex: 1;
+  min-width: 240px;
+}
+
+.reminder-form-row label.reminder-check {
+  flex-direction: row;
+  align-items: center;
+  padding-bottom: 6px;
+}
+
+.reminder-form input[type="text"],
+.reminder-form input[type="number"],
+.reminder-form input[type="time"],
+.reminder-form select {
+  padding: 6px 8px;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  font-size: 13px;
+  background: #fff;
+  color: #111827;
+}
+
+.reminder-form input[type="text"] {
+  width: 100%;
+}
+
+.reminder-hint {
+  margin: 0;
+  font-size: 12px;
+  color: #92400e;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 6px;
+  padding: 6px 10px;
+}
+
+.reminder-form-error {
+  margin: 0;
+  font-size: 12px;
+  color: #b91c1c;
+}
+
+.reminder-form-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.reminder-form-actions .primary {
+  background: #6366f1;
+  color: #fff;
+  border-color: #6366f1;
+}
+
+.reminder-stats {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 13px;
+}
+
+.reminder-stats li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 0;
+  border-bottom: 1px dashed #f3f4f6;
+}
+
+.reminder-toast {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  padding: 10px 16px;
+  background: #111827;
+  color: #f9fafb;
+  border-radius: 8px;
+  font-size: 13px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
 }

@@ -473,9 +473,11 @@ pub fn report_max_lag_ms() -> i64 {
 // ---------------------------------------------------------------------------
 
 /// 探测 opencode 数据库路径（TC-TK-01/02；无 → None，TC-TK-03）。
+/// 返回 `Result<Option<PathBuf>, String>` 与 DESIGN §4.2 签名对齐（M3 P3-④；
+/// 该命令无失败路径，恒为 `Ok`）。
 #[tauri::command]
-pub fn token_stats_opencode_path() -> Option<PathBuf> {
-    detect_db_path(&opencode_data_dir())
+pub fn token_stats_opencode_path() -> Result<Option<PathBuf>, String> {
+    Ok(detect_db_path(&opencode_data_dir()))
 }
 
 /// 聚合查询（group_by: session/day/week/range；错误序列化为 "code: message"）。
