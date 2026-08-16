@@ -105,7 +105,7 @@ supervised-coding（编排者，便宜模型）
 | committer | `deepseek/deepseek-v4-pro@max` | 独立模型族，审慎推理（跨族盲点正交，见 D11） |
 
 > 模型 ID 已用 `opencode models` 验证存在（2026-08-14）。⚠️ subagent 不显式写 `model` 会**继承调用者的模型**，三个 subagent 必须各自写死。
-> **variant 必须显式写 `@max`**（D31）：`model:` 不带 `@variant` 后缀时走该模型的默认 variant（非最高推理强度）。三个模型的 `max` 均在各自 `reasoning_options` 支持列表内（2026-08-16 验证）。
+> **`@max` 依赖全局配置自定义 variants**（D36）：这三个模型在 models.dev 目录中未登记 `variants`，opencode 不会从 `reasoning_options` 自动生成；`max` variant 由 `~/.config/opencode/opencode.jsonc` 的 `provider.<id>.models.<id>.variants` 显式定义（请求带 `reasoning_effort: max`）。缺了这份全局配置，`@max` 会被 TUI 判为无效模型（"configured model ... is not valid"）。换机器/换账号须同步该配置。
 
 ---
 
@@ -494,7 +494,7 @@ Sup -> User: 汇报合入请求
 
 ## 8. 设计依据（决策记录）
 
-> 本文档由 2026-08 的多轮讨论沉淀。D1-D12 为初版决策，D13-D20 为首轮审阅修订，D21-D25 为二次迭代（改名体系、命名划分、skill 体系调研），D26-D27 为三轮修订（护栏加固、状态机一致性、回 spec 路径），D28-D30 为四轮修订（调用前确认、遗留事项清偿、develop_opencode 分支策略），D31 为五轮修订（模型 variant 显式 @max），D32-D34 为六轮修订（首跑实测反馈：tester 权限扩容、检查点字段完整性、移除死字段），D35 为七轮修订（用户直连通道：问询直连协议，方案定稿待实施）。
+> 本文档由 2026-08 的多轮讨论沉淀。D1-D12 为初版决策，D13-D20 为首轮审阅修订，D21-D25 为二次迭代（改名体系、命名划分、skill 体系调研），D26-D27 为三轮修订（护栏加固、状态机一致性、回 spec 路径），D28-D30 为四轮修订（调用前确认、遗留事项清偿、develop_opencode 分支策略），D31 为五轮修订（模型 variant 显式 @max），D32-D34 为六轮修订（首跑实测反馈：tester 权限扩容、检查点字段完整性、移除死字段），D35 为七轮修订（用户直连通道：问询直连协议，方案定稿待实施），D36 为八轮修订（D31 回退 → 又以全局配置自定义 variants 复活：@max 需在 `~/.config/opencode/opencode.jsonc` 显式注册，否则 TUI 判无效）。
 
 ### D1. 为什么不用 GitHub Issue/PR 作为 agent 间通信媒介
 
@@ -726,7 +726,7 @@ task-pulsepet-m1 交付后用户定案（该检查点"交付后约定"节）固�
 - **提交前同步**：每次本地 commit 前 `git fetch origin` → 将 `origin/develop` merge（或 rebase）进 `develop_opencode`，确保分支不落后于 develop；交付 push 前同样先同步再推
 - **权限例外**：`git merge*` 整体 deny 不变（D15），仅精确放行 `git merge origin/develop*` / `git merge --no-edit origin/develop*` / `git rebase origin/develop*`（同步专用动作，allow）——延续 D15"匹配动作而非分支名"的思路，授权粒度收到最小；其余 merge（任意分支）仍 deny
 
-### D31. 全员显式指定 `@max` variant（2026-08-16 五轮修订）
+### D31. 全员显式指定 `@max` variant（2026-08-16 五轮修订，被 D36 回退后以配置复活）
 
 初版 `model:` 只写 `provider/model`，未考虑 opencode 的 variant 机制：不带 `@variant` 后缀时使用模型默认 variant，非最高推理强度——设计时意图是各角色满血推理，实际运行却是默认档（**设计未覆盖点，task-pulsepet 跑完后复盘发现**）。
 
@@ -739,6 +739,20 @@ task-pulsepet-m1 交付后用户定案（该检查点"交付后约定"节）固�
 | `deepseek/deepseek-v4-pro` | toggle；high / **max** |
 
 注意：variant 支持列表随 models.dev 数据更新（opencode 每 5 分钟刷新缓存），换模型时须重新确认目标 variant 存在（`~/.cache/opencode/models.json` 或 TUI `/models`）。
+
+### D36. `@max` 需在全局配置自定义 variants（2026-08-16 八轮修订）
+
+D31 落地后切换到任一 agent 即报错：`Agent Supervised-Coding's configured model deepseek/deepseek-v4-flash@max is not valid`（TUI 切换 agent 时校验模型 ID，不合法拒绝启用）。
+
+**根因**：D31 的验证依据只查了 models.dev 的 `reasoning_options`（模型 API 能力层面支持 `effort=max`），但 opencode 的 `model@variant` 解析看的是模型目录的 `variants` 字段与内置 variant 插件（`plugin/variant.ts`，v1.18.18 只为 `glm-5.2` 族生成 `high/max`）：
+
+- 实测 `models.opencode.ai/api.json`（live，与本地缓存一致）三个模型 `variants` 均为空
+- `glm-5.3` 不在 variant 插件白名单（`["glm-5.2","glm-5-2","glm-5p2"]`）内
+- 结论：`deepseek/deepseek-v4-flash@max`、`deepseek/deepseek-v4-pro@max`、`zhipuai-coding-plan/glm-5.3@max` 全部解析不到 variant → 模型无效
+
+**第一版修订（回退）**：4 个 agent 的 `model:` 去掉 `@max`。**终版修订（复活，用户选全局方案）**：`~/.config/opencode/opencode.jsonc` 给三个模型显式注册 `max` variant（`provider.<id>.models.<id>.variants.max.body.reasoning_effort = "max"`，config 插件会把 variant 的 headers/body 合并进请求），4 个 agent 恢复 `@max`。变体来源有四处：models.dev 目录登记、内置 variant 插件（glm-5.2 族）、全局/项目 opencode.json 配置、用户插件 catalog.transform——本流程的三个模型走配置源。
+
+**经验**：模型 API 支持某参数 ≠ opencode 的 `@variant` 可用；variant 可用性以模型目录 `variants` 字段为准（`~/.cache/opencode/models.json`），未登记的 variant 可用 opencode.json 配置补齐。换机器/换账号须同步全局配置，否则报 "configured model ... is not valid"。
 
 ### D32. tester 权限扩容：放行只读探查与 node（2026-08-16 六轮修订，首跑实测反馈）
 
