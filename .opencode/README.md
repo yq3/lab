@@ -99,13 +99,13 @@ supervised-coding（编排者，便宜模型）
 
 | 角色 | 模型 | 定位理由 |
 |---|---|---|
-| supervised-coding | `deepseek/deepseek-v4-flash@max` | 只做调度与状态机，便宜快 |
-| coder | `zhipuai-coding-plan/glm-5.3@max` | 主力实现，能力强 |
-| tester | `deepseek/deepseek-v4-flash@max` | 跑命令+写测试为主，便宜；质量不足可升级 |
-| committer | `deepseek/deepseek-v4-pro@max` | 独立模型族，审慎推理（跨族盲点正交，见 D11） |
+| supervised-coding | `deepseek/deepseek-v4-flash` + `variant: max` | 只做调度与状态机，便宜快 |
+| coder | `zhipuai-coding-plan/glm-5.3` + `variant: max` | 主力实现，能力强 |
+| tester | `deepseek/deepseek-v4-flash` + `variant: max` | 跑命令+写测试为主，便宜；质量不足可升级 |
+| committer | `deepseek/deepseek-v4-pro` + `variant: max` | 独立模型族，审慎推理（跨族盲点正交，见 D11） |
 
 > 模型 ID 已用 `opencode models` 验证存在（2026-08-14）。⚠️ subagent 不显式写 `model` 会**继承调用者的模型**，三个 subagent 必须各自写死。
-> **`@max` 依赖全局配置自定义 variants**（D36）：这三个模型在 models.dev 目录中未登记 `variants`，opencode 不会从 `reasoning_options` 自动生成；`max` variant 由 `~/.config/opencode/opencode.jsonc` 的 `provider.<id>.models.<id>.variants` 显式定义（请求带 `reasoning_effort: max`）。缺了这份全局配置，`@max` 会被 TUI 判为无效模型（"configured model ... is not valid"）。换机器/换账号须同步该配置。
+> **max 用独立 `variant:` 字段指定，不要写 `model@max`**（D36）：官方文档（/docs/agents）里 agent 的 model 格式就是 `provider/model-id`，没有 `@variant` 后缀写法；v1.18.18 实现也只按 `/` 切分，`model: deepseek/deepseek-v4-flash@max` 会把 `@max` 留在模型 id 里 → TUI 报 "configured model ... is not valid"。正确写法是 `model:` 只写基础 id，另起一行 `variant: max`。deepseek-v4* 的 max variant 由 opencode 内置插件自动生成（/docs/models 的 Built-in variants："Many other providers have built-in defaults too"）；glm-5.3 被插件排除规则拦截，max 需在 `~/.config/opencode/opencode.jsonc` 按官方 Custom variants 格式注册（`provider.zhipuai-coding-plan.models.glm-5.3.variants.max.reasoningEffort = "max"`），换机器须同步该配置。
 
 ---
 
@@ -494,7 +494,7 @@ Sup -> User: 汇报合入请求
 
 ## 8. 设计依据（决策记录）
 
-> 本文档由 2026-08 的多轮讨论沉淀。D1-D12 为初版决策，D13-D20 为首轮审阅修订，D21-D25 为二次迭代（改名体系、命名划分、skill 体系调研），D26-D27 为三轮修订（护栏加固、状态机一致性、回 spec 路径），D28-D30 为四轮修订（调用前确认、遗留事项清偿、develop_opencode 分支策略），D31 为五轮修订（模型 variant 显式 @max），D32-D34 为六轮修订（首跑实测反馈：tester 权限扩容、检查点字段完整性、移除死字段），D35 为七轮修订（用户直连通道：问询直连协议，方案定稿待实施），D36 为八轮修订（D31 回退 → 又以全局配置自定义 variants 复活：@max 需在 `~/.config/opencode/opencode.jsonc` 显式注册，否则 TUI 判无效）。
+> 本文档由 2026-08 的多轮讨论沉淀。D1-D12 为初版决策，D13-D20 为首轮审阅修订，D21-D25 为二次迭代（改名体系、命名划分、skill 体系调研），D26-D27 为三轮修订（护栏加固、状态机一致性、回 spec 路径），D28-D30 为四轮修订（调用前确认、遗留事项清偿、develop_opencode 分支策略），D31 为五轮修订（模型 variant 显式 @max），D32-D34 为六轮修订（首跑实测反馈：tester 权限扩容、检查点字段完整性、移除死字段），D35 为七轮修订（用户直连通道：问询直连协议，方案定稿待实施），D36 为八轮修订（D31 修正：`@max` 后缀写法无效，改 `model:` + 独立 `variant:` 字段；deepseek-v4* 的 max 由内置插件自动生成，glm-5.3 的 max 在全局配置注册）。
 
 ### D1. 为什么不用 GitHub Issue/PR 作为 agent 间通信媒介
 
@@ -726,7 +726,7 @@ task-pulsepet-m1 交付后用户定案（该检查点"交付后约定"节）固�
 - **提交前同步**：每次本地 commit 前 `git fetch origin` → 将 `origin/develop` merge（或 rebase）进 `develop_opencode`，确保分支不落后于 develop；交付 push 前同样先同步再推
 - **权限例外**：`git merge*` 整体 deny 不变（D15），仅精确放行 `git merge origin/develop*` / `git merge --no-edit origin/develop*` / `git rebase origin/develop*`（同步专用动作，allow）——延续 D15"匹配动作而非分支名"的思路，授权粒度收到最小；其余 merge（任意分支）仍 deny
 
-### D31. 全员显式指定 `@max` variant（2026-08-16 五轮修订，被 D36 回退后以配置复活）
+### D31. 全员显式指定 `@max` variant（2026-08-16 五轮修订，写法已被 D36 修正）
 
 初版 `model:` 只写 `provider/model`，未考虑 opencode 的 variant 机制：不带 `@variant` 后缀时使用模型默认 variant，非最高推理强度——设计时意图是各角色满血推理，实际运行却是默认档（**设计未覆盖点，task-pulsepet 跑完后复盘发现**）。
 
@@ -740,19 +740,18 @@ task-pulsepet-m1 交付后用户定案（该检查点"交付后约定"节）固�
 
 注意：variant 支持列表随 models.dev 数据更新（opencode 每 5 分钟刷新缓存），换模型时须重新确认目标 variant 存在（`~/.cache/opencode/models.json` 或 TUI `/models`）。
 
-### D36. `@max` 需在全局配置自定义 variants（2026-08-16 八轮修订）
+### D36. `variant:` 是独立字段，`model@max` 写法无效（2026-08-16 八轮修订）
 
 D31 落地后切换到任一 agent 即报错：`Agent Supervised-Coding's configured model deepseek/deepseek-v4-flash@max is not valid`（TUI 切换 agent 时校验模型 ID，不合法拒绝启用）。
 
-**根因**：D31 的验证依据只查了 models.dev 的 `reasoning_options`（模型 API 能力层面支持 `effort=max`），但 opencode 的 `model@variant` 解析看的是模型目录的 `variants` 字段与内置 variant 插件（`plugin/variant.ts`，v1.18.18 只为 `glm-5.2` 族生成 `high/max`）：
+**根因（两层）**：
 
-- 实测 `models.opencode.ai/api.json`（live，与本地缓存一致）三个模型 `variants` 均为空
-- `glm-5.3` 不在 variant 插件白名单（`["glm-5.2","glm-5-2","glm-5p2"]`）内
-- 结论：`deepseek/deepseek-v4-flash@max`、`deepseek/deepseek-v4-pro@max`、`zhipuai-coding-plan/glm-5.3@max` 全部解析不到 variant → 模型无效
+1. **`model@max` 后缀写法在 v1.18.18 不生效**：agent 的 model 解析（`ModelV2.parse`）只按 `/` 切分，`deepseek/deepseek-v4-flash@max` 解析为 `{providerID: deepseek, id: "deepseek-v4-flash@max", variant: undefined}`——`@max` 留在模型 id 里，目录中不存在该 id 的条目 → 服务端 `ModelUnavailableError`、TUI 判无效。正确姿势是 `model:` 只写基础 id，用**独立 `variant:` 字段**（config 插件读 `variant` 设置 `h.model.variant`，产物为 `{id: base, variant: "max"}`，目录查得到、`withVariant` 正常应用）。
+2. **max variant 的来源**：v1.18.18 二进制内置 variant 插件（比 GitHub tag 源码更全）对 `@ai-sdk/openai-compatible` 且 api.id 含 `deepseek-v4` 的模型自动生成 `low/medium/high/max`（`reasoningEffort`）——deepseek-v4-flash / deepseek-v4-pro 的 max 免配置；`glm-5.3` 被排除规则（`id 含 "glm"` 且非 glm-5.2 族）拦截 → 无任何 variant，max 需在 `~/.config/opencode/opencode.jsonc` 注册：`provider.zhipuai-coding-plan.models.glm-5.3.variants.max.reasoningEffort = "max"`（**官方 Custom variants 格式**：variant 值直接写选项，camelCase，/docs/models；不要包 `body:` 再写 snake_case，那样请求里不会带出 `reasoning_effort`）。
 
-**第一版修订（回退）**：4 个 agent 的 `model:` 去掉 `@max`。**终版修订（复活，用户选全局方案）**：`~/.config/opencode/opencode.jsonc` 给三个模型显式注册 `max` variant（`provider.<id>.models.<id>.variants.max.body.reasoning_effort = "max"`，config 插件会把 variant 的 headers/body 合并进请求），4 个 agent 恢复 `@max`。变体来源有四处：models.dev 目录登记、内置 variant 插件（glm-5.2 族）、全局/项目 opencode.json 配置、用户插件 catalog.transform——本流程的三个模型走配置源。
+**修订**：4 个 agent 的 frontmatter 改为 `model: <base id>` + `variant: max` 两行；全局配置保留三模型的 max 注册（deepseek 冗余但无害，glm-5.3 必需）。README §3.3 表格与注记同步更正。
 
-**经验**：模型 API 支持某参数 ≠ opencode 的 `@variant` 可用；variant 可用性以模型目录 `variants` 字段为准（`~/.cache/opencode/models.json`），未登记的 variant 可用 opencode.json 配置补齐。换机器/换账号须同步全局配置，否则报 "configured model ... is not valid"。
+**经验**：① agent 指定 variant 用独立 `variant:` 字段（/docs/agents 未提及，但 schema 与实现支持），不要拼进 model id；② variant 可用性以运行版二进制内置插件 + 配置合并结果为准（插件规则因版本而异，升级后须复测）；③ 自定义 variants 按官方格式写（/docs/models Custom variants：对象形式、值直接写 camelCase 选项），v1 config 迁移会转成 v2 内部数组。
 
 ### D32. tester 权限扩容：放行只读探查与 node（2026-08-16 六轮修订，首跑实测反馈）
 

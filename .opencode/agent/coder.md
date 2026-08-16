@@ -2,7 +2,8 @@
 name: Coder
 description: 按需求实现功能并 TDD 自测，按 tester/committer 意见修复代码
 mode: subagent
-model: zhipuai-coding-plan/glm-5.3@max
+model: zhipuai-coding-plan/glm-5.3
+variant: max
 permission:
   edit: allow
   bash:

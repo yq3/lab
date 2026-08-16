@@ -2,7 +2,8 @@
 name: Supervised-Coding
 description: 编排 Coder/Tester/Committer 实现需求，直到双验证通过后交付。下达开发任务时使用
 mode: primary
-model: deepseek/deepseek-v4-flash@max
+model: deepseek/deepseek-v4-flash
+variant: max
 permission:
   task:
     "*": deny
