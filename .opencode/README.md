@@ -100,9 +100,9 @@ supervised-coding（编排者，便宜模型）
 | 角色 | 模型 | 定位理由 |
 |---|---|---|
 | supervised-coding | `deepseek/deepseek-v4-flash` | 只做调度与状态机，便宜快 |
-| coder | `deepseek/deepseek-v4-pro` | 主力实现，能力强 |
+| coder | `zhipuai-coding-plan/glm-5.3` | 主力实现，能力强 |
 | tester | `deepseek/deepseek-v4-flash` | 跑命令+写测试为主，便宜；质量不足可升级 |
-| committer | `zhipuai-coding-plan/glm-5.2` | 独立模型族，审慎推理（跨族盲点正交，见 D11） |
+| committer | `deepseek/deepseek-v4-pro` | 独立模型族，审慎推理（跨族盲点正交，见 D11） |
 
 > 模型 ID 已用 `opencode models` 验证存在（2026-08-14）。⚠️ subagent 不显式写 `model` 会**继承调用者的模型**，三个 subagent 必须各自写死。
 
@@ -565,7 +565,7 @@ POC 阶段先在单仓库验证效果（模型配合、prompt 质量、检查点
 
 ### D11. 为什么 committer 选独立模型族
 
-clowder F253 的"盲点正交性"：不同模型族有不同系统性盲点，跨族 review 比同族 fresh-context 多捕获的 finding（reviewer delta metric）更高。故 committer 用与 coder 不同族、审慎型的模型（如 glm-5.2），而非同族强模型。
+clowder F253 的"盲点正交性"：不同模型族有不同系统性盲点，跨族 review 比同族 fresh-context 多捕获的 finding（reviewer delta metric）更高。故 committer 用与 coder 不同族、审慎型的模型（如 deepseek-v4-pro，与 coder 的 glm 族错开），而非同族强模型。
 
 ### D12. 从 clowder 借鉴的设计清单
 
