@@ -18,8 +18,9 @@ interface PetState {
 /**
  * 宠物状态 store。
  *
- * M1 阶段没有 HTTP 事件源（M2 引入），通过 `setRaw` / `next` 驱动状态，
- * 供占位精灵渲染与降级映射验证（TC-SP-01 / TC-SP-01b）。
+ * M2 起主事件源：`src/lib/http-bridge.ts` 监听 Rust 下发的合并显示状态
+ * （`pulsepet://state` event）→ 调 `setRaw` 更新。`setRaw` / `next` 仍保留，
+ * 供占位精灵渲染、降级映射验证（TC-SP-01/01b）与测试 / CDP 手动驱动。
  */
 export const usePetStore = create<PetState>((set) => ({
   raw: "idle",

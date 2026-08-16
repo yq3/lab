@@ -85,7 +85,7 @@ Tauri 一个 App 可挂多个 webview 窗口。v1 三个窗口：
 
 跑在 opencode 的 Bun 进程内的官方插件，~200 行 JS：
 
-- **注册**：安装脚本把文件拷到 `~/.config/opencode/plugins/`、并把 `~/.config/opencode/opencode.json` 的 `plugin` 数组合并 `pulse-pet` 一项（带 `--pulse-pet-managed` 标记便于后续安全增删）。
+- **注册**：安装脚本把文件拷到 `~/.config/opencode/plugins/`、并把 `~/.config/opencode/opencode.json` 的 `plugin` 数组合并 `pulse-pet` 一项（带 `--pulse-pet-managed` 标记便于后续安全增删）。**M2 实测（opencode 1.18.x）修正**：① 插件导出格式为 `export default { id, server }`（`server` 为 async 函数返回 Hooks；`@opencode-ai/plugin` 无 `plugin()` 工厂函数）；② `plugin` 数组本地项必须是路径 spec（如 `./plugins/pulse-pet-hook.js`），裸名会被当 npm 包；全局 `~/.config/opencode/plugins/` 不自动扫描（仅项目 `.opencode/plugins/` 自动扫描）。
 - **监听 hooks**（opencode 官方）→ 归一化 → POST `/state`：
 
 | opencode 事件 | 归一化 `kind` | 说明 |
@@ -111,6 +111,7 @@ Tauri 一个 App 可挂多个 webview 窗口。v1 三个窗口：
 | reaction | 10s | working / editing / testing / idle | 动画反应类 |
 
 三类冷却互不干扰（如 waiting-permission 只占 permission 冷却，不占 speech 冷却）。`idle` 归入 reaction 类用于防止 `session.status==idle` 反复到达时的状态抖动；idle→idle 丢弃视觉上无变化，冷却无害。
+> **同桶升级放行（M2 实测补充定案）**：同一冷却桶内，若新事件的视觉优先级高于已投递事件（如 `editing`(4) > 已投递 `working`(1)），**绕过冷却直接放行**；新事件优先级不高于已投递事件时维持节流。背景：`session.status busy→working` 先占 reaction 10s 桶时，真实流中紧随的 `tool.execute.before`（editing/testing）原会被冷却吞掉——占位阶段降级渲染无视觉影响，但 M5 切 atlas 后（editing/testing 有独立动画）需按此语义放行。瞬态被 `tool.execute.after` 复位吞没的情况由 App 侧 30s 超时兜底。
 - **自忽略**：正则跳过 `pulsepet_status/say/react` 工具，防回环（openpets 已踩过的坑）。
 - **消息净化**：气泡文案只能来自白名单语音池（thinking/success/error/permission/waiting 五类模板），**不展示原始 prompt/输出/路径/URL/secret 样式 token**。命令行具体内容仅用于归一化分类，**不发给宠物**。
 - **runtime 目录与 token 文件**：runtime 目录 POSIX 端为 `~/.pulsepet/runtime/`，Windows 端为 `%LOCALAPPDATA%\pulsepet\runtime\`（两平台目录内含相同的三个运行时文件：`update-token` / `endpoint` / `hooks-disabled`）。`update-token` 存随机 token，mode 0600（POSIX 端），由 Tauri App 启动时生成并写文件，插件每次启动读 token。App 退出时清除，下次启动重新生成。Windows 无 POSIX 权限语义，mode 0600 无效——Windows 端仅靠"用户级目录（`%LOCALAPPDATA%\pulsepet\runtime`）+ 单用户登录假设 + ACL 默认仅本用户可见"保护，不在 v1 实装 ACL 强化。
@@ -139,7 +140,7 @@ Tauri 一个 App 可挂多个 webview 窗口。v1 三个窗口：
 ### 3.3 多 session 状态机 + 优先级合并
 
 - App 维护 `HashMap<SessionId, SessionState>`，每收事件更新对应 session。
-- 显示状态用 clawd 式优先级合并：`error > waiting-permission > testing > editing > thinking > working > idle`。
+- 显示状态用 clawd 式优先级合并：`error > waiting-permission > testing > editing > thinking > success > working > idle`（success 定案位于 thinking 与 working 之间——进行中瞬态压过完成信号，完成信号压过泛化 working；M2 实现按此定案）。
 - 多个 session 同时活跃时，单只宠物显示最高优先级状态（v1 不做多宠物）。
 - 长时间无事件的 session（30s 无 `/state` 事件）回收为 `idle`。`/health` 仅用于调试探活，不参与回收条件（v1 插件不发心跳，避免"无 /health"分支成为死代码）。
 
@@ -570,6 +571,7 @@ lab/pulse-pet/
 - 前端 `http-bridge` + `petStore` + 状态驱动动画
 - 端到端验证：开 opencode 跑任务 → 宠物切换 idle/thinking/working/success
 - **M2 done 标准补充验证项**：① 实测 `tool.execute.after` / `chat.message` 完成事件在 opencode 中是否存在并以何种字段区分；② 据此选定主复位信号 + 兜底信号，并加上 §3.1 30s 状态超时兜底；③ 跑完一个完整任务，验证宠物不会卡在 `editing`/`thinking` 状态超过 30s。
+- **M2 实测结论（2026-08-15，opencode 1.18.18）**：`tool.execute.after` 存在（`input:{tool,sessionID,callID,args}`）→ 选为主复位信号 → working；`chat.message` 存在（`input:{sessionID,agent,model,messageID,variant}`）→ thinking，**无独立"chat.message 完成"事件**；兜底复位 = event bus `session.status`（`status.type ∈ {idle,busy,retry}`）+ `session.idle` 事件 → idle，App 侧另有 30s 瞬态超时兜底。**`success` 状态 v1 无事件驱动**（SessionStatus 仅 idle/busy/retry，无"任务完成"事件）——M2 验收按"不可达、链路就绪"记录；success 事件驱动由 M3（token 会话汇报）/M4（todo 完成）引入。
 
 ### M3 Token 统计（1 周）
 - Rust 侧 `token_stats.rs`：路径探测 + rusqlite 只读连接 + 聚合查询命令
