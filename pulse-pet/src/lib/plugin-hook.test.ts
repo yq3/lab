@@ -6,6 +6,7 @@ import {
   bucketFor,
   classifyEvent,
   classifyToolBefore,
+  createDeliverer,
   isSelfTool,
   pickBubble,
   sanitizeText,
@@ -45,6 +46,92 @@ describe("插件 Backoff：指数退避序列（TC-EV-07）", () => {
     b.nextDelay(); // 推进到 2000
     b.reset();
     expect(b.nextDelay()).toBe(0);
+  });
+});
+
+describe("createDeliverer：并发投递串行化（P3-②，M2 测试缺口）", () => {
+  /** 记录 post/wait 交错顺序 + 退避序列的实验装置（sleep 不真等）。
+   *  退避记录点在 nextDelay（wait() 对 delay=0 不调 sleep，记录 sleep 会漏首次）。 */
+  function rig(postImpls: Array<() => Promise<unknown>>) {
+    const order: string[] = [];
+    const delays: number[] = [];
+    const backoff = new Backoff(async () => {});
+    const origNext = backoff.nextDelay.bind(backoff);
+    backoff.nextDelay = () => {
+      const d = origNext();
+      order.push(`wait${d}`);
+      delays.push(d);
+      return d;
+    };
+    let call = 0;
+    const postStateImpl = vi.fn(async () => {
+      order.push("post");
+      const impl = postImpls[Math.min(call, postImpls.length - 1)];
+      call += 1;
+      return impl();
+    });
+    const deliverer = createDeliverer({
+      throttle: { shouldSend: () => true }, // 测试关闭节流，聚焦退避行为
+      backoff,
+      postStateImpl: postStateImpl as never,
+      killswitch: () => false,
+    });
+    return { deliverer, order, delays };
+  }
+
+  it("并发失败：一次只消耗一级退避（0→1000→2000，不跳级），post/wait 严格交替", async () => {
+    const { deliverer, order, delays } = rig([
+      () => Promise.reject(new Error("fail")),
+      () => Promise.reject(new Error("fail")),
+      () => Promise.reject(new Error("fail")),
+    ]);
+    await Promise.all([
+      deliverer.deliver("working", "s1"),
+      deliverer.deliver("editing", "s1"),
+      deliverer.deliver("testing", "s1"),
+    ]);
+    // 未串行化时三个 post 会先并发执行完，再连续三次 wait（跳级/乱序）
+    expect(order).toEqual(["post", "wait0", "post", "wait1000", "post", "wait2000"]);
+    expect(delays).toEqual([0, 1000, 2000]);
+  });
+
+  it("失败后成功 reset：下次失败从 0 重新开始（并发下不误复位）", async () => {
+    // 第 1 次失败 → 第 2 次成功（队列内 reset）→ 第 3 次失败应为 0 而非 2000
+    const { deliverer, delays } = rig([
+      () => Promise.reject(new Error("fail")),
+      () => Promise.resolve({ status: 200 }),
+      () => Promise.reject(new Error("fail")),
+    ]);
+    await deliverer.deliver("working", "s1");
+    await deliverer.deliver("editing", "s1");
+    await deliverer.deliver("testing", "s1");
+    expect(delays).toEqual([0, 0]);
+  });
+
+  it("killswitch / 节流 / null kind 语义保留", async () => {
+    const order: string[] = [];
+    const postStateImpl = vi.fn(async () => {
+      order.push("post");
+      return { status: 200 };
+    });
+    const ks = { on: false };
+    const deliverer = createDeliverer({
+      throttle: { shouldSend: () => true },
+      postStateImpl: postStateImpl as never,
+      killswitch: () => ks.on,
+    });
+    await deliverer.deliver(null, "s1"); // null kind → 直接跳过
+    expect(postStateImpl).not.toHaveBeenCalled();
+    ks.on = true; // TC-EV-10：killswitch 整体跳过
+    await deliverer.deliver("working", "s1");
+    expect(postStateImpl).not.toHaveBeenCalled();
+    const throttled = createDeliverer({
+      throttle: { shouldSend: () => false }, // TC-EV-18：节流丢弃
+      postStateImpl: postStateImpl as never,
+    });
+    await throttled.deliver("working", "s1");
+    expect(postStateImpl).not.toHaveBeenCalled();
+    expect(order).toEqual([]);
   });
 });
 

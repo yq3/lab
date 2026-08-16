@@ -35,13 +35,30 @@ describe("postState：读 endpoint/token 文件并 POST（TC-EV-09）", () => {
     const init = opts as Record<string, any>;
     expect(init.method).toBe("POST");
     expect(init.headers["x-pulsepet-token"]).toBe("tok-123");
-    expect(init.headers.connection).toBe("close");
+    // P3-③：Connection 是 fetch forbidden header（被实现忽略），不再发送冗余头
+    expect(init.headers).not.toHaveProperty("connection");
+    expect(init.headers).not.toHaveProperty("Connection");
     expect(JSON.parse(init.body as string)).toEqual({
       sessionId: "sess-1",
       kind: "editing",
       agent: "opencode",
     });
   });
+
+  it("fetch 挂起时 3s AbortSignal 兜底中止（TC-EV-14 客户端口径）", async () => {
+    writeRuntime("127.0.0.1:47998");
+    // 模拟服务端无响应：fetch 永不 resolve，仅靠 abort signal 中止
+    const fetchImpl = (_url: string, init?: Record<string, unknown>) =>
+      new Promise<{ status: number }>((_, reject) => {
+        const signal = init?.signal as AbortSignal;
+        signal.addEventListener("abort", () =>
+          reject(new Error(`aborted: ${signal.reason?.name ?? "timeout"}`)),
+        );
+      });
+    await expect(
+      postState("idle", "s1", "opencode", fetchImpl, dir),
+    ).rejects.toThrow(/aborted/);
+  }, 5000);
 
   it("端口回退后每次读最新 endpoint（无需重装插件，TC-EV-09）", async () => {
     const fetchImpl = vi.fn<

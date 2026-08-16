@@ -10,9 +10,6 @@
 
 use std::path::PathBuf;
 
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
-
 /// 生成 32 字符随机 token（每会话轮换，DESIGN §3.1）。
 pub fn generate_token() -> String {
     use rand::distributions::Alphanumeric;
@@ -58,12 +55,27 @@ pub fn ensure_runtime_dir() -> std::io::Result<()> {
 }
 
 /// 写入 token 文件；POSIX 端强制 mode 0600（TC-SEC-04）。
+///
+/// P2-10（M2 遗留）：创建即 0600——`OpenOptions::mode(0o600)` 在 open(2) 原子生效，
+/// 消除「先 write 后 chmod」之间内容以 umask 默认权限（如 0644）可读的短窗口；
+/// umask 只会在 0600 基础上更严，不会更宽。预先存在的旧文件（崩溃残留等）mode
+/// 不受 open 影响，写后仍统一收紧一次。Windows 无 POSIX 权限语义，走默认 ACL。
 pub fn write_token(token: &str) -> std::io::Result<()> {
+    use std::io::Write;
     ensure_runtime_dir()?;
     let path = token_path();
-    std::fs::write(&path, token)?;
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create(true).truncate(true);
     #[cfg(unix)]
     {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600); // 创建即 0600，无 umask 短窗口
+    }
+    let mut f = opts.open(&path)?;
+    f.write_all(token.as_bytes())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
     }
     Ok(())
@@ -92,6 +104,8 @@ pub fn clear_endpoint() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
 
     #[test]
     fn token_roundtrip() {
@@ -115,6 +129,9 @@ mod tests {
     fn token_file_is_0600() {
         // 用真实 runtime 路径写 token，验证 mode 0600 后清理（不污染用户目录残留）。
         let prev = read_token();
+        // P2-10：先删除确保走「创建」路径——mode 0600 由 OpenOptions 在 open(2) 原子
+        // 生效（而非先写后补 chmod），不存在 umask 短窗口。
+        let _ = std::fs::remove_file(token_path());
         write_token("test-token").unwrap();
         let meta = std::fs::metadata(token_path()).unwrap();
         assert_eq!(meta.permissions().mode() & 0o777, 0o600);

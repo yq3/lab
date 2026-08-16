@@ -4,10 +4,12 @@
  * Rust 侧 `session_state` 已做多 session 优先级合并，经 Tauri event `pulsepet://state`
  * 下发合并后的显示状态（payload = `{kind}`）。本模块：
  *   1. 初始化时查一次 `get_display_state`（避免启动时错过已发生的状态）；
- *   2. 监听 `pulsepet://state`，把 `kind` 写入 petStore。
+ *   2. 监听 `pulsepet://state`，把 `kind` 写入 petStore；
+ *   3. M3：监听 `pulsepet://bubble`（token 会话汇报等，payload = `{text}`）→
+ *      `showBubble`（内部做单行 1-140 净化）。
  *
  * 与 @tauri-apps/api 的交互用动态 import + 运行时探测，使纯函数（parseDisplayKind /
- * applyStatePayload）可在 vitest(node) 下直接单测。
+ * applyStatePayload / parseBubblePayload）可在 vitest(node) 下直接单测。
  */
 
 import { ALL_STATES, type NormalizedState } from "./state";
@@ -27,6 +29,19 @@ export function parseDisplayKind(payload: unknown): NormalizedState | null {
 export function applyStatePayload(payload: unknown): void {
   const kind = parseDisplayKind(payload);
   if (kind) usePetStore.getState().setRaw(kind);
+}
+
+/** 从 `pulsepet://bubble` payload 提取气泡文案（非字符串 → null，不出气泡）。 */
+export function parseBubblePayload(payload: unknown): string | null {
+  if (typeof payload !== "object" || payload === null) return null;
+  const text = (payload as { text?: unknown }).text;
+  return typeof text === "string" && text.length > 0 ? text : null;
+}
+
+/** 把气泡 payload 应用到 petStore（showBubble 内部净化；空文案丢弃）。 */
+export function applyBubblePayload(payload: unknown): void {
+  const text = parseBubblePayload(payload);
+  if (text) usePetStore.getState().showBubble(text);
 }
 
 /**
@@ -59,5 +74,10 @@ export async function initHttpBridge(): Promise<void> {
 
   await listen("pulsepet://state", (event) => {
     applyStatePayload(event.payload);
+  });
+
+  // M3：token 会话汇报气泡（idle + 有用量时 Rust 侧下发）
+  await listen("pulsepet://bubble", (event) => {
+    applyBubblePayload(event.payload);
   });
 }

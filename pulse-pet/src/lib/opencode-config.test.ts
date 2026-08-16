@@ -103,6 +103,48 @@ describe("mergePlugin：JSONC 感知幂等合并（TC-EV-01）", () => {
     const out = mergePlugin('{\n  "plugin": ["a", "b",]\n}');
     expect(jsoncToJson(out)).toEqual({ plugin: ["a", "b", SPEC] });
   });
+
+  // ---- P2-9（M2 遗留）：tokenizer 零消费死循环修复 + block 注释用例 ----
+
+  it("block 注释正确跳过，合并仍成功（P2-9 测试缺口）", () => {
+    const src = [
+      "{",
+      "  /* 顶部块注释，",
+      "     跨行 */",
+      '  "plugin": [',
+      '    "foo" /* 行内块注释 */',
+      "  ]",
+      "}",
+    ].join("\n");
+    const out = mergePlugin(src);
+    expect(out).toContain("/* 顶部块注释，");
+    expect(out).toContain("/* 行内块注释 */");
+    expect(jsoncToJson(out)).toEqual({ plugin: ["foo", SPEC] });
+  });
+
+  it("非法 JSONC 字符（@/单引号/emoji）不挂死，返回有限结果（P2-9）", () => {
+    // 旧实现 literal 分支零消费 → while 死循环 → install.sh 挂死；
+    // 本用例能跑完即证明 tokenizer 总在推进。
+    const cases = [
+      '{\n  "plugin": ["a"],\n  "x": @\n}',
+      "{\n  'plugin': ['a']\n}",
+      '{\n  "plugin": ["a"], /* \u{1f600} */ "y": 1\n}',
+    ];
+    for (const src of cases) {
+      const out = mergePlugin(src);
+      expect(typeof out).toBe("string");
+      expect(out.length).toBeGreaterThan(0);
+    }
+    // 非法但 plugin 数组仍可定位时，合并照常完成（幂等安装不受影响）。
+    // jsoncToJson 是测试用严格转换器（不认 @），先把非法字面量替换回合法值再校验结构。
+    const out = mergePlugin('{\n  "plugin": ["a"],\n  "x": @\n}');
+    expect(jsoncToJson(out.replace('"x": @', '"x": null'))).toEqual({
+      plugin: ["a", SPEC],
+      x: null,
+    });
+    // 幂等仍成立（TC-EV-01）：二次合并原样返回
+    expect(mergePlugin(out)).toBe(out);
+  });
 });
 
 describe("uninstallPlugin：只移除 managed 项（TC-EV-02）", () => {
