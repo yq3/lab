@@ -2,7 +2,7 @@
 name: Committer
 description: 代码审查 + 交付把关：语义审查代码改动与测试质量，输出问题清单与审查结论；终态做 PR 正式评审留痕
 mode: subagent
-model: deepseek/deepseek-v4-pro
+model: deepseek/deepseek-v4-pro@max
 permission:
   edit: deny
   bash:

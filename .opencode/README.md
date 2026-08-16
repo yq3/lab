@@ -2,7 +2,7 @@
 
 > 本文档是 `lab/.opencode/` 配置的权威设计文档：实现细节 + 设计依据（决策记录）。
 > 内容已去掉具体项目属性，适用于任何目标项目；迁移到其他仓库/全局配置时随本目录整体搬迁。
-> 版本：v5（2026-08-15，四轮修订：subagent 调用前用户确认 D28、新任务遗留事项检查 D29、develop_opencode 分支策略 D30；前三轮见 D15/D26-D27）
+> 版本：v8（2026-08-16，六轮修订：tester 权限扩容 D32、检查点字段完整性 D33、移除 supervisorSessionId D34；五轮见 D31，四轮见 D28-D30，前三轮见 D15/D26-D27）
 
 ---
 
@@ -99,12 +99,13 @@ supervised-coding（编排者，便宜模型）
 
 | 角色 | 模型 | 定位理由 |
 |---|---|---|
-| supervised-coding | `deepseek/deepseek-v4-flash` | 只做调度与状态机，便宜快 |
-| coder | `zhipuai-coding-plan/glm-5.3` | 主力实现，能力强 |
-| tester | `deepseek/deepseek-v4-flash` | 跑命令+写测试为主，便宜；质量不足可升级 |
-| committer | `deepseek/deepseek-v4-pro` | 独立模型族，审慎推理（跨族盲点正交，见 D11） |
+| supervised-coding | `deepseek/deepseek-v4-flash@max` | 只做调度与状态机，便宜快 |
+| coder | `zhipuai-coding-plan/glm-5.3@max` | 主力实现，能力强 |
+| tester | `deepseek/deepseek-v4-flash@max` | 跑命令+写测试为主，便宜；质量不足可升级 |
+| committer | `deepseek/deepseek-v4-pro@max` | 独立模型族，审慎推理（跨族盲点正交，见 D11） |
 
 > 模型 ID 已用 `opencode models` 验证存在（2026-08-14）。⚠️ subagent 不显式写 `model` 会**继承调用者的模型**，三个 subagent 必须各自写死。
+> **variant 必须显式写 `@max`**（D31）：`model:` 不带 `@variant` 后缀时走该模型的默认 variant（非最高推理强度）。三个模型的 `max` 均在各自 `reasoning_options` 支持列表内（2026-08-16 验证）。
 
 ---
 
@@ -206,7 +207,7 @@ endif
 stop
 ```
 
-> 中断恢复：任何状态均可中断，重启后 resume 主会话（supervisorSessionId），supervised-coding 读检查点按 status 从断点继续（恢复语义见 §4.3 表格）。
+> 中断恢复：任何状态均可中断，重启后 resume 主会话（opencode 自身 session 管理），supervised-coding 读检查点按 status 从断点继续（恢复语义见 §4.3 表格）。
 
 ### 4.2 每轮迭代顺序（为什么 tester 在 committer 前：D5）
 
@@ -239,7 +240,6 @@ coder 修复/实现（TDD + 验证证据小节）→ 自测通过 → 本地 com
 ---
 taskId: task-001
 target: <目标项目目录>      # coder/tester/committer 以此作为工作根
-supervisorSessionId: null   # supervised-coding 所在的 opencode 会话（恢复时 resume 主会话用）
 coderTaskId: null           # Task 工具返回的 coder 会话 ID（续接用，见 §4.3.1）
 testerTaskId: null          # 同上，tester
 committerTaskId: null        # 同上，committer
@@ -282,6 +282,8 @@ updatedAt: 2026-08-11T10:30:00+08:00
 
 > **updatedAt 铁律**：上表每次写入（无论改动大小，包括只改 status/轮次记录/遗留事项小节）都必须同步把 frontmatter `updatedAt` 更新为当前时间（ISO 8601 含时区），禁止沿用旧值——这是判断检查点新鲜度与恢复时序的依据，已写入 supervised-coding prompt 与模板注释。
 
+> **字段完整性铁律（D33）**：每次写入 frontmatter 必须包含模板全部字段，未产生的值写 `null` / `[]`，禁止省略字段本身；事件即写（Task 调用返回即写 xxxTaskId，coder 返回即写 filesChanged + SHA）；写后必读校验（重读检查点逐字段核对，缺失当场补写，未校验视为未完成）——已写入 supervised-coding prompt 与模板注释。
+
 | 节点 | status | 写入内容 |
 |---|---|---|
 | 创建 | spec_confirm | 任务原文 |
@@ -312,10 +314,9 @@ updatedAt: 2026-08-11T10:30:00+08:00
 - **首次调用**：Task 调用后把返回的 task_id 写入检查点
 - **二次调用**：必须携带对应 task_id 续接同一会话（coder 记得自己上一轮的实现与思路；tester 记得自己写过的测试；committer 记得自己提过的意见），**禁止新开**
 - **续接失败**（进程重启 / compaction 导致会话失效）：新开会话，更新检查点中的 task_id，并告知该角色"从检查点文件恢复上下文"
-- **supervised-coding 自身**：主会话由 opencode session 管理，记录到 `supervisorSessionId`（中断后用户据此 resume 主会话），未知则留空
 - 会话 ID 是"每轮节点写入检查点"的一部分：每次 Task 调用后立即更新
 
-> 业务 ID（`taskId`，1 任务 = 1 检查点文件）与 Task 会话 ID（`coderTaskId` 等，1 角色 = 1 会话）是两层 ID，不要混淆。任务会创建 1 个检查点文件 + 最多 4 个会话 ID。
+> 业务 ID（`taskId`，1 任务 = 1 检查点文件）与 Task 会话 ID（`coderTaskId` 等，1 角色 = 1 会话）是两层 ID，不要混淆。任务会创建 1 个检查点文件 + 最多 3 个会话 ID（coder/tester/committer 各一；主会话恢复走 opencode 自身 session 管理，不入检查点，见 D34）。
 
 **协议铁律**（写入 supervised-coding prompt）：正常流程每轮节点只写、恢复时先读、状态只能前进、检查点文件是唯一权威。
 
@@ -344,7 +345,7 @@ User -> Sup: 下达需求
 Sup -> CP: 扫描历史检查点遗留事项
 Sup -> CP: 创建检查点（任务原文 / 会话 ID 字段）
 Sup -> User: 复述需求 + 验收标准 + 遗留事项清单，请求确认
-User --> Sup: 确认（记录 supervisorSessionId）
+User --> Sup: 确认
 
 Sup -> Coder: Task(需求 + 文档 + 检查点路径)
 ' 首次调用，返回 task_id=A
@@ -472,9 +473,9 @@ Sup -> User: 汇报合入请求
 
 | 角色 | 放行 | 拦截/询问 |
 |---|---|---|
-| supervised-coding | git status/log/diff/rev-parse | 其余全部 ask（含 push/merge） |
+| supervised-coding | git status/log/diff/rev-parse + ls/cat/date（检查点协议所需只读命令） | 其余全部 ask（含 push/merge） |
 | coder | 全部 | push/pull/cherry-pick/revert 弹确认（ask）；merge、remote 变更、reset --hard、clean、rm -rf（deny）；**例外（D30）**：`git merge origin/develop*`、`git merge --no-edit origin/develop*`、`git rebase origin/develop*`（同步 develop 进 develop_opencode 专用，allow） |
-| tester | 只读 git（含 rev-parse）+ cargo/npm/pnpm/npx/yarn/bun 全族 | 其余 ask |
+| tester | 只读 git（status/diff/log/show/rev-parse）+ 只读探查（cd/pwd/ls/cat/head/tail/grep/rg/which/file/wc/stat/date）+ cargo/npm/pnpm/npx/yarn/bun/node 全族 | 其余 ask |
 | committer | 只读 git（diff/status/log/show/rev-parse）+ gh pr diff/view/review/comment | 其余 deny |
 
 ---
@@ -493,7 +494,7 @@ Sup -> User: 汇报合入请求
 
 ## 8. 设计依据（决策记录）
 
-> 本文档由 2026-08 的多轮讨论沉淀。D1-D12 为初版决策，D13-D20 为首轮审阅修订，D21-D25 为二次迭代（改名体系、命名划分、skill 体系调研），D26-D27 为三轮修订（护栏加固、状态机一致性、回 spec 路径），D28-D30 为四轮修订（调用前确认、遗留事项清偿、develop_opencode 分支策略）。
+> 本文档由 2026-08 的多轮讨论沉淀。D1-D12 为初版决策，D13-D20 为首轮审阅修订，D21-D25 为二次迭代（改名体系、命名划分、skill 体系调研），D26-D27 为三轮修订（护栏加固、状态机一致性、回 spec 路径），D28-D30 为四轮修订（调用前确认、遗留事项清偿、develop_opencode 分支策略），D31 为五轮修订（模型 variant 显式 @max），D32-D34 为六轮修订（首跑实测反馈：tester 权限扩容、检查点字段完整性、移除死字段）。
 
 ### D1. 为什么不用 GitHub Issue/PR 作为 agent 间通信媒介
 
@@ -656,7 +657,7 @@ clowder F253 的"盲点正交性"：不同模型族有不同系统性盲点，�
 **配套规则**：
 - 4 个 agent 全部显式写 `name`：`Supervised-Coding` / `Coder` / `Tester` / `Committer`
 - 引用注册名的地方必须同步（task 权限、调用方 prompt 中的 Task 调用词）——曾因漏改 tester/coder prompt 里的角色引用导致不一致（已修）
-- 检查点字段名（`supervisorSessionId`、`coderTaskId` 等）与注册名解耦，可保留原样
+- 检查点字段名（`coderTaskId`、`committerTaskId` 等）与注册名解耦，可保留原样
 
 ### D23. 角色可见性：谁可以调用谁（2026-08-12 二次迭代）
 
@@ -725,6 +726,45 @@ task-pulsepet-m1 交付后用户定案（该检查点"交付后约定"节）固�
 - **提交前同步**：每次本地 commit 前 `git fetch origin` → 将 `origin/develop` merge（或 rebase）进 `develop_opencode`，确保分支不落后于 develop；交付 push 前同样先同步再推
 - **权限例外**：`git merge*` 整体 deny 不变（D15），仅精确放行 `git merge origin/develop*` / `git merge --no-edit origin/develop*` / `git rebase origin/develop*`（同步专用动作，allow）——延续 D15"匹配动作而非分支名"的思路，授权粒度收到最小；其余 merge（任意分支）仍 deny
 
+### D31. 全员显式指定 `@max` variant（2026-08-16 五轮修订）
+
+初版 `model:` 只写 `provider/model`，未考虑 opencode 的 variant 机制：不带 `@variant` 后缀时使用模型默认 variant，非最高推理强度——设计时意图是各角色满血推理，实际运行却是默认档（**设计未覆盖点，task-pulsepet 跑完后复盘发现**）。
+
+修订：4 个 agent 的 `model:` 全部显式加 `@max` 后缀。验证依据（models.dev live 缓存，2026-08-16）：
+
+| 模型 | reasoning_options 支持的 effort |
+|---|---|
+| `zhipuai-coding-plan/glm-5.3` | low / high / **max** |
+| `deepseek/deepseek-v4-flash` | toggle；low / high / **max** |
+| `deepseek/deepseek-v4-pro` | toggle；high / **max** |
+
+注意：variant 支持列表随 models.dev 数据更新（opencode 每 5 分钟刷新缓存），换模型时须重新确认目标 variant 存在（`~/.cache/opencode/models.json` 或 TUI `/models`）。
+
+### D32. tester 权限扩容：放行只读探查与 node（2026-08-16 六轮修订，首跑实测反馈）
+
+实跑反馈：tester 一轮测试触发十数次权限确认，打断节奏。根因：bash 白名单只覆盖构建/测试族与只读 git，模型日常的目录/文件探查、git show、node 直接执行全部落入 `*: ask`。修订：
+
+- **放行纯只读探查命令**：cd/pwd/ls/cat/head/tail/grep/rg/which/file/wc/stat/date——均无写原语（管道中的对端命令仍按各自模式匹配，不会被连带放行）
+- **放行 `git show*`**：读特定 commit 内容，与 diff/log 同级
+- **放行 `node *`**：与 cargo/npm 同类——测试工具链本就可执行任意代码（`npm run` 任意脚本、cargo build.rs），威胁模型是防误操作、非防对抗，node 不扩大实际边界
+- **有意不放行**：find（`-delete`/`-exec` 是写原语，找文件用内置 Glob 工具）、cp/mv/rm/mkdir/touch（写原语；测试文件用内置 write/edit 落盘，自动建目录）、python 等（栈外，扩展走 D14 流程）
+- edit 权限不变（仍限定测试路径）；tester prompt 增补引导：能用内置 read/grep/glob 工具的一律优先用工具（零摩擦）
+
+### D33. 检查点字段完整性铁律（2026-08-16 六轮修订，首跑实测反馈）
+
+实跑发现 supervised-coding 漏写 frontmatter 字段（xxxTaskId、filesChanged 等）。后果：task_id 丢失 → 子会话无法续接（只能新开重建上下文，D22 续接机制失效）；filesChanged 丢失 → committer 审查对象清单不完整。修订（三条铁律写入 supervised-coding prompt，模板 frontmatter 加注释）：
+
+- **frontmatter 完整性**：每次写入必须含模板全部字段，未产生的值写 `null` / `[]`，禁止省略字段本身
+- **事件即写，禁止攒批**：Task 调用返回 → 立即写 xxxTaskId；coder 返回 → 立即写 filesChanged + commit SHA；verdict 返回 → 立即写 verdict + SHA
+- **写后必读校验**：写完立即用 read 重读检查点逐字段核对，缺失当场补写；未经校验的写入视为未完成
+- 配套：supervised-coding bash 放行 `date*`（时间铁律依赖的取时命令，原落入 ask，既是摩擦也是漏写 updatedAt 的隐性诱因）与 ls/cat（扫历史检查点、读模板）
+
+### D34. 移除 supervisorSessionId 字段（2026-08-16 六轮修订）
+
+三个任务实跑证实该字段是死字段：supervised-coding 在会话内**拿不到自己的 opencode 会话 ID**（prompt 只能"不知道则留空"），task-pulsepet-m1/m2/m3 三份检查点全部为 `null`，从未起过作用。主会话恢复实际走 opencode 自身 session 管理（TUI resume 列表），本就不依赖检查点里的这个值。
+
+修订：检查点 frontmatter 删除 `supervisorSessionId` 字段（模板、README 示例、supervised-coding prompt、时序图同步清理；m1-m3 历史检查点中的 null 字段一并移除）。会话 ID 计数从"最多 4 个"改为"最多 3 个"（coder/tester/committer 各一）。附带收益：D33 完整性铁律不再强制维护一个永远填不上的字段。
+
 ---
 
 ## 9. 已知限制与后续演进
@@ -733,7 +773,7 @@ task-pulsepet-m1 交付后用户定案（该检查点"交付后约定"节）固�
 
 - **循环可靠性是软约束**：协议依赖模型遵循 prompt（检查点写坏最坏重跑一轮，可接受）
 - **乒乓检测是启发式**：语义比对可能误判/漏判（D19）
-- **支持技术栈受限**：tester/bash 白名单覆盖 **JS/TS（npm/pnpm/yarn/bun/npx）+ Rust（cargo）**；引入其他栈（Python/Go/Swift）需先扩展 tester 权限与测试命令
+- **支持技术栈受限**：tester/bash 白名单覆盖 **JS/TS（npm/pnpm/yarn/bun/npx/node）+ Rust（cargo）**；引入其他栈（Python/Go/Swift）需先扩展 tester 权限与测试命令
 - **Rust 测试边界**：`#[cfg(test)]` 单元测试内联在 src/ 业务文件中，tester 权限写不到，由 coder TDD 自测覆盖；tester 的 Rust 验证限于 `tests/` 集成测试与用例勾验
 - **模型质量依赖**：tester 用便宜模型写测试，质量不足时需升级模型或由 committer 兜底审查测试质量
 - **平台验证受限**：本地只能验证当前平台行为（如 macOS），跨平台行为靠 CI/手动

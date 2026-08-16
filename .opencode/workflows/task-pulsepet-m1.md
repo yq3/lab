@@ -1,7 +1,6 @@
 ---
 taskId: task-pulsepet-m1
 target: pulse-pet/
-supervisorSessionId: null
 coderTaskId: ses_fff32f837ffewyE7fk4x62IMqx
 testerTaskId: ses_ffd44c59bffe5SbsgtS0Q2oZuC
 committerTaskId: ses_ffd324abaffecbhHdYzGvlR1Vk
