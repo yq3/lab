@@ -191,14 +191,31 @@ function put(cells, x, y, ch) {
  * - eyes："open" | "blink" | "x"
  * - headShift：头部（CAT 行 <15）水平位移（waiting 张望）
  * - slump：整体下移格数（failed 垂头丧气）
+ * - rightEyeSlit：true 时保留 CAT 原始右眼 K 缝（2 格宽×1 格高 K + 下方白毛），
+ *   不覆盖为 B 睁眼——idle 行专用（与 app-icon.png 图标同款"左眼睁、右眼一条缝"
+ *   常驻造型；R1 修复轮 6，用户 22:20 口径）。动作行维持双眼睁开。
  */
-function blitCat(cells, ox, oy, { eyes = "open", headShift = 0, slump = 0 } = {}) {
+function blitCat(
+  cells,
+  ox,
+  oy,
+  { eyes = "open", headShift = 0, slump = 0, rightEyeSlit = false } = {},
+) {
   for (let gy = 0; gy < 32; gy++) {
     for (let gx = 0; gx < 32; gx++) {
       let ch = CAT[gy][gx];
-      // 双眼先统一为 open（原始画右眼是 K 单眨眼，atlas 基线两眼睁开）
+      // 左眼统一为 open；右眼仅在动作行（!rightEyeSlit）覆盖为 B
+      // （CAT 原始画右眼是 K 单眨眼缝：行10 KK + 行11 WW 白毛）
       if (gy >= EYE_L.y && gy <= EYE_L.y + 1 && gx >= EYE_L.x && gx <= EYE_L.x + 1) ch = "B";
-      if (gy >= EYE_R.y && gy <= EYE_R.y + 1 && gx >= EYE_R.x && gx <= EYE_R.x + 1) ch = "B";
+      if (
+        !rightEyeSlit &&
+        gy >= EYE_R.y &&
+        gy <= EYE_R.y + 1 &&
+        gx >= EYE_R.x &&
+        gx <= EYE_R.x + 1
+      ) {
+        ch = "B";
+      }
       const sx = ox + gx + (gy < 15 ? headShift : 0);
       const sy = oy + gy + slump;
       if (ch !== ".") put(cells, sx, sy, ch);
@@ -292,9 +309,11 @@ function atlasFrameCells(row, col) {
   let dx = 0;
   let dy = 0;
   switch (row) {
-    case 0: // idle：6 帧眨眼（列 1-2 闭眼，对应 110ms 短帧）
-      opts.eyes = col === 1 || col === 2 ? "blink" : "open";
-      dy = col >= 4 ? 1 : 0; // 长帧里轻微下沉（呼吸感）
+    case 0: // idle：常驻"左眼睁、右眼一条缝"造型（与 app-icon.png 图标同款，
+      // CAT 原始单眨眼；R1 修复轮 6 用户口径：不是只在 220ms 闪一下）
+      // + 长帧轻微下沉（呼吸感）。其它动作行双眼睁开不变。
+      opts.rightEyeSlit = true;
+      dy = col >= 4 ? 1 : 0;
       break;
     case 1: // running-right：向右侧倾 + 左侧速度线
     case 2: {
