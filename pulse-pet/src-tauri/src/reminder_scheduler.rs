@@ -62,6 +62,7 @@ pub struct TriggerPayload {
 }
 
 /// 烟花播放指令 payload（物理→逻辑像素换算后的 CSS 坐标，前端 ×dpr 进 canvas）。
+/// `target` = 宠物当前所处显示器的正中心（DESIGN §5.3：绽放点固定于该屏中心）。
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct PlayPayload {
     pub log_id: i64,
@@ -595,37 +596,68 @@ fn fire_and_notify(app: &tauri::AppHandle, fired: &[ReminderRule]) {
     }
 }
 
-/// 计算烟花发射点：pet 窗口中心换算到 fireworks 窗口坐标系（逻辑像素）。
+/// 计算烟花 play payload（DESIGN §5.3 用户补充需求）：
+/// - 发射点 = pet 窗口中心；
+/// - **绽放点 = pet 当前所处显示器（monitor）的正中心**（多显示器取宠物所在屏；
+///   单显示器即屏幕中心）；
+/// - 坐标换算到 fireworks 窗口逻辑像素（payload 消费方 ×dpr 进 canvas）。
 fn compute_play_payload(app: &tauri::AppHandle, log_id: i64) -> PlayPayload {
     let fw = app.get_webview_window("fireworks");
+    let pet = app.get_webview_window("pet");
+
+    // 1) 宠物当前所处显示器：pet.current_monitor()（窗口当前所在屏）；
+    //    取不到时回退 fireworks 窗口所在屏（通常为主屏）。
+    let mon = pet
+        .as_ref()
+        .and_then(|w| w.current_monitor().ok().flatten())
+        .or_else(|| fw.as_ref().and_then(|w| w.current_monitor().ok().flatten()));
+
+    // 2) 多显示器跟随：把 fireworks 窗口铺到该显示器（隐藏态移动，无视觉闪烁）。
+    //    单显示器时窗口 bounds 已等于该屏 → no-op。
+    if let (Some(fww), Some(m)) = (fw.as_ref(), mon.as_ref()) {
+        cover_monitor(fww, m);
+    }
+
     let sf = fw.as_ref().and_then(|w| w.scale_factor().ok()).unwrap_or(1.0);
-    let (fw_x, fw_y, fw_w, fw_h) = match (&fw, fw.as_ref().and_then(|w| w.outer_position().ok()), fw.as_ref().and_then(|w| w.outer_size().ok())) {
-        (Some(_), Some(p), Some(s)) => (
-            p.x as f64 / sf,
-            p.y as f64 / sf,
-            s.width as f64 / sf,
-            s.height as f64 / sf,
+    // 移动后重读 fireworks 窗口 bounds（物理像素）
+    let (fw_x, fw_y, fw_w, fw_h) = match (
+        fw.as_ref().and_then(|w| w.outer_position().ok()),
+        fw.as_ref().and_then(|w| w.outer_size().ok()),
+    ) {
+        (Some(p), Some(s)) => (p.x as f64, p.y as f64, s.width as f64, s.height as f64),
+        _ => (0.0, 0.0, 1280.0 * sf, 800.0 * sf),
+    };
+
+    // 3) 发射点 = pet 中心（物理 → fireworks 窗口逻辑坐标；取不到退化为窗口底部中间）
+    let (ox, oy) = match (&pet, pet.as_ref().map(|w| (w.outer_position(), w.outer_size()))) {
+        (Some(_), Some((Ok(p), Ok(s)))) => (
+            (p.x as f64 + s.width as f64 / 2.0 - fw_x) / sf,
+            (p.y as f64 + s.height as f64 / 2.0 - fw_y) / sf,
         ),
-        _ => (0.0, 0.0, 1280.0, 800.0),
+        _ => (fw_w / 2.0 / sf, fw_h * 0.85 / sf),
     };
-    // 发射点 = pet 中心（取不到则退化为 fireworks 窗口底部中间）
-    let (cx, cy) = match app.get_webview_window("pet") {
-        Some(w) => match (w.outer_position(), w.outer_size()) {
-            (Ok(p), Ok(s)) => (
-                (p.x as f64 + s.width as f64 / 2.0) / sf,
-                (p.y as f64 + s.height as f64 / 2.0) / sf,
-            ),
-            _ => (fw_x + fw_w / 2.0, fw_y + fw_h * 0.85),
-        },
-        None => (fw_x + fw_w / 2.0, fw_y + fw_h * 0.85),
+    let origin_x = ox.clamp(20.0, (fw_w / sf - 20.0).max(20.0));
+    let origin_y = oy.clamp(20.0, (fw_h / sf - 20.0).max(20.0));
+
+    // 4) 绽放点 = 该显示器正中心（物理 → fireworks 窗口逻辑坐标；cover 后窗口
+    //    bounds == 显示器 bounds，故 target 即窗口正中心；clamp 仅作安全兜底）
+    let (tx, ty) = match mon.as_ref() {
+        Some(m) => monitor_center_in_window(
+            m.position().x,
+            m.position().y,
+            m.size().width,
+            m.size().height,
+            fw_x as i32,
+            fw_y as i32,
+            sf,
+        ),
+        None => (fw_w / 2.0 / sf, fw_h / 2.0 / sf), // 兜底：窗口中心
     };
-    let origin_x = (cx - fw_x).clamp(20.0, (fw_w - 20.0).max(20.0));
-    let origin_y = (cy - fw_y).clamp(20.0, (fw_h - 20.0).max(20.0));
-    // 目标：屏幕中心附近随机扰动（"朝屏幕中心或随机方向"）
-    let mut rng = rand::thread_rng();
-    use rand::Rng;
-    let target_x = fw_w * (0.5 + rng.gen_range(-0.15..0.15));
-    let target_y = fw_h * (0.30 + rng.gen_range(0.0..0.15));
+    let target_x = tx.clamp(20.0, (fw_w / sf - 20.0).max(20.0));
+    let target_y = ty.clamp(20.0, (fw_h / sf - 20.0).max(20.0));
+    eprintln!(
+        "[pulsepet] fireworks target = monitor center ({target_x:.0}, {target_y:.0}) logical, origin ({origin_x:.0}, {origin_y:.0})"
+    );
     PlayPayload {
         log_id,
         origin_x,
@@ -633,6 +665,51 @@ fn compute_play_payload(app: &tauri::AppHandle, log_id: i64) -> PlayPayload {
         target_x,
         target_y,
     }
+}
+
+/// 显示器正中心 → fireworks 窗口逻辑坐标（纯函数，可单测）。
+/// `(mon_x..mon_w)` 为显示器物理 bounds，`(win_x, win_y)` 为窗口物理左上角。
+pub fn monitor_center_in_window(
+    mon_x: i32,
+    mon_y: i32,
+    mon_w: u32,
+    mon_h: u32,
+    win_x: i32,
+    win_y: i32,
+    sf: f64,
+) -> (f64, f64) {
+    let cx = mon_x as f64 + mon_w as f64 / 2.0;
+    let cy = mon_y as f64 + mon_h as f64 / 2.0;
+    ((cx - win_x as f64) / sf, (cy - win_y as f64) / sf)
+}
+
+/// 把 fireworks 窗口铺满指定显示器（多显示器：绽放跟随宠物所在屏）。
+/// 窗口隐藏时调用（play 流程 show 之前）→ 无视觉闪烁；bounds 已相符则 no-op。
+fn cover_monitor(win: &tauri::WebviewWindow, mon: &tauri::Monitor) {
+    let mpos = mon.position();
+    let msize = mon.size();
+    let already = win
+        .outer_position()
+        .map(|p| p == *mpos)
+        .unwrap_or(false)
+        && win.outer_size().map(|s| s == *msize).unwrap_or(false);
+    if already {
+        return;
+    }
+    // maximized 状态下 set_frame 可能被系统忽略 → 先退出再铺满（隐藏态无闪烁）
+    if win.is_maximized().unwrap_or(false) {
+        let _ = win.unmaximize();
+    }
+    let _ = win.set_position(*mpos);
+    let _ = win.set_size(*msize);
+    eprintln!(
+        "[pulsepet] fireworks window moved to monitor {:?} ({},{} {}x{})",
+        mon.name(),
+        mpos.x,
+        mpos.y,
+        msize.width,
+        msize.height
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -1327,5 +1404,30 @@ mod tests {
         assert!(parse_rfc3339_ms("not a date").is_none());
         let m = now_minute_of_day();
         assert!((0..1440).contains(&m));
+    }
+
+    // ---- 绽放点 = 宠物所处显示器正中心（DESIGN §5.3 用户补充需求） ----
+
+    #[test]
+    fn monitor_center_single_display_dpr2() {
+        // 本机实测配置：主屏 2940×1912 物理（dpr=2），fireworks 窗口铺满全屏
+        // → 逻辑坐标 (735, 478) = 屏幕正中心
+        let (tx, ty) = monitor_center_in_window(0, 0, 2940, 1912, 0, 0, 2.0);
+        assert!((tx - 735.0).abs() < 1e-9);
+        assert!((ty - 478.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn monitor_center_secondary_display_relative_to_window() {
+        // 次屏从 x=2940 起（2940×1912 物理），fireworks 窗口已铺到次屏
+        // → 绽放点在窗口坐标系内仍是该屏正中心 (735, 478)（与屏号无关）
+        let (tx, ty) = monitor_center_in_window(2940, 0, 2940, 1912, 2940, 0, 2.0);
+        assert!((tx - 735.0).abs() < 1e-9);
+        assert!((ty - 478.0).abs() < 1e-9);
+        // 窗口未对齐显示器（窗口在主屏、宠物屏为中心在次屏）：坐标带偏移，
+        // 供 clamp 前的原始值（运行时 cover_monitor 会先对齐，此分支仅兜底语义）
+        let (tx, ty) = monitor_center_in_window(2940, 0, 2940, 1912, 0, 0, 1.0);
+        assert!((tx - 4410.0).abs() < 1e-9);
+        assert!((ty - 956.0).abs() < 1e-9);
     }
 }

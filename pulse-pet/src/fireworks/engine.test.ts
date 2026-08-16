@@ -54,17 +54,51 @@ describe("FireworksEngine（TC-RM-09 可断言逻辑层）", () => {
     expect(e.isDone()).toBe(true);
   });
 
-  it("发射点来自 payload（宠物位置为发射点）", () => {
+  it("炸裂点=传入的目标点（屏幕正中心，DESIGN §5.3 用户补充需求）", () => {
+    for (const target of [
+      { x: 735, y: 478 }, // 单显示器：屏幕正中心
+      { x: 100, y: 100 }, // 任意目标（如另一显示器的中心）
+    ]) {
+      const e = new FireworksEngine({ ...PLAY, target_x: target.x, target_y: target.y });
+      // 逐帧步进到炸裂
+      let guard = 0;
+      while (!e.hasBurst && guard++ < 600) e.step(FRAME_MS);
+      expect(e.hasBurst).toBe(true);
+      expect(e.getBurstPoint()).toEqual({ x: target.x, y: target.y });
+      // 炸裂帧的花瓣粒子都从目标点出发（此刻位移 ≤ 数帧速度）
+      const ps = e.getParticles().filter((p) => p.type === "petal");
+      expect(ps.length).toBeGreaterThanOrEqual(320);
+      for (const p of ps) {
+        expect(Math.abs(p.x - target.x)).toBeLessThanOrEqual(60);
+        expect(Math.abs(p.y - target.y)).toBeLessThanOrEqual(60);
+      }
+    }
+  });
+
+  it("发射点来自 payload：上升段流光出现在发射点附近（弹道起始段）", () => {
     const e = new FireworksEngine(PLAY);
-    // 未步进时无粒子；步进 1 帧后流光粒子应出现在发射点附近
-    // （上升速度 15-18.5 px/帧，首帧位移即在此量级）
+    // 步进 1 帧：shell 沿弹道前进 ~5%（easeOutQuad 起始快），流光粒子在起始段附近
     e.step(FRAME_MS);
     const ps = e.getParticles();
     expect(ps.length).toBeGreaterThan(0);
     for (const p of ps) {
-      expect(Math.abs(p.x - PLAY.origin_x)).toBeLessThan(5);
-      expect(Math.abs(p.y - PLAY.origin_y)).toBeLessThan(25);
+      expect(Math.abs(p.x - PLAY.origin_x)).toBeLessThan(45);
+      expect(Math.abs(p.y - PLAY.origin_y)).toBeLessThan(45);
     }
+    // 未到达前不炸裂
+    expect(e.hasBurst).toBe(false);
+    expect(e.getBurstPoint()).toBeNull();
+  });
+
+  it("发射点=目标点（宠物恰在屏幕中心）也能正常炸裂", () => {
+    const e = new FireworksEngine({
+      ...PLAY,
+      origin_x: PLAY.target_x,
+      origin_y: PLAY.target_y,
+    });
+    runToEnd(e);
+    expect(e.getBurstPoint()).toEqual({ x: PLAY.target_x, y: PLAY.target_y });
+    expect(e.isDone()).toBe(true);
   });
 
   it("reset 后可复用：清空旧粒子、重新完整播放（TC-RM-10）", () => {
