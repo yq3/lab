@@ -243,6 +243,8 @@ fn token_stats_current_session(session_id: String) -> Result<Option<TokenRow>, S
 - 提醒规则持久化在脉冲内 SQLite（`pulsepet.db`）的 `reminders` 表。
 - 到点：发送 Tauri event `reminder://trigger` 给前端，前端根据规则决定渲染气泡还是烟花。
 - 调度器读 SQLite 表后做 in-memory 倒计时，避免每分钟查库；用户改设置后通过 Tauri command 通知调度器 reload。
+- **暂停所有提醒（M4 定案）**：托盘"暂停所有提醒"开关（app_state 持久化）暂停期间，到期规则的倒计时**顺延**，取消暂停后按顺延点触发，不补弹错过场次。
+- **"试一试"手动触发（M4 定案）**：panel 的"试一试"（`reminders_trigger_now`）受暂停 + 3 分钟去重约束，跳过窗口/倒计时检查；触发后推进 `last_triggered_at` 与 next_due（会顺延下一自然触发点）。
 
 ### 5.2 气泡模式（默认）
 
@@ -254,12 +256,15 @@ fn token_stats_current_session(session_id: String) -> Result<Option<TokenRow>, S
 ### 5.3 烟花模式（用户设置中开启）
 
 - **触发**：用户在提醒规则上勾"烟花模式"或全局开关。
-- **效果**：宠物位置为发射点，朝屏幕中心或随机方向发一束粒子烟花，3-5s 消散，粒子带渐变与拖尾，参考日本动漫烟花的"流光花瓣"质感。
+- **全局开关 OR 语义（M4 定案）**：全局烟花开关开 → 所有规则升级放烟花（无单条豁免机制）；单条 `use_fireworks=1` 覆盖全局关。`use_fireworks ∥ fireworks_global` 任一为真即放烟花。
+- **效果**：宠物位置为发射点，**绽放点固定为宠物当前所处屏幕（显示器）的中轴线上、高度为屏幕从上往下 0.3 倍处（中间偏上）**——即绽放点 x = 该屏水平中心，y = 屏高 × 0.3（多显示器场景取宠物所在显示器计算；单显示器即当前屏）。**屏高取整显示器物理高度（含菜单栏/Dock 区域；用户 2026-08-16 确认维持整屏口径）**。无论宠物在该屏幕的哪个位置，烟花都发射到该点绽放。3-5s 消散，粒子带渐变与拖尾，参考日本动漫烟花的"流光花瓣"质感。
 - **实现选型**：HTML canvas 全屏透明窗口 + 粒子动画。理由：① 跨 macOS/Windows 一致（不用写两套平台原生）② Tauri 多窗口天然支持 ③ 体积小（不引入 pixi/three）④ canvas 2D 粒子配合 radial gradient + 拖尾即可达到动漫质感。
   - 粒子数 ~300-500；requestAnimationFrame 60fps；颜色用 HSL 渐变 + alpha fade；拖尾用上一帧叠加半透明黑（或透明 + globalCompositeOperation）。
 - **音频**（可选，默认关）：可选"啾——砰"短音效，音频文件内置在 `src-tauri/resources/`，通过 Tauri audio API 播放。M5 阶段评估是否需要。
 
 ### 5.4 数据模型
+
+- **时间戳格式（M4 定案）**：`reminders.last_triggered_at` / `reminder_logs.triggered_at` / `acked_at` 统一 RFC3339 本地字符串（chrono 序列化，schema TEXT 列）。
 
 ```sql
 CREATE TABLE reminders (
@@ -649,6 +654,7 @@ lab/pulse-pet/
 - **opencode 插件运行时**：opencode 插件 API 目前在演进，hooks 字段稳定但可能新增；v1 监听字段做存在性检测后兜底 `event` bus；安装脚本做"幂等合并 + `--pulse-pet-managed` 标记"保证卸载不误删用户原有插件。
 - **Tauri 2 API 变化**：锁定最新稳定版，按文档调整（与 todo-lite 同策略）。
 - **Windows 端实机验证延后**：v1 主要在 macOS 开发，Windows 在 M4/M8 阶段交叉验证。
+- **多显示器烟花绽放点实机验证（M4 注记）**：M4 实现为代码级链路（`pet.current_monitor()` 判屏 → `cover_monitor` 铺窗 → `monitor_burst_point_in_window` 纯函数），单屏已实测（绽放点固定屏中轴 + 0.3 屏高）；多屏实机（含 cover_monitor 后回读坐标竞态修复）并入 M8 验证。
 
 ---
 
