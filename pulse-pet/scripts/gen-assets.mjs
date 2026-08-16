@@ -369,12 +369,15 @@ function genCatAtlas() {
   return sheet;
 }
 
-// ---- M5 内置小狗 wagging-doggy（线条小狗风格：圆润剪影 + 自动描边 + 摇尾巴）----
+// ---- M5 内置小狗 wagging-doggy（正面简洁像素风，与 blinking-kitty 同款画法）----
 //
-// 与小猫同 codex 格式 8×9（1536×1872，单帧 192×208，行号与 petdex sprite.zig 一致）。
-// 造型：侧视线条小狗——圆润身体 + 大圆头 + 垂耳（粉内耳）+ 嘴吻 + 项圈，
-// 简洁线条感、圆润亲和。idle 行招牌动作 = 摇尾巴（偶数帧翘起 / 奇数帧放下）。
-// 行区分沿用「毛色 + 动作」（每行毛色与小猫行色错开，两只并排可辨）。
+// 2026-08-16 用户造型反馈重画：① 不写实——与 CAT 同款 32×32 字符画 + ×4 缩放、
+// K 描边 + 少量色块（调色板同 PAL：K 描边 / W 毛色 / P 内耳+鼻头+项圈 / B 双眼）；
+// ② 正面/偏正面——五官朝向观察者：头顶大垂耳（K 边 + P 内耳）、正脸双眼、
+// 狗鼻头 P + 嘴线 K、脖子项圈 P、正面坐姿身体 + 双前腿；
+// ③ 尾巴自然摆动——idle 6 帧中仅 col2-3 轻摆（K 色短尾端点 2 格位移），
+// 非每帧摇、摆幅收敛，整体"自然微动"。
+// 行区分沿用「毛色 + 动作」（DOG_ROW_FUR 与小猫行色错开，TC-SP-07 可辨）。
 // 作者自绘（CC0）。
 
 /** 每行毛色（与小猫 ROW_FUR 错开的另一组色调）。 */
@@ -390,17 +393,48 @@ const DOG_ROW_FUR = {
   8: [240, 200, 208], // review 浅玫红
 };
 
+/** 正面小狗 32×32 像素画（行 2-16 头部含垂耳、行 17 项圈、行 18-28 坐姿身体）。 */
+const DOG = [
+  "................................", // 0
+  "................................", // 1
+  "......KK................KK......", // 2 垂耳顶边
+  ".....KPPK..............KPPK.....", // 3
+  ".....KPPK..............KPPK.....", // 4
+  ".....KPPKKKKKKKKKKKKKKKKPPK.....", // 5 头顶边线（两耳之间）
+  ".....KPPKWWWWWWWWWWWWWWKPPK.....", // 6
+  ".....KPPKWWWWWWWWWWWWWWKPPK.....", // 7
+  ".....KPPKWWWWWWWWWWWWWWKPPK.....", // 8
+  ".....KPPKWWWWWWWWWWWWWWKPPK.....", // 9
+  ".....KPPKWWWBBWWWWBBWWWKPPK.....", // 10 正脸双眼
+  ".....KPPKWWWBBWWWWBBWWWKPPK.....", // 11
+  ".....KKKKWWWWWWWWWWWWWWKKKK.....", // 12 垂耳底边
+  "......KWWWWWWWWWWWWWWWWWWK......", // 13 脸颊露宽（耳下）
+  "......KWWWWWWPPPKWWWWWWWWK......", // 14 鼻头 P
+  "......KWWWWWWWKKKWWWWWWWWK......", // 15 嘴线 K
+  "......KWWWWWWWWWWWWWWWWWWK......", // 16 下巴
+  ".......KPPPPPPPPPPPPPPPPK.......", // 17 项圈
+  "........KWWWWWWWWWWWWWWK........", // 18 身体
+  "........KWWWWWWWWWWWWWWK........", // 19
+  "........KWWWWWWWWWWWWWWK........", // 20
+  "........KWWWWWWWWWWWWWWK........", // 21
+  "........KWWWWWWWWWWWWWWK........", // 22
+  "........KWWWWWWWWWWWWWWK........", // 23
+  "........KWWWWWWWWWWWWWWK........", // 24
+  "........KWWWWWWWWWWWWWWK........", // 25
+  "..........KWWWWK..KWWWWK........", // 26 双前腿
+  "..........KWWWWK..KWWWWK........", // 27
+  "..........KKKKK....KKKKK........", // 28 腿底
+  "................................", // 29
+  "................................", // 30
+  "................................", // 31
+];
+
+/** DOG 网格里双眼位置（行 10-11：左眼列 12-13，右眼列 18-19）。 */
+const DOG_EYE_L = { x: 12, y: 10 };
+const DOG_EYE_R = { x: 18, y: 10 };
+
 function fillRectC(cells, x0, y0, x1, y1, ch) {
   for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) put(cells, x, y, ch);
-}
-
-/** 圆角矩形（去四角一格）——像素圆润感。 */
-function roundedRect(cells, x0, y0, x1, y1, ch) {
-  fillRectC(cells, x0, y0, x1, y1, ch);
-  put(cells, x0, y0, ".");
-  put(cells, x1, y0, ".");
-  put(cells, x0, y1, ".");
-  put(cells, x1, y1, ".");
 }
 
 /** 两点间 2×2 粗线（尾巴 / 举爪）。 */
@@ -413,92 +447,76 @@ function thickLine(cells, x0, y0, x1, y1, ch) {
   }
 }
 
-/** 自动描边：透明格 4 邻接非透明非 K → K（尾巴等自由形状获得轮廓，线条感）。 */
-function autoOutline(cells) {
-  const h = cells.length;
-  const w = cells[0].length;
-  const solid = (x, y) => {
-    if (y < 0 || y >= h || x < 0 || x >= w) return false;
-    const c = cells[y][x];
-    return c !== "." && c !== "K";
-  };
-  const marks = [];
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      if (cells[y][x] !== ".") continue;
-      if (solid(x - 1, y) || solid(x + 1, y) || solid(x, y - 1) || solid(x, y + 1)) {
-        marks.push([x, y]);
+/**
+ * 画正面小狗（DOG 网格 + 覆盖层）。options：
+ * - eyes："open" | "blink" | "x"（正面双眼覆盖）
+ * - headShift：头部（含垂耳 + 项圈，DOG 行 ≤17）水平位移（waiting 张望）
+ * - slump：整体下移格数（failed 垂头丧气）
+ * - tail："up" | "mid" | "down"（身体右侧短尾端点位置；自然摆动小幅差）
+ * - pawWave：≥0 时右前爪举起（waving，高低交替）
+ */
+function drawDogFront(
+  cells,
+  dx = 0,
+  dy = 0,
+  { eyes = "open", headShift = 0, slump = 0, tail = "mid", pawWave = -1 } = {},
+) {
+  const ox = CAT_X + dx;
+  const oy = CAT_Y + dy + slump;
+  for (let gy = 0; gy < 32; gy++) {
+    for (let gx = 0; gx < 32; gx++) {
+      const ch = DOG[gy][gx];
+      if (ch === ".") continue;
+      // 头部（含耳 + 项圈，行 ≤17）随张望平移；身体不动
+      const sx = ox + gx + (gy <= 17 ? headShift : 0);
+      put(cells, sx, oy + gy, ch);
+    }
+  }
+
+  // 尾巴：K 色 2×2 粗线，从身体右上缘伸出（与 CAT 尾巴同款 K 线条风格）
+  const tailEnd = { up: [27, 16], mid: [27, 19], down: [27, 21] }[tail] ?? [27, 19];
+  thickLine(cells, ox + 23, oy + 19, ox + tailEnd[0], oy + tailEnd[1], "K");
+
+  // 举爪（waving）：右前爪斜上伸出身体右缘，高低交替；K 色爪尖
+  if (pawWave >= 0) {
+    const tipY = pawWave % 2 === 0 ? 19 : 21;
+    thickLine(cells, ox + 21, oy + 24, ox + 24, oy + tipY, "W");
+    put(cells, ox + 25, oy + tipY - 1, "K");
+  }
+
+  // 眼睛覆盖层（正面双眼，随头部平移）
+  const adj = (p) => ({ x: p.x + ox + headShift, y: p.y + oy });
+  if (eyes === "blink") {
+    for (const e of [DOG_EYE_L, DOG_EYE_R]) {
+      for (let ey = 0; ey <= 1; ey++)
+        for (let ex = 0; ex <= 1; ex++) {
+          const q = adj({ x: e.x + ex, y: e.y + ey });
+          put(cells, q.x, q.y, ".");
+        }
+      const q = adj({ x: e.x, y: e.y + 1 });
+      put(cells, q.x, q.y, "K"); // 下眼皮一条线
+      put(cells, q.x + 1, q.y, "K");
+    }
+  } else if (eyes === "x") {
+    for (const e of [DOG_EYE_L, DOG_EYE_R]) {
+      for (let ey = 0; ey <= 1; ey++)
+        for (let ex = 0; ex <= 1; ex++) {
+          const q = adj({ x: e.x + ex, y: e.y + ey });
+          put(cells, q.x, q.y, ".");
+        }
+      const cx = e.x + ox + headShift + 0.5;
+      const cy = e.y + oy + 0.5;
+      for (const [ddx, ddy] of [
+        [-1, -1],
+        [1, 1],
+        [-1, 1],
+        [1, -1],
+        [0, 0],
+      ]) {
+        put(cells, Math.round(cx + ddx), Math.round(cy + ddy), "K");
       }
     }
   }
-  for (const [x, y] of marks) put(cells, x, y, "K");
-}
-
-/**
- * 画一只侧视小狗（面向右）。基础坐标（cell 48×52，左右各留 2 格余量给动作偏移）：
- * 身体 x8-27 y24-38；头 x25-41 y10-26（随 headShift 张望平移）；
- * 垂耳 P x26-29；嘴吻 x40-44 + 鼻子；项圈 P y24-25（头身分界）；
- * 四腿 y38-48；尾巴从身体左上 (9,25) 出发，tailPos up/mid/down。
- * options：eyes "open"|"blink"|"x"、tailPos、headShift、slump、dx/dy、pawWave(≥0 举爪)。
- */
-function drawDog(
-  cells,
-  { eyes = "open", tailPos = "mid", headShift = 0, slump = 0, dx = 0, dy = 0, pawWave = -1 } = {},
-) {
-  const oy = dy + slump;
-  const X = (v) => v + dx;
-  const Y = (v) => v + oy;
-  const h = headShift;
-
-  // 尾巴（画在最底层）
-  const tailEnd = { up: [2, 14], mid: [1, 21], down: [3, 31] }[tailPos] ?? [1, 21];
-  thickLine(cells, X(9), Y(25), X(tailEnd[0]), Y(tailEnd[1]), "W");
-
-  // 四条腿（W 填充；身体盖住腿根）
-  for (const lx of [11, 16, 24, 29]) {
-    roundedRect(cells, X(lx), Y(38), X(lx + 2), Y(47), "W");
-  }
-  // 举爪（waving）：前右腿抬起成斜线，高低交替
-  if (pawWave >= 0) {
-    const high = pawWave % 2 === 0;
-    thickLine(cells, X(30), Y(high ? 30 : 32), X(high ? 33 : 34), Y(high ? 24 : 27), "W");
-  }
-
-  // 身体 + 头（重叠区自然融合）
-  roundedRect(cells, X(8), Y(24), X(27), Y(38), "W");
-  roundedRect(cells, X(25 + h), Y(10), X(41 + h), Y(26), "W");
-
-  // 垂耳：K 边 + P 内
-  fillRectC(cells, X(26 + h), Y(12), X(29 + h), Y(21), "K");
-  fillRectC(cells, X(27 + h), Y(13), X(28 + h), Y(20), "P");
-
-  // 嘴吻 + 鼻子
-  roundedRect(cells, X(40 + h), Y(17), X(44 + h), Y(21), "W");
-  fillRectC(cells, X(43 + h), Y(17), X(44 + h), Y(18), "K");
-
-  // 眼睛（单眼侧视）
-  const ex = X(34 + h);
-  const ey = Y(16);
-  if (eyes === "open") {
-    fillRectC(cells, ex, ey, ex + 1, ey + 1, "B");
-  } else if (eyes === "blink") {
-    fillRectC(cells, ex, ey + 1, ex + 1, ey + 1, "K"); // 下眼皮线
-  } else if (eyes === "x") {
-    for (const [ddx, ddy] of [
-      [-1, -1],
-      [1, 1],
-      [-1, 1],
-      [1, -1],
-      [0, 0],
-    ]) {
-      put(cells, ex + 1 + ddx, ey + ddy, "K");
-    }
-  }
-
-  // 项圈（P，头/身分界，随头平移）
-  fillRectC(cells, X(24 + h), Y(24), X(28 + h), Y(25), "P");
-
-  autoOutline(cells);
 }
 
 /** 小狗 row 行 col 列这一帧的 48×52 格子（行语义与小猫一致）。 */
@@ -508,51 +526,52 @@ function dogFrameCells(row, col) {
   let dx = 0;
   let dy = 0;
   switch (row) {
-    case 0: // idle：摇尾巴（偶数帧翘起 / 奇数帧放下）+ 列 1-2 眨眼
-      opts.tailPos = col % 2 === 0 ? "up" : "down";
+    case 0: // idle：尾巴自然轻摆（仅 col2-3 端点下沉 2 格，其余帧中位静止）
+      // + col1-2 眨眼 + 长帧轻微下沉（呼吸感）
+      opts.tail = col === 2 || col === 3 ? "down" : "mid";
       opts.eyes = col === 1 || col === 2 ? "blink" : "open";
       dy = col >= 4 ? 1 : 0;
       break;
-    case 1: // running-right
+    case 1: // running-right：左右轻晃 + 左侧速度线
     case 2: {
       // running-left：镜像
       dx = col % 2 === 0 ? 1 : -1;
       dy = col % 2;
-      opts.tailPos = col % 2 === 0 ? "up" : "mid";
-      drawDog(cells, { ...opts, dx, dy });
+      opts.tail = "mid";
+      drawDogFront(cells, dx, dy, opts);
       motionDashes(cells, row === 1 ? "left" : "right", col);
       return cells;
     }
-    case 3: // waving：举爪高低交替 + 尾巴轻摆
+    case 3: // waving：右前爪举起高低交替，尾巴自然中位
       opts.pawWave = col;
-      opts.tailPos = col % 2 === 0 ? "up" : "mid";
+      opts.tail = "mid";
       break;
-    case 4: // jumping：5 帧抛物线，腾空时尾巴翘起
+    case 4: // jumping：5 帧抛物线
       dy = [0, -4, -8, -4, 0][Math.min(col, 4)];
-      opts.tailPos = col >= 2 && col <= 3 ? "up" : "mid";
+      opts.tail = "mid";
       break;
     case 5: // failed：X 眼 + 下坠 + 尾巴垂下（蔫了）
       opts.eyes = "x";
       opts.slump = col % 4 === 3 ? 3 : 2;
-      opts.tailPos = "down";
+      opts.tail = "down";
       break;
-    case 6: // waiting：头部左右张望
+    case 6: // waiting：头（含垂耳 + 项圈）左右张望
       opts.headShift = col % 2 === 0 ? -1 : 1;
-      opts.tailPos = "mid";
+      opts.tail = "mid";
       dy = col === 5 ? 1 : 0;
       break;
-    case 7: // running：原地颠 + 两侧速度线 + 尾巴摆
+    case 7: // running：原地颠 + 两侧速度线
       dy = col % 2;
-      opts.tailPos = col % 2 === 0 ? "up" : "mid";
-      drawDog(cells, { ...opts, dy });
+      opts.tail = "mid";
+      drawDogFront(cells, 0, dy, opts);
       motionDashes(cells, "both", col);
       return cells;
     case 8: // review：头顶感叹号左右
       dy = col === 5 ? 1 : 0;
-      opts.tailPos = "mid";
+      opts.tail = "mid";
       break;
   }
-  drawDog(cells, { ...opts, dx, dy });
+  drawDogFront(cells, dx, dy, opts);
   if (row === 8) exclaim(cells, col);
   return cells;
 }
@@ -582,9 +601,15 @@ function genDogAtlas() {
 
 function main() {
   // 校验网格
-  for (let y = 0; y < CAT.length; y++) {
-    if (CAT[y].length !== 32) {
-      throw new Error(`row ${y} length ${CAT[y].length} != 32`);
+  for (const [name, grid] of [
+    ["CAT", CAT],
+    ["DOG", DOG],
+  ]) {
+    if (grid.length !== 32) throw new Error(`${name} rows ${grid.length} != 32`);
+    for (let y = 0; y < grid.length; y++) {
+      if (grid[y].length !== 32) {
+        throw new Error(`${name} row ${y} length ${grid[y].length} != 32`);
+      }
     }
   }
 
@@ -636,7 +661,7 @@ function main() {
         id: "wagging-doggy",
         displayName: "wagging-doggy（内置小狗）",
         description:
-          "PulsePet 内置小狗（线条小狗风格：圆润剪影 + 垂耳 + 项圈）。codex 格式 atlas 8×9 = 1536×1872，单帧 192×208，9 行姿态；idle 摇尾巴。作者自绘，CC0。",
+          "PulsePet 内置小狗（正面简洁像素风，与小猫同款画法：大垂耳 + 项圈 + 正脸双眼）。codex 格式 atlas 8×9 = 1536×1872，单帧 192×208，9 行姿态；idle 尾巴自然轻摆。作者自绘，CC0。",
         spritesheetPath: "spritesheet.png",
       },
       null,
