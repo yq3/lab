@@ -180,7 +180,7 @@ v1 只实现 `OpenCodeAdapter`，但模块边界清晰：将来加 `ClaudeCodeAd
 
 ```sql
 -- by 会话
-SELECT session_id, project_id, cost,
+SELECT id AS session_id, project_id, cost,
        tokens_input, tokens_output, tokens_reasoning,
        tokens_cache_read, tokens_cache_write,
        time_created, time_updated
@@ -204,6 +204,8 @@ ORDER BY day DESC;
 
 周 / 任意跨度由前端把 `from/to` 传给 Rust 计算，避免后端写一套固定维度。
 
+> 勘误（2026-08-16，M3 实测）：真实 schema 的 session 表主键列名为 `id`（非 `session_id`），故 by session SQL 以 `id AS session_id` 别名落地；TC-TK-06 对账按此语义执行。
+
 ### 4.2 Tauri 命令（暴露给 TS）
 
 ```rust
@@ -224,7 +226,7 @@ fn token_stats_current_session(session_id: String) -> Result<Option<TokenRow>, S
 - **时间序列图**：默认按天柱状图（recharts 或自己画 SVG，倾向自画 SVG 避免 bundle 体积），可在 7d / 30d / 任意跨度切换。
 - **项目分布**：选跨度内的项目占比饼图 + 列表。
 - **会话列表**：跨度内的会话按 token 降序，单条可展开详情（input/output/reasoning/cache 分布）。
-- **当前会话气泡汇报**：宠物收到 `session.status == idle` 事件且本会话有 ≥1 条 token 记录时，气泡显示"本期用了 Xk input / Yk output / $ Z"——这是 token 功能在宠物窗口里的直接体现。
+- **当前会话气泡汇报**：宠物收到 `session.status == idle` 事件且本会话有 ≥1 条 token 记录时，气泡显示"本期用了 Xk input / Yk output / $ Z"——这是 token 功能在宠物窗口里的直接体现。**约定（2026-08-16，M3 定案）**：订阅/plan 模式会话 `cost=0` 时省略 "$ Z" 段（仅显示"本期用了 Xk input / Yk output"，避免"零花费"误导）。
 
 ### 4.4 v2 排行榜（不在 v1 实现）
 
