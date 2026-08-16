@@ -1,0 +1,28 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "deepseek": {
+      "models": {
+        "deepseek-v4-flash": {
+          "variants": {
+            "max": { "reasoningEffort": "max" }
+          }
+        },
+        "deepseek-v4-pro": {
+          "variants": {
+            "max": { "reasoningEffort": "max" }
+          }
+        }
+      }
+    },
+    "zhipuai-coding-plan": {
+      "models": {
+        "glm-5.3": {
+          "variants": {
+            "max": { "reasoningEffort": "max" }
+          }
+        }
+      }
+    }
+  }
+}
