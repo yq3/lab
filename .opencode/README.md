@@ -2,7 +2,7 @@
 
 > 本文档是 `lab/.opencode/` 配置的权威设计文档：实现细节 + 设计依据（决策记录）。
 > 内容已去掉具体项目属性，适用于任何目标项目；迁移到其他仓库/全局配置时随本目录整体搬迁。
-> 版本：v8（2026-08-16，六轮修订：tester 权限扩容 D32、检查点字段完整性 D33、移除 supervisorSessionId D34；五轮见 D31，四轮见 D28-D30，前三轮见 D15/D26-D27）
+> 版本：v9（2026-08-16，七轮修订：D35 用户直连通道方案定稿（待实施）；六轮见 D32-D34，五轮见 D31，四轮见 D28-D30，前三轮见 D15/D26-D27）
 
 ---
 
@@ -494,7 +494,7 @@ Sup -> User: 汇报合入请求
 
 ## 8. 设计依据（决策记录）
 
-> 本文档由 2026-08 的多轮讨论沉淀。D1-D12 为初版决策，D13-D20 为首轮审阅修订，D21-D25 为二次迭代（改名体系、命名划分、skill 体系调研），D26-D27 为三轮修订（护栏加固、状态机一致性、回 spec 路径），D28-D30 为四轮修订（调用前确认、遗留事项清偿、develop_opencode 分支策略），D31 为五轮修订（模型 variant 显式 @max），D32-D34 为六轮修订（首跑实测反馈：tester 权限扩容、检查点字段完整性、移除死字段）。
+> 本文档由 2026-08 的多轮讨论沉淀。D1-D12 为初版决策，D13-D20 为首轮审阅修订，D21-D25 为二次迭代（改名体系、命名划分、skill 体系调研），D26-D27 为三轮修订（护栏加固、状态机一致性、回 spec 路径），D28-D30 为四轮修订（调用前确认、遗留事项清偿、develop_opencode 分支策略），D31 为五轮修订（模型 variant 显式 @max），D32-D34 为六轮修订（首跑实测反馈：tester 权限扩容、检查点字段完整性、移除死字段），D35 为七轮修订（用户直连通道：问询直连协议，方案定稿待实施）。
 
 ### D1. 为什么不用 GitHub Issue/PR 作为 agent 间通信媒介
 
@@ -765,6 +765,30 @@ task-pulsepet-m1 交付后用户定案（该检查点"交付后约定"节）固�
 
 修订：检查点 frontmatter 删除 `supervisorSessionId` 字段（模板、README 示例、supervised-coding prompt、时序图同步清理；m1-m3 历史检查点中的 null 字段一并移除）。会话 ID 计数从"最多 4 个"改为"最多 3 个"（coder/tester/committer 各一）。附带收益：D33 完整性铁律不再强制维护一个永远填不上的字段。
 
+### D35. 用户直连通道：问询直连，指令走编排（2026-08-16 七轮修订，方案定稿、待实施）
+
+**问题**：用户只能与 supervised-coding 直接对话，过程中有疑问或发现 bug 需 supervisor 当传声筒。中继的代价：① token/上下文膨胀（每次中继 4 跳读写，问询多时挤占 supervisor 自身上下文）；② 语义损耗（D7 逐字传递纪律只约束 tester/committer 报告，用户问询无此约束，supervisor 易自行消化再转述）；③ 延迟（问一句也要走一轮完整 Task 调用）。
+
+**通道盘点与实测结论**（2026-08-16，opencode 原生机制，零配置改动）：
+
+| 通道 | 用法 | 上下文 | 结论 |
+|---|---|---|---|
+| A. @mention | 主会话内 `@Coder 问题` | 全新子任务上下文，无任务记忆 | 无法解释"自己为什么这样做"；适合与任务记忆无关的快问，答案落回主会话 |
+| B. 子会话导航 | TUI：`ctrl+x ↓` 进入第一个子会话，`←/→` 在各子会话间切换，`↑` 回主线 | 完整任务上下文（只读） | **实测只读，不能发起对话**；但各角色的调试过程与中间决策都在子会话转录里，"为什么这样做"类问题常直接被转录解答——定位为观察通道 |
+| C. CLI 续接 | `opencode run -s <taskId> --agent Coder "问题"`（taskId 取检查点 xxxTaskId） | 完整任务上下文，可对话 | **唯一可对话的完整上下文通道**（实测确认）；问答留在该会话内，supervisor 下次带 task_id 续接时角色自然记得——上下文不丢且免中继；代价是另开终端 |
+
+机制依据：@mention 不受 `permission.task` 约束（官方文档："Users can always invoke any subagent directly via the @ autocomplete menu, even if the agent's task permissions would deny it"）；子会话是真实 session（DB 中 parent_id 挂主会话下，三个角色会话实测在库，但 CLI `session list` 过滤不显示带 parent 的子会话，taskId 以检查点为准）；`opencode run --session` 续接任意会话已验证。
+
+**定稿协议**：
+1. **问询/质疑/讨论 → 直连**：先 B 观察（转录常已解答），不够再 C 追问；与任务记忆无关的快问可用 A
+2. **改动指令 → 仍走编排**：用户要改代码仍经 supervised-coding 进正式修复轮——SHA 校验、round 计数、verdict 流转不被旁路
+3. **子 agent 直连协议**（待写入 3 个 subagent prompt）：直连会话中只答询、只读代码，禁止 edit/commit/push；用户要改则引导回主线走编排
+4. **并发守则**（待写入 prompt）：只在 D28 调用预告等暂停点直连（Task 未运行，无并发写冲突）；Task 运行中禁止向同一会话发消息
+5. **摩擦削减**（待写入 supervised-coding prompt）：调用预告中附目标角色 taskId 与可粘贴的直连命令，用户免翻检查点手拼 ses ID；用户选择中继时，问询与回答均逐字往返（D7 语义扩展到用户问询）
+6. **不加 QoL 脚本**（用户定案）：不做 ask.sh 类封装，纯文档 + 预告附命令
+
+**状态**：方案定稿。prompt 改动（supervised-coding 预告附 taskId/直连指引、3 个 subagent 直连协议）与 §7 使用指南更新**待实施**（实施条目见 §9 演进方向 7，当前限制见 §9 限制"用户问询须中继"）；opencode 配置（mode/permission）零改动。
+
 ---
 
 ## 9. 已知限制与后续演进
@@ -781,6 +805,7 @@ task-pulsepet-m1 交付后用户定案（该检查点"交付后约定"节）固�
 - **需求确认代价**：每任务多一次用户交互（换取方向正确性）
 - **调用确认交互成本**：每次 subagent 调用前需用户确认（D28），任务耗时随人工响应增加
 - **同步冲突成本**：commit 前同步 develop（D30）可能引入冲突，由 coder 当轮消化；develop 频繁变动时同步开销放大
+- **用户问询须中继**：过程中用户只能与 supervised-coding 对话，问询/质疑需 supervisor 传递（token 膨胀、语义损耗、延迟）；D35 直连协议已定稿待实施，实施前此限制存在（过渡期可手动用 `opencode run -s <taskId>` 直连，见 D35 通道表）
 
 ### 演进方向
 
@@ -790,3 +815,4 @@ task-pulsepet-m1 交付后用户定案（该检查点"交付后约定"节）固�
 4. 每轮写检查点时生成 evidence manifest，交付阶段自动组装进 PR description（可脚本化）
 5. 支持多技术栈时，引入 per-target 测试命令配置（如 `opencode-test-config.json`），替代静态 bash 白名单
 6. 新领域监督模式（`supervised-design` 等）按 D21 模式族扩展，subagent 按需复用（D23 默认开放）
+7. **用户直连通道实施（D35，已定稿）**：supervised-coding 调用预告附 taskId + 可粘贴直连命令、3 个 subagent prompt 增直连协议（只答询、只读代码、要改引导回主线）、§7 使用指南补 B/C/A 三通道用法——方案全文见 D35
