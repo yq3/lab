@@ -1,3 +1,4 @@
+mod atlas;
 mod db;
 mod http_server;
 mod reminder_scheduler;
@@ -86,6 +87,14 @@ pub fn run() {
             let conn = db::init(app.handle())?;
             app.manage(Mutex::new(conn));
 
+            // ---- M5 atlas：按加载顺序解析当前宠物（pet.selected → 内置 → codex → petdex）----
+            let atlas_state = {
+                let db = app.state::<Mutex<Connection>>();
+                let conn = db.lock().map_err(|e| format!("db lock: {e}"))?;
+                atlas::init_selection(&conn)?
+            };
+            app.manage(Mutex::new(atlas_state));
+
             // ---- M2 事件链路：runtime 目录 + token + HTTP server + 状态机 ----
             runtime::ensure_runtime_dir().map_err(|e| format!("runtime dir: {e}"))?;
             let token = runtime::generate_token();
@@ -152,6 +161,10 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             get_display_state,
+            atlas::atlas_meta,
+            atlas::atlas_pixels,
+            atlas::atlas_list_pets,
+            atlas::atlas_select,
             token_stats::token_stats_opencode_path,
             token_stats::token_stats_query,
             token_stats::token_stats_current_session,

@@ -1,6 +1,57 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { usePetStore, setReminderReporter, type ReminderReporter } from "./petStore";
 import { BUBBLE_AUTO_HIDE_MS } from "../lib/bubble";
+import type { AtlasMeta, AtlasPixels } from "../lib/atlas";
+
+describe("petStore M5 atlas 状态（热替换基础，TC-SP-11②）", () => {
+  const meta = (id: string): AtlasMeta => ({
+    requested: id,
+    currentId: id,
+    currentSource: "codex",
+    cols: 8,
+    rows: 9,
+    frameW: 192,
+    frameH: 208,
+    notice: null,
+  });
+  const pixels = (tag: number): AtlasPixels => ({
+    cols: 8,
+    rows: 9,
+    frameW: 192,
+    frameH: 208,
+    rgba: new Uint8Array(8 * 9 * 192 * 208 * 4).fill(tag),
+  });
+
+  it("setAtlas：写入 meta + pixels；切换宠物后对象身份变化（热替换信号）", () => {
+    usePetStore.setState({ atlas: null, atlasMeta: null });
+    const p1 = pixels(1);
+    usePetStore.getState().setAtlas(meta("kitty"), p1);
+    expect(usePetStore.getState().atlasMeta?.currentId).toBe("kitty");
+    expect(usePetStore.getState().atlas).toBe(p1);
+
+    // 面板切换 → 新对象身份（PetCanvas effect 依赖 atlas 身份重建离屏 sheet）
+    const p2 = pixels(2);
+    usePetStore.getState().setAtlas(meta("boba"), p2);
+    expect(usePetStore.getState().atlas).toBe(p2);
+    expect(usePetStore.getState().atlas).not.toBe(p1);
+    expect(usePetStore.getState().atlasMeta?.currentId).toBe("boba");
+  });
+
+  it("setAtlas：pixels=null 表示回退占位（加载失败不崩，P2-3 兜底）", () => {
+    usePetStore.getState().setAtlas(meta("broken"), null);
+    expect(usePetStore.getState().atlas).toBeNull();
+    expect(usePetStore.getState().atlasMeta?.notice).toBeNull();
+  });
+
+  it("atlas 模式下 setRaw/next 状态机照常（9 状态映射在渲染层，不动 store）", () => {
+    usePetStore.getState().setAtlas(meta("kitty"), pixels(3));
+    usePetStore.getState().setRaw("editing");
+    expect(usePetStore.getState().raw).toBe("editing");
+    expect(usePetStore.getState().sprite).toBe("working"); // 占位降级仍可用
+    usePetStore.getState().next();
+    expect(usePetStore.getState().raw).toBe("testing");
+  });
+});
 
 describe("petStore 气泡状态（M3 token 汇报，TC-TK-10/12）", () => {
   beforeEach(() => {

@@ -61,6 +61,13 @@ pub fn set_state(conn: &Connection, key: &str, value: &str) -> Result<(), String
     Ok(())
 }
 
+/// 删除一个 app_state 键（M5：atlas_select(None) 恢复自动选择时清 `pet.selected`）。
+pub fn delete_state(conn: &Connection, key: &str) -> Result<(), String> {
+    conn.execute("DELETE FROM app_state WHERE key = ?1", [key])
+        .map_err(|e| format!("delete_state {key}: {e}"))?;
+    Ok(())
+}
+
 #[allow(dead_code)] // 单测与运行时验证使用；后续里程碑查询用
 pub fn list_tables(conn: &Connection) -> Vec<String> {
     let mut stmt = match conn.prepare(

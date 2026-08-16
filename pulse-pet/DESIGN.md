@@ -260,7 +260,7 @@ fn token_stats_current_session(session_id: String) -> Result<Option<TokenRow>, S
 - **效果**：宠物位置为发射点，**绽放点固定为宠物当前所处屏幕（显示器）的中轴线上、高度为屏幕从上往下 0.3 倍处（中间偏上）**——即绽放点 x = 该屏水平中心，y = 屏高 × 0.3（多显示器场景取宠物所在显示器计算；单显示器即当前屏）。**屏高取整显示器物理高度（含菜单栏/Dock 区域；用户 2026-08-16 确认维持整屏口径）**。无论宠物在该屏幕的哪个位置，烟花都发射到该点绽放。3-5s 消散，粒子带渐变与拖尾，参考日本动漫烟花的"流光花瓣"质感。
 - **实现选型**：HTML canvas 全屏透明窗口 + 粒子动画。理由：① 跨 macOS/Windows 一致（不用写两套平台原生）② Tauri 多窗口天然支持 ③ 体积小（不引入 pixi/three）④ canvas 2D 粒子配合 radial gradient + 拖尾即可达到动漫质感。
   - 粒子数 ~300-500；requestAnimationFrame 60fps；颜色用 HSL 渐变 + alpha fade；拖尾用上一帧叠加半透明黑（或透明 + globalCompositeOperation）。
-- **音频**（可选，默认关）：可选"啾——砰"短音效，音频文件内置在 `src-tauri/resources/`，通过 Tauri audio API 播放。M5 阶段评估是否需要。
+- ~~**音频**（可选，默认关）~~：**已取消（2026-08-16 用户定案）**：原设想"啾——砰"短音效（音频文件内置 `src-tauri/resources/`，Tauri audio API 播放）不再评估、不实现，后续里程碑均不做（TC-RM-12 同步取消）。
 
 ### 5.4 数据模型
 
@@ -301,6 +301,10 @@ CREATE TABLE reminder_logs (
 ### 6.1 v1 内置占位精灵
 
 - v1 起步用 1 张 PNG（128×128 单图，draw 几帧切换）打通链路。占位用一只简洁像素风小猫（姿势力求中性：坐姿 + 单眨眼），作者自备或用开源 CC0 素材（避免许可问题）。
+- **内置宠物（M5 定名 + 补充）**：内置占位素材随 M5 升级为 codex 格式 atlas（8×9 = 1536×1872，单帧 192×208，编译期内嵌 `src-tauri/assets/`），共两只，均为作者自绘 CC0：
+  - **`blinking-kitty`**（像素风小猫：坐姿 + 单眨眼，即原"内置占位小猫"定名）——默认宠物，无用户配置时加载它；
+  - **`wagging-doggy`**（像素风小狗：摇尾巴动作；2026-08-16 用户补充需求新增，同日用户反馈重画定案）——同为内置可选，与 blinking-kitty 并列展示在下拉"内置"分组。**造型定案（2026-08-16 用户反馈）**：与 blinking-kitty 同款简洁像素风（**不写实**，非线条小狗原样）；**正面/偏正面**（非侧面）；尾巴**自然摆动**（不刻意、不频繁）。
+  - 两只均走完整 9 状态行（idle/running-right/running-left/waving/jumping/failed/waiting/running/review，行号与 petdex sprite.zig 一致），供 TC-SP-07 9 状态映射目视验证。
 - 渲染：canvas 2D，按 60fps 切帧（占位阶段帧切换极简，主要验证状态机驱动）。
 - **canvas 缩放策略**（占位 + atlas 一致适用）：pet 窗口 220×220 逻辑尺寸，canvas 内部分辨率 = 220 × `window.devicePixelRatio`（HiDPI 下 2×→440），CSS 尺寸固定 220×220。帧图按 `min(canvasW/frameW, canvasH/frameH)` 居中绘制（占位 128×128 / atlas 单帧 192×208 都会被放大到 canvas 内），不裁剪保持比例。窗口 resize 不触发（v1 `resizable:false`），dpr 变化（拖到外接屏）时监听 `window.matchMedia` 重设画布尺寸。
 - 占位精灵只覆盖最常用 5 状态：`idle / thinking / working / success / error`，未覆盖的 3 个状态降级映射到最近同类：`waiting-permission→thinking`、`testing→working`、`editing→working`（M5 切 atlas 起改用 §6.2 完整 8→9 映射表，降级映射届时作废）。
@@ -308,7 +312,7 @@ CREATE TABLE reminder_logs (
 ### 6.2 atlas 加载器（M5 补入）
 
 - 素材格式标准：codex atlas（pet.json + spritesheet.webp，v1 8×9 = 1536×1872 / v2 8×11 = 1536×2288，单帧 192×208）。
-- 加载顺序：用户配置的 `pet` → 内置占位 → 用户 `~/.codex/pets/` 扫描 → `~/.petdex/pets/` 扫描。
+- 加载顺序：用户配置的 `pet` → 内置宠物（`blinking-kitty` / `wagging-doggy`，§6.1）→ 用户 `~/.codex/pets/` 扫描 → `~/.petdex/pets/` 扫描。
 - 渲染帧时长表：直接照抄 petdex `sprite.zig` 的 9 状态帧时长表（TS 版本）。
 
 | 状态 | atlas 行号 | 帧时长（petdex 值） |
