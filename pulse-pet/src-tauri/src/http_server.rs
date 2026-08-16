@@ -26,6 +26,10 @@ use crate::session_state::{Kind, SessionStateMachine};
 /// 显示状态变化回调（lib.rs 里封成 Tauri event emit）。
 pub type StateChangeCallback = Arc<dyn Fn(Kind) + Send + Sync>;
 
+/// idle 事件回调（M3 token 汇报：`/state` 收到 `kind == idle` 时以 session_id 调用，
+/// lib.rs 里做 opencode.db 查询 + 气泡下发 + success 状态注入，DESIGN §4.3）。
+pub type IdleHook = Arc<dyn Fn(&str) + Send + Sync>;
+
 /// 显示状态去重通知器：仅当合并后的显示状态真正变化时回调一次。
 pub struct DisplayNotifier {
     last: Mutex<Option<Kind>>,
@@ -291,9 +295,11 @@ fn json_response(status: u16, body: &str) -> tiny_http::Response<std::io::Cursor
 }
 
 /// 启动 HTTP server（后台线程）+ 写 endpoint 文件。
+#[allow(clippy::too_many_arguments)]
 pub fn start(
     state: Arc<Mutex<SessionStateMachine>>,
     notifier: Arc<DisplayNotifier>,
+    idle_hook: IdleHook,
     token: String,
     config: HttpConfig,
 ) -> Result<HttpServerHandle, String> {
@@ -333,10 +339,16 @@ pub fn start(
                         let _ = request.respond(json_response(429, r#"{"error":"rate limited"}"#));
                         continue;
                     }
-                    handle_incoming(request, &token, &state, &notifier, config.max_body);
+                    handle_incoming(request, &token, &state, &notifier, &idle_hook, config.max_body);
                 }
                 Ok(None) => continue, // accept 超时，回到循环检查停机标志
-                Err(_) => break,      // unblock / socket 错误 → 退出
+                Err(e) => {
+                    // P3-①（M2 遗留）：accept 错误不再静默退出——记录原因后继续服务
+                    // （EOF/连接被客户端丢弃等可恢复错误很常见；停机由顶部标志控制）。
+                    // 短暂 sleep 防持续错误下热转。
+                    eprintln!("[pulsepet] http server accept error: {e}");
+                    std::thread::sleep(Duration::from_millis(50));
+                }
             }
         }
     });
@@ -349,6 +361,7 @@ fn handle_incoming(
     token: &str,
     state: &Arc<Mutex<SessionStateMachine>>,
     notifier: &Arc<DisplayNotifier>,
+    idle_hook: &IdleHook,
     max_body: usize,
 ) {
     let method = request.method().as_str().to_string();
@@ -383,6 +396,12 @@ fn handle_incoming(
             {
                 let mut st = state.lock().unwrap_or_else(|p| p.into_inner());
                 st.apply_event(&ev.session_id, ev.kind, Instant::now());
+            }
+            // M3 token 汇报（TC-TK-10/11/12）：idle 时先让 hook 查库并可能注入
+            // success 状态，再统一 notify——前端只收到一次合并后的状态事件，
+            // 避免 idle→success 抖动。
+            if ev.kind == Kind::Idle {
+                idle_hook(&ev.session_id);
             }
             notifier.notify(state);
             let _ = request.respond(json_response(200, r#"{"action":null}"#));
@@ -536,6 +555,7 @@ mod tests {
         std::fs::create_dir_all(&tmp).unwrap();
         let state = Arc::new(Mutex::new(SessionStateMachine::new()));
         let notifier = Arc::new(DisplayNotifier::new(Arc::new(|_| {})));
+        let idle_hook: IdleHook = Arc::new(|_| {});
         let cfg = HttpConfig {
             runtime_dir: tmp,
             preferred_port: 0, // 随机端口
@@ -544,7 +564,7 @@ mod tests {
             rate_window: Duration::from_secs(1),
             accept_timeout: Duration::from_millis(200),
         };
-        start(state, notifier, TOKEN.to_string(), cfg).unwrap()
+        start(state, notifier, idle_hook, TOKEN.to_string(), cfg).unwrap()
     }
 
     fn raw_request(port: u16, req: &str) -> (u16, String) {
@@ -661,6 +681,100 @@ mod tests {
         let mut extra = [0u8; 1];
         let n = stream.read(&mut extra).unwrap_or(0);
         assert_eq!(n, 0, "connection should be closed after one response");
+        h.shutdown();
+    }
+
+    // ---- 服务端空闲连接语义锁定（M2 测试缺口，TC-EV-14 口径：
+    //      recv_timeout 超时不杀 server + 客户端断开兜底 + 连接一次性） ----
+
+    #[test]
+    fn integration_accept_timeout_cycles_do_not_kill_server() {
+        // accept_timeout=200ms；空转 >3 个超时周期后服务仍正常响应新连接
+        //（锁定「recv_timeout 超时 → 循环继续」语义，防止回归成超时/错误即退出）。
+        let h = start_test_server(1000);
+        std::thread::sleep(Duration::from_millis(700));
+        let (s, _) = raw_request(
+            h.port,
+            "GET /health HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+        );
+        assert_eq!(s, 200, "3 个 accept 超时周期后服务应仍在");
+        h.shutdown();
+    }
+
+    #[test]
+    fn integration_dangling_connection_does_not_kill_server() {
+        // 客户端发送不完整请求后挂起（模拟插件进程被杀/网络断开的半开连接）：
+        // 客户端关闭（对应插件侧 AbortSignal 3s 兜底的 close）后，服务恢复响应
+        // 新连接（accept 错误记录日志并继续，P3-①）。
+        let h = start_test_server(1000);
+        let mut dangling = TcpStream::connect(("127.0.0.1", h.port)).unwrap();
+        dangling
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        dangling
+            .write_all(b"POST /state HTTP/1.1\r\nHost: 127.0.0.1\r\n") // 无 body/不完整
+            .unwrap();
+        std::thread::sleep(Duration::from_millis(200));
+        drop(dangling); // 客户端放弃连接
+        // 给服务线程一点时间处理断开（accept 错误 → 日志 + 继续）
+        std::thread::sleep(Duration::from_millis(300));
+        let (s, _) = raw_request(
+            h.port,
+            "GET /health HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+        );
+        assert_eq!(s, 200, "挂起连接断开后服务应继续响应");
+        h.shutdown();
+    }
+
+    #[test]
+    fn integration_idle_event_invokes_idle_hook_with_session_id() {
+        // M3 token 汇报链路：/state kind=idle → idle_hook(sessionId)（TC-TK-10 入口）；
+        // 非 idle 事件不触发。
+        let tmp = std::env::temp_dir().join(format!(
+            "pulsepet-http-idle-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let state = Arc::new(Mutex::new(SessionStateMachine::new()));
+        let notifier = Arc::new(DisplayNotifier::new(Arc::new(|_| {})));
+        let seen = Arc::new(Mutex::new(Vec::<String>::new()));
+        let seen_hook = seen.clone();
+        let idle_hook: IdleHook = Arc::new(move |sid: &str| {
+            seen_hook
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .push(sid.to_string());
+        });
+        let cfg = HttpConfig {
+            runtime_dir: tmp,
+            preferred_port: 0,
+            max_body: 16 * 1024,
+            rate_limit: 1000,
+            rate_window: Duration::from_secs(1),
+            accept_timeout: Duration::from_millis(200),
+        };
+        let h = start(state, notifier, idle_hook, TOKEN.to_string(), cfg).unwrap();
+        // 非 idle → 不触发
+        post_state(h.port, TOKEN, r#"{"sessionId":"ses_a","kind":"working","agent":"opencode"}"#);
+        assert!(seen.lock().unwrap().is_empty(), "working 不应触发 idle hook");
+        // idle → 触发且带对 sessionId
+        post_state(h.port, TOKEN, r#"{"sessionId":"ses_a","kind":"idle","agent":"opencode"}"#);
+        // hook 在响应前的同步路径上调用；小窗口等待兜底
+        for _ in 0..50 {
+            if !seen.lock().unwrap().is_empty() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(
+            seen.lock().unwrap().as_slice(),
+            ["ses_a"],
+            "idle 事件应以 sessionId 触发 idle hook"
+        );
         h.shutdown();
     }
 }

@@ -89,7 +89,17 @@ pulse-pet/
 
 ## M1 范围与后续
 
-- **M1（当前）**：三窗口骨架、占位精灵 5 状态渲染、托盘 + 单实例锁、SQLite 迁移（6 表）、位置记忆。
-- **未实现**：HTTP server / opencode 插件（M2）、token 统计（M3）、提醒与烟花逻辑（M4）、atlas 加载（M5）、拖拽/穿透/热键/右键菜单（M6）、todo 插件机制（M7）。
+- **M1**：三窗口骨架、占位精灵 5 状态渲染、托盘 + 单实例锁、SQLite 迁移（6 表）、位置记忆。
+- **M2**：tiny_http 事件链路（token/endpoint/killswitch + 限流/鉴权）+ opencode 插件（归一化/节流/退避/净化）+ 多 session 状态机。
+- **M3（当前）**：token 统计——`token_stats.rs` 只读聚合查询（路径探测 / schema 白名单 / 旧版兜底）、panel Token 标签页（KPI / 自画 SVG 时序 / 项目饼图 / 会话明细）、当前会话气泡汇报（idle + 有用量 → "本期用了 Xk input / Yk output / $ Z"，并驱动 success 状态）。
+- **未实现**：提醒与烟花逻辑（M4）、atlas 加载（M5）、拖拽/穿透/热键/右键菜单（M6）、todo 插件机制（M7）。
 
 详见 [DESIGN.md §10](./DESIGN.md) 实施里程碑。
+
+## M3 实测记录：opencode session 表写入时机（TC-TK-11）
+
+2026-08-16，opencode 1.18.18 + 本机真实 `~/.local/share/opencode/opencode.db`（WAL 模式）：
+
+- `session` 表的 `tokens_*` / `cost` 为**逐 message 增量写入**，非 session 结束聚合写——观测一个进行中的会话，5s 间隔两次采样 `tokens_input` 58263 → 58748，`time_updated` 跟随最近一次写入推进（滞后秒级）。
+- `cost` 可能为 0（订阅/plan 模式无按量计费数据；观测到多个大用量会话 cost=0.0）。
+- 据此气泡汇报只需新鲜度护栏：`time_updated` 与 `session.status=idle` 时间差 < 阈值（默认 60s，`PULSEPET_TOKEN_REPORT_MAX_LAG_MS` 可配）才显示，避免陈旧数字；无记录或全零不出气泡（TC-TK-12）。结论同时记录在 `src-tauri/src/token_stats.rs` 模块注释。

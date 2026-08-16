@@ -47,3 +47,15 @@ export function postState(
   ) => Promise<{ status: number }>,
   dir?: string,
 ): Promise<unknown>;
+
+export interface Deliverer {
+  deliver(kind: string | null, sessionId?: string): Promise<void>;
+}
+
+export function createDeliverer(opts?: {
+  throttle?: { shouldSend(kind: string): boolean };
+  backoff?: Backoff;
+  postStateImpl?: typeof postState;
+  killswitch?: () => boolean;
+  agent?: string;
+}): Deliverer;

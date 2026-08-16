@@ -207,6 +207,10 @@ export function killswitchActive(dir = runtimeDir()) {
 /**
  * POST /state。每次发请求前读最新 endpoint/token 文件（端口回退后无需重装插件，
  * TC-EV-09）。返回 response；任何 IO/网络/401 错误抛出（由调用方静默退避）。
+ *
+ * P3-③（M2 遗留）：不再发送 `connection: close` 头——`Connection` 是 fetch 规范的
+ * forbidden header name，实现会静默忽略，发了也是冗余；一次性连接语义由服务端
+ * tiny_http「一请求一连接」保证（TC-EV-14），客户端配合 AbortSignal 3s 兜底。
  */
 export async function postState(
   kind,
@@ -222,7 +226,6 @@ export async function postState(
     headers: {
       "content-type": "application/json",
       "x-pulsepet-token": token,
-      connection: "close",
     },
     body: JSON.stringify({ sessionId, kind, agent }),
     signal: AbortSignal.timeout(3000),
@@ -233,27 +236,59 @@ export async function postState(
   return res;
 }
 
-// ---- opencode 插件注册（v1 格式：export default { id, server }）----
+// ---- 投递器（P3-②：并发投递串行化，Backoff 不跳级/不误复位） ----
 
-export default {
-  id: "pulse-pet",
-  server: async () => {
-    const throttle = new Throttle();
-    const backoff = new Backoff();
-    const agent = "opencode";
-
-    async function deliver(kind, sessionId) {
-      if (!kind) return;
-      if (killswitchActive()) return; // TC-EV-10：killswitch 整体跳过
-      if (!throttle.shouldSend(kind)) return; // TC-EV-18：节流
+/**
+ * 创建 deliver：killswitch / 节流检查后，把实际 POST 放入串行队列。
+ *
+ * 背景（M2 遗留 P3-②）：opencode 的 hooks 可能并发触发，若多个 deliver 同时失败，
+ * 每个都推进一次 backoff index——一次「失败脉冲」连跳多级退避（并发 3 个失败一步
+ * 到 2s），且并发里的成功 reset 会把别的失败正在等待的序列打断复位。串行化后：
+ *   - 同一时刻至多一个 POST 在飞（与单连接服务端的语义一致）；
+ *   - 每次失败只消耗一级退避（0→1s→2s→5s→30s 严格递进，不跳级）；
+ *   - reset 只发生在队列排空的成功之后（无误复位）。
+ */
+export function createDeliverer({
+  throttle = new Throttle(),
+  backoff = new Backoff(),
+  postStateImpl = postState,
+  killswitch = killswitchActive,
+  agent = "opencode",
+} = {}) {
+  let queue = Promise.resolve();
+  const enqueue = (fn) => {
+    // 上一步无论成败都继续（deliver 内部已吞错，这里兜底防断链）
+    const run = queue.then(fn, fn);
+    queue = run.then(
+      () => {},
+      () => {},
+    );
+    return run;
+  };
+  async function deliver(kind, sessionId) {
+    if (!kind) return;
+    if (killswitch()) return; // TC-EV-10：killswitch 整体跳过
+    if (!throttle.shouldSend(kind)) return; // TC-EV-18：节流
+    await enqueue(async () => {
       try {
-        await postState(kind, sessionId ?? "default", agent);
+        await postStateImpl(kind, sessionId ?? "default", agent);
         backoff.reset(); // 恢复后下次立即投递
       } catch {
         // TC-EV-07：静默跳过（不打日志不报错）+ 指数退避
         await backoff.wait();
       }
-    }
+    });
+  }
+  return { deliver };
+}
+
+// ---- opencode 插件注册（v1 格式：export default { id, server }）----
+
+export default {
+  id: "pulse-pet",
+  server: async () => {
+    const deliverer = createDeliverer();
+    const deliver = deliverer.deliver;
 
     return {
       event: async ({ event }) => {

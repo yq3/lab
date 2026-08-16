@@ -131,18 +131,30 @@ impl SessionStateMachine {
     /// 规则（TC-EV-06 / TC-EV-17）：
     /// - 瞬态 `>= transient_timeout` 无新事件 → 回退 `working`，并把计时基准重置为
     ///   `now`（保证「再 30s → idle」是完整的新窗口，而非瞬态一步跳到 idle）。
-    /// - 非瞬态（且非 idle）`>= idle_timeout` 无新事件 → 回收 `idle`。
+    /// - 非瞬态 `>= idle_timeout` 无新事件 → 回收：**从 map 中 remove 该 session**
+    ///   （P3-⑥，M2 遗留：原先只置 `Idle` 不删除，条目常驻导致内存随 session 数
+    ///   无界增长；idle 条目同样按超时 remove，显示语义不变——缺席 = idle）。
+    ///   回收发生在锁内（本方法持有 `&mut self`），与并发读取（`display`）天然互斥。
     pub fn tick(&mut self, now: Instant, transient_timeout: Duration, idle_timeout: Duration) {
-        for rec in self.sessions.values_mut() {
+        let mut expired: Vec<String> = Vec::new();
+        for (id, rec) in self.sessions.iter_mut() {
             let elapsed = now.saturating_duration_since(rec.last_event_at);
             if rec.kind.is_transient() && elapsed >= transient_timeout {
                 rec.kind = Kind::Working;
                 rec.last_event_at = now;
-            } else if rec.kind != Kind::Idle && !rec.kind.is_transient() && elapsed >= idle_timeout
-            {
-                rec.kind = Kind::Idle;
+            } else if !rec.kind.is_transient() && elapsed >= idle_timeout {
+                expired.push(id.clone());
             }
         }
+        for id in expired {
+            self.sessions.remove(&id);
+        }
+    }
+
+    /// 当前跟踪的 session 数（测试用：验证 P3-⑥ 回收即 remove）。
+    #[cfg(test)]
+    pub fn len(&self) -> usize {
+        self.sessions.len()
     }
 
     /// 当前显示状态：所有 session 的优先级合并（无 session 时 idle）。
@@ -266,5 +278,47 @@ mod tests {
         m.apply_event("a", Kind::Editing, t0 + secs(20));
         m.tick(t0 + secs(40), secs(30), secs(30));
         assert_eq!(m.display(), Kind::Editing);
+    }
+
+    // ---- P3-⑥：回收即 remove（内存不随 session 数无界增长） ----
+
+    #[test]
+    fn reclaimed_sessions_are_removed_from_map() {
+        let mut m = SessionStateMachine::new();
+        let t0 = Instant::now();
+        m.apply_event("a", Kind::Working, t0);
+        m.apply_event("b", Kind::Idle, t0); // idle 条目同样按超时回收
+        m.apply_event("c", Kind::Success, t0); // token 汇报注入的 success 也会回收
+        assert_eq!(m.len(), 3);
+        m.tick(t0 + secs(30), secs(30), secs(30));
+        assert_eq!(m.len(), 0, "非瞬态条目超时后应被 remove，而非常驻");
+        assert_eq!(m.display(), Kind::Idle, "缺席 = idle，显示语义不变");
+    }
+
+    #[test]
+    fn reclaimed_session_resumes_on_new_event() {
+        let mut m = SessionStateMachine::new();
+        let t0 = Instant::now();
+        m.apply_event("a", Kind::Working, t0);
+        m.tick(t0 + secs(30), secs(30), secs(30)); // 回收
+        assert_eq!(m.len(), 0);
+        // 回收后同一 session 来新事件 → 正常重建（不影响后续状态）
+        m.apply_event("a", Kind::Editing, t0 + secs(31));
+        assert_eq!(m.display(), Kind::Editing);
+        assert_eq!(m.len(), 1);
+    }
+
+    #[test]
+    fn transient_two_step_reclaim_keeps_other_sessions() {
+        let mut m = SessionStateMachine::new();
+        let t0 = Instant::now();
+        m.apply_event("a", Kind::Editing, t0);
+        m.apply_event("b", Kind::Working, t0 + secs(5)); // b 晚 5s
+        m.tick(t0 + secs(30), secs(30), secs(30));
+        // a：瞬态→working（计时重置）；b：非瞬态但才 25s → 保留
+        assert_eq!(m.len(), 2);
+        m.tick(t0 + secs(60), secs(30), secs(30));
+        // a：working 30s → remove；b：working 55s → remove
+        assert_eq!(m.len(), 0);
     }
 }

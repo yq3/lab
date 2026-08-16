@@ -56,7 +56,14 @@ function tokenize(text) {
     }
     const start = i;
     while (i < n && /[0-9a-zA-Z_\-+.]/.test(text[i])) i += 1;
-    tokens.push({ type: "literal", start, end: i, value: text.slice(start, i) });
+    if (i > start) {
+      tokens.push({ type: "literal", start, end: i, value: text.slice(start, i) });
+    } else {
+      // P2-9（M2 遗留）：非法字符（@、单引号等不在白名单内的字符）零消费会导致
+      // while 死循环（install.sh 挂死）。此处跳过 1 个字符保证推进；不产出 token
+      // （该输入本就非法，mergePlugin 定位失败时保守返回原文）。
+      i += 1;
+    }
   }
   return tokens;
 }

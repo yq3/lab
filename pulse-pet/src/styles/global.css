@@ -14,9 +14,9 @@ body,
 
 /* pet 窗口：220×220 透明画布 */
 .pet-root {
+  position: relative;
   width: 220px;
   height: 220px;
-  overflow: hidden;
   background: transparent;
 }
 
@@ -24,6 +24,28 @@ body,
   display: block;
   width: 220px;
   height: 220px;
+}
+
+/* 宠物气泡（M3 token 汇报；M4 复用）：窗口内顶部悬浮卡片，单行省略 */
+.pet-bubble {
+  position: absolute;
+  top: 2px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 208px;
+  padding: 5px 10px;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+  color: #1f2937;
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  z-index: 2;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
 }
 
 /* panel 窗口：普通不透明控制面板 */
@@ -48,6 +70,292 @@ body,
 .panel ul {
   color: #4b5563;
   line-height: 1.8;
+}
+
+/* 面板 tab */
+.panel-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid #e5e7eb;
+  margin-bottom: 16px;
+}
+
+.panel-tab {
+  appearance: none;
+  border: none;
+  background: transparent;
+  padding: 8px 14px;
+  font-size: 14px;
+  color: #6b7280;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+}
+
+.panel-tab.active {
+  color: #111827;
+  border-bottom-color: #6366f1;
+  font-weight: 600;
+}
+
+.tab-milestone {
+  margin-left: 6px;
+  font-size: 10px;
+  color: #9ca3af;
+}
+
+.panel-placeholder {
+  padding: 32px 0;
+  text-align: center;
+  color: #9ca3af;
+}
+
+/* ---- Token 统计（M3，TC-TK-08/09） ---- */
+
+.token-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.token-seg {
+  display: inline-flex;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.token-seg .seg {
+  appearance: none;
+  border: none;
+  background: transparent;
+  padding: 6px 12px;
+  font-size: 13px;
+  color: #6b7280;
+  cursor: pointer;
+}
+
+.token-seg .seg.active {
+  background: #6366f1;
+  color: #fff;
+}
+
+.token-dates {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #6b7280;
+}
+
+.token-dates input {
+  padding: 5px 8px;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.token-error {
+  margin: 16px 0;
+  padding: 14px 16px;
+  background: #fef3c7;
+  border: 1px solid #fcd34d;
+  border-radius: 8px;
+  color: #92400e;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.token-kpis {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.kpi {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 14px;
+  text-align: center;
+}
+
+.kpi-value {
+  font-size: 20px;
+  font-weight: 700;
+  color: #111827;
+}
+
+.kpi-label {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #9ca3af;
+}
+
+.token-section {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-bottom: 16px;
+}
+
+.token-section h3 {
+  margin: 0 0 10px;
+  font-size: 14px;
+  color: #374151;
+}
+
+.token-chart {
+  width: 100%;
+  height: auto;
+}
+
+.token-columns {
+  display: grid;
+  grid-template-columns: 5fr 7fr;
+  gap: 16px;
+  align-items: start;
+}
+
+.project-pie {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+}
+
+.project-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  flex: 1;
+  font-size: 13px;
+}
+
+.project-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  border-bottom: 1px dashed #f3f4f6;
+}
+
+.project-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  flex: none;
+}
+
+.project-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #374151;
+}
+
+.project-pct {
+  color: #6b7280;
+  min-width: 48px;
+  text-align: right;
+}
+
+.project-cost {
+  color: #111827;
+  min-width: 64px;
+  text-align: right;
+}
+
+.token-empty {
+  color: #9ca3af;
+  font-size: 13px;
+}
+
+.token-sessions {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 320px;
+  overflow-y: auto;
+  font-size: 13px;
+}
+
+.session-row {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  border-radius: 6px;
+}
+
+.session-row:hover {
+  background: #f9fafb;
+}
+
+.session-id {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #6b7280;
+  min-width: 110px;
+}
+
+.session-project {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #374151;
+}
+
+.session-tokens {
+  min-width: 64px;
+  text-align: right;
+  color: #111827;
+}
+
+.session-cost {
+  min-width: 64px;
+  text-align: right;
+  color: #6b7280;
+}
+
+.session-caret {
+  color: #9ca3af;
+  width: 14px;
+  text-align: center;
+}
+
+.session-detail {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px 12px;
+  margin: 0;
+  padding: 8px 12px;
+  background: #f9fafb;
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.session-detail .detail-wide {
+  grid-column: 1 / -1;
+}
+
+.session-detail dt {
+  color: #9ca3af;
+}
+
+.session-detail dd {
+  margin: 0;
+  color: #374151;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 /* fireworks 窗口：透明占位 */
