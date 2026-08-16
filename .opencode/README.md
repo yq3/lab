@@ -2,7 +2,7 @@
 
 > 本文档是 `lab/.opencode/` 配置的权威设计文档：实现细节 + 设计依据（决策记录）。
 > 内容已去掉具体项目属性，适用于任何目标项目；迁移到其他仓库/全局配置时随本目录整体搬迁。
-> 版本：v9（2026-08-16，八轮修订：D36 推理强度改用官方 agent 选项 `reasoningEffort`，零额外配置；七轮见 D35，六轮见 D32-D34，五轮见 D31，四轮见 D28-D30，前三轮见 D15/D26-D27）
+> 版本：v10（2026-08-16，九轮修订：D37 tester bash 权限反转为默认放行 + 定向拦截（git 写全禁），栈限制解除；八轮见 D36，七轮见 D35，六轮见 D32-D34，五轮见 D31，四轮见 D28-D30，前三轮见 D15/D26-D27）
 
 ---
 
@@ -466,7 +466,7 @@ Sup -> User: 汇报合入请求
 | 最大轮次 | maxRounds=3，超轮 → blocked（endReason=max_rounds） |
 | 乒乓检测 | 同问题往返 ≥2 次 → blocked；**启发式**：supervised-coding 按意见主题做语义比对，POC 阶段观察误判率（D19） |
 | 授权闸门 | supervised-coding `bash: ask`（只放行只读 git）；coder push/pull/cherry-pick/revert 一律 ask，merge/remote 变更/危险清理 deny |
-| 权限隔离 | tester 只能写测试路径；committer 全只读 |
+| 权限隔离 | tester 只能写测试路径、git 写操作全禁（bash 其余默认放行，D37）；committer 全只读 |
 | gh 环境 | agent prompt 注明 gh 不在默认 PATH，需先 `export PATH=...` |
 
 ### 6.1 各角色 bash 权限一览
@@ -475,7 +475,7 @@ Sup -> User: 汇报合入请求
 |---|---|---|
 | supervised-coding | git status/log/diff/rev-parse + ls/cat/date（检查点协议所需只读命令） | 其余全部 ask（含 push/merge） |
 | coder | 全部 | push/pull/cherry-pick/revert 弹确认（ask）；merge、remote 变更、reset --hard、clean、rm -rf（deny）；**例外（D30）**：`git merge origin/develop*`、`git merge --no-edit origin/develop*`、`git rebase origin/develop*`（同步 develop 进 develop_opencode 专用，allow） |
-| tester | 只读 git（status/diff/log/show/rev-parse）+ 只读探查（cd/pwd/ls/cat/head/tail/grep/rg/which/file/wc/stat/date）+ cargo/npm/pnpm/npx/yarn/bun/node 全族 | 其余 ask |
+| tester | 默认全 allow（任意栈的测试/构建/E2E/GUI 自动化命令，含 env 前缀）；git 例外只读：status/diff/log/show/rev-parse/fetch；rm -rf 在系统临时目录（/var/folders、/tmp，含 /private 形态）放行；external_directory 放行 /var/folders、/tmp（含 /private 形态）、~/Library/Application Support | git 写操作（`git *` deny，防 HEAD/工作区变动破坏 SHA 校验）、sudo、gh 全 deny；rm -rf/rm -fr 在仓库与 home 内 deny（`rm` 单文件/`rm -r` 不限） |
 | committer | 只读 git（diff/status/log/show/rev-parse）+ gh pr diff/view/review/comment | 其余 deny |
 
 ---
@@ -494,7 +494,7 @@ Sup -> User: 汇报合入请求
 
 ## 8. 设计依据（决策记录）
 
-> 本文档由 2026-08 的多轮讨论沉淀。D1-D12 为初版决策，D13-D20 为首轮审阅修订，D21-D25 为二次迭代（改名体系、命名划分、skill 体系调研），D26-D27 为三轮修订（护栏加固、状态机一致性、回 spec 路径），D28-D30 为四轮修订（调用前确认、遗留事项清偿、develop_opencode 分支策略），D31 为五轮修订（模型 variant 显式 @max），D32-D34 为六轮修订（首跑实测反馈：tester 权限扩容、检查点字段完整性、移除死字段），D35 为七轮修订（用户直连通道：问询直连协议，方案定稿待实施），D36 为八轮修订（D31 修正：`@max` 后缀写法无效，改 `model:` + 独立 `variant:` 字段；deepseek-v4* 的 max 由内置插件自动生成，glm-5.3 的 max 在全局配置注册）。
+> 本文档由 2026-08 的多轮讨论沉淀。D1-D12 为初版决策，D13-D20 为首轮审阅修订，D21-D25 为二次迭代（改名体系、命名划分、skill 体系调研），D26-D27 为三轮修订（护栏加固、状态机一致性、回 spec 路径），D28-D30 为四轮修订（调用前确认、遗留事项清偿、develop_opencode 分支策略），D31 为五轮修订（模型 variant 显式 @max），D32-D34 为六轮修订（首跑实测反馈：tester 权限扩容、检查点字段完整性、移除死字段），D35 为七轮修订（用户直连通道：问询直连协议，方案定稿待实施），D36 为八轮修订（D31 修正：`@max` 后缀写法无效，改 `model:` + 独立 `variant:` 字段；deepseek-v4* 的 max 由内置插件自动生成，glm-5.3 的 max 在全局配置注册），D37 为九轮修订（tester bash 权限反转：默认放行 + git 写/危险命令定向拦截 + 外部临时目录放行，栈限制解除）。
 
 ### D1. 为什么不用 GitHub Issue/PR 作为 agent 间通信媒介
 
@@ -740,18 +740,6 @@ task-pulsepet-m1 交付后用户定案（该检查点"交付后约定"节）固�
 
 注意：variant 支持列表随 models.dev 数据更新（opencode 每 5 分钟刷新缓存），换模型时须重新确认目标 variant 存在（`~/.cache/opencode/models.json` 或 TUI `/models`）。
 
-### D36. 推理强度用 agent 选项 `reasoningEffort`，`model@max` 与 `variant:` 均弃用（2026-08-16 八轮修订）
-
-D31 落地后切换到任一 agent 即报错：`Agent Supervised-Coding's configured model deepseek/deepseek-v4-flash@max is not valid`（TUI 切换 agent 时校验模型 ID，不合法拒绝启用）。
-
-**第一层根因（写法）**：agent 的 model 解析（`ModelV2.parse`）只按 `/` 切分，`deepseek/deepseek-v4-flash@max` 解析为 `{providerID: deepseek, id: "deepseek-v4-flash@max", variant: undefined}`——`@max` 留在模型 id 里，目录中不存在该 id 的条目 → 服务端 `ModelUnavailableError`、TUI 判无效。官方文档 /docs/agents 的 model 格式也只有 `provider/model-id`，无 `@variant` 后缀写法。
-
-**中间探索（弃用）**：曾试独立 `variant: max` 字段 + 项目级 `.opencode/opencode.json` 注册自定义 variants。`variant:` 是真实 schema 字段（config 插件支持），deepseek-v4* 的 max 也确有内置插件自动生成（openai-compatible + api.id 含 deepseek-v4 → 生成 low/medium/high/max），glm-5.3 被插件排除规则拦截需配置注册——**能跑但绕远**。
-
-**终版（选定）**：直接按官方文档 /docs/agents "Additional" 一节，把 `reasoningEffort: max` 写在 agent frontmatter（未列出的字段 → 迁移进 agent request → 作为模型选项直通 provider，camelCase 在 openai-compatible 协议层转 `reasoning_effort`）。**mock API 实测（2026-08-16）**：agent 带 `reasoningEffort: max` 时主调用请求体含 `reasoning_effort: max`（覆盖模型级默认 default），不带时无该覆盖——确认生效链路完整。4 个 agent 统一为 `model: <base id>` + `reasoningEffort: max`，删除 `.opencode/opencode.json`（零额外配置，随仓库搬迁即用）。
-
-**经验**：① 控制推理强度首选官方 agent 选项 `reasoningEffort`（docs/agents Additional），与模型/版本无关、零配置；② 不要拼 `model@max`（v1.18.18 解析只切 `/`）；③ 验证配置是否真的生效：本地 mock OpenAI-compatible 服务 + 抓请求体（`opencode run --agent` 实测），不要只看配置校验通过。
-
 ### D32. tester 权限扩容：放行只读探查与 node（2026-08-16 六轮修订，首跑实测反馈）
 
 实跑反馈：tester 一轮测试触发十数次权限确认，打断节奏。根因：bash 白名单只覆盖构建/测试族与只读 git，模型日常的目录/文件探查、git show、node 直接执行全部落入 `*: ask`。修订：
@@ -801,6 +789,43 @@ D31 落地后切换到任一 agent 即报错：`Agent Supervised-Coding's config
 
 **状态**：方案定稿。prompt 改动（supervised-coding 预告附 taskId/直连指引、3 个 subagent 直连协议）与 §7 使用指南更新**待实施**（实施条目见 §9 演进方向 7，当前限制见 §9 限制"用户问询须中继"）；opencode 配置（mode/permission）零改动。
 
+### D36. 推理强度用 agent 选项 `reasoningEffort`，`model@max` 与 `variant:` 均弃用（2026-08-16 八轮修订）
+
+D31 落地后切换到任一 agent 即报错：`Agent Supervised-Coding's configured model deepseek/deepseek-v4-flash@max is not valid`（TUI 切换 agent 时校验模型 ID，不合法拒绝启用）。
+
+**第一层根因（写法）**：agent 的 model 解析（`ModelV2.parse`）只按 `/` 切分，`deepseek/deepseek-v4-flash@max` 解析为 `{providerID: deepseek, id: "deepseek-v4-flash@max", variant: undefined}`——`@max` 留在模型 id 里，目录中不存在该 id 的条目 → 服务端 `ModelUnavailableError`、TUI 判无效。官方文档 /docs/agents 的 model 格式也只有 `provider/model-id`，无 `@variant` 后缀写法。
+
+**中间探索（弃用）**：曾试独立 `variant: max` 字段 + 项目级 `.opencode/opencode.json` 注册自定义 variants。`variant:` 是真实 schema 字段（config 插件支持），deepseek-v4* 的 max 也确有内置插件自动生成（openai-compatible + api.id 含 deepseek-v4 → 生成 low/medium/high/max），glm-5.3 被插件排除规则拦截需配置注册——**能跑但绕远**。
+
+**终版（选定）**：直接按官方文档 /docs/agents "Additional" 一节，把 `reasoningEffort: max` 写在 agent frontmatter（未列出的字段 → 迁移进 agent request → 作为模型选项直通 provider，camelCase 在 openai-compatible 协议层转 `reasoning_effort`）。**mock API 实测（2026-08-16）**：agent 带 `reasoningEffort: max` 时主调用请求体含 `reasoning_effort: max`（覆盖模型级默认 default），不带时无该覆盖——确认生效链路完整。4 个 agent 统一为 `model: <base id>` + `reasoningEffort: max`，删除 `.opencode/opencode.json`（零额外配置，随仓库搬迁即用）。
+
+**经验**：① 控制推理强度首选官方 agent 选项 `reasoningEffort`（docs/agents Additional），与模型/版本无关、零配置；② 不要拼 `model@max`（v1.18.18 解析只切 `/`）；③ 验证配置是否真的生效：本地 mock OpenAI-compatible 服务 + 抓请求体（`opencode run --agent` 实测），不要只看配置校验通过。
+
+### D37. tester bash 权限反转：默认放行 + 定向拦截（2026-08-16 九轮修订，M4 实跑反馈）
+
+**问题**（task-pulsepet-m4 实跑证据）：D32 扩容后 tester 一轮验证仍频繁触发授权，落 ask 的命令全在白名单外：
+
+- **env 前缀命令**：`PULSEPET_REMINDER_TICK_MS=2000 npm run tauri dev`——权限匹配对象是 tree-sitter AST 命令节点的完整文本（`shell.ts` `source(node)` 含 `FOO=bar` 赋值前缀），`npm *` 锚定开头匹配不上，落入 `*: ask`
+- **E2E 验证工具链**：screencapture 截屏、Vision OCR / CGEvent / AX 驱动的 Swift 工具（swiftc 编译+执行）、sqlite3 直查与测试数据注入、pgrep/ps、kill/pkill 清理 dev 进程、像素分析脚本
+- **/var/folders 临时目录**：bash 写文件原语（mkdir/cp/cat >）触发 external_directory 默认 ask；write 工具又被 edit `*: deny` 拦（测试路径外）
+
+**根因**：
+
+1. 白名单假设"tester = 跑单测"，实际 GUI App 的验收是开放式 E2E 工作负载（GUI 自动化/截屏 OCR/DB 注入/进程管理/ad-hoc 工具编译），静态枚举必然打地鼠——D32 已补过一轮仍不够
+2. 更本质：`node *` 早已放行 = 任意代码执行，bash 白名单根本不是安全边界（非对抗模型下可被 `node -e` 绕过），只剩摩擦。威胁模型是"防误操作、非防对抗"（D32 自述），该模型下的正确形态是**默认放行 + 定向拦截不可逆动作**——与 coder D15 同哲学、粒度更贴 tester 职责
+
+**修订**（bash 从 ask 白名单反转为 allow + deny 清单）：
+
+- `"*": allow`：任意测试/构建/E2E/GUI 自动化命令直接可用，env 前缀命令同样放行（匹配对象含前缀也不再产生摩擦）；**tester 的栈限制随之解除**（§9 限制已更新）
+- **git 收紧为只读**：`git *: deny` + 六个例外（status/diff/log/show/rev-parse/fetch——fetch 只更新 remote-tracking refs，tester 核对同步状态需要）。理由：tester 任何写 git 操作（commit/stash/checkout…）都会移动 HEAD 或改动工作区，破坏 testedSha=HEAD 校验协议——比原 ask 更严
+- **deny**：`sudo*`、`gh *`（交付面工具归 committer/coder，P1 授权面收口）；`rm -rf*`/`rm -fr*` deny 但**临时目录精确放行**（`rm -rf /var/folders/*`、`/tmp/*` 含 /private 形态）——防的是"仓库/home 内递归强删"的灾难形态，测试临时文件清理（`rm -rf` 肌肉记忆形式）零摩擦。`rm` 单文件与 `rm -r` 任意位置可用（bash 工具 stdin=ignore 非交互，`rm -r` 不弹确认，效果等同 `-rf`，且不匹配 deny 模式）
+- **external_directory 放行**：`/var/folders/*`、`/tmp/*`（各含 `/private/...` 符号链接解析形态）与 `~/Library/Application Support/*`（被测 GUI App 的数据目录，E2E 注入/直查的合法落点）——消除 external 默认 ask；edit `*: deny` 仍拦 write 工具写仓库外（临时文件用 bash 落盘）
+- **顺序语义依据**：规则"最后一个匹配生效"，frontmatter 键序由 config 解析保留（源码 permission config 注释 `propertyOrder: "original"`）——catch-all 在前、例外在后的写法与 coder 一致
+
+**已知缺口（接受）**：env 前缀同样绕过 deny——`FOO=1 git push` 只匹配 `*: allow` 而放行。非对抗威胁模型下接受（该缺口在 coder 的 `git push*: ask` 同样存在，非本次引入）。
+
+**验证**：配置语义对照官方 permissions/agents 文档与源码（packages/opencode/src/tool/shell.ts：AST 拆分、`source(node)` 含 env 前缀、FILES 集合触发 external 扫描）；`external_directory` 为合法 permission 键且支持对象粒度（config schema 含该键）。下个任务实跑观察授权频次。
+
 ---
 
 ## 9. 已知限制与后续演进
@@ -809,7 +834,7 @@ D31 落地后切换到任一 agent 即报错：`Agent Supervised-Coding's config
 
 - **循环可靠性是软约束**：协议依赖模型遵循 prompt（检查点写坏最坏重跑一轮，可接受）
 - **乒乓检测是启发式**：语义比对可能误判/漏判（D19）
-- **支持技术栈受限**：tester/bash 白名单覆盖 **JS/TS（npm/pnpm/yarn/bun/npx/node）+ Rust（cargo）**；引入其他栈（Python/Go/Swift）需先扩展 tester 权限与测试命令
+- **tester 栈限制已解除（D37）**：bash 默认放行后不再依赖命令白名单，任意栈可用；edit 仍限定测试文件路径（Rust 内联单测边界见下条）
 - **Rust 测试边界**：`#[cfg(test)]` 单元测试内联在 src/ 业务文件中，tester 权限写不到，由 coder TDD 自测覆盖；tester 的 Rust 验证限于 `tests/` 集成测试与用例勾验
 - **模型质量依赖**：tester 用便宜模型写测试，质量不足时需升级模型或由 committer 兜底审查测试质量
 - **平台验证受限**：本地只能验证当前平台行为（如 macOS），跨平台行为靠 CI/手动
@@ -825,6 +850,6 @@ D31 落地后切换到任一 agent 即报错：`Agent Supervised-Coding's config
 2. **skill 化拆分（D25，优先）**：4 个 agent 的知识沉淀为 `tdd` / `code-review` / `test-execution` / `checkpoint-protocol` skill，prompt 瘦身为身份 + 路由；跑几轮后把实战教训回写进 skill
 3. 用 `@opencode-ai/sdk` 将流程固化为脚本（硬循环 + structured output），支持 CI/无人值守
 4. 每轮写检查点时生成 evidence manifest，交付阶段自动组装进 PR description（可脚本化）
-5. 支持多技术栈时，引入 per-target 测试命令配置（如 `opencode-test-config.json`），替代静态 bash 白名单
+5. ~~支持多技术栈时，引入 per-target 测试命令配置（如 `opencode-test-config.json`），替代静态 bash 白名单~~（已被 D37 取代：bash 默认放行后无白名单可替代）
 6. 新领域监督模式（`supervised-design` 等）按 D21 模式族扩展，subagent 按需复用（D23 默认开放）
 7. **用户直连通道实施（D35，已定稿）**：supervised-coding 调用预告附 taskId + 可粘贴直连命令、3 个 subagent prompt 增直连协议（只答询、只读代码、要改引导回主线）、§7 使用指南补 B/C/A 三通道用法——方案全文见 D35
