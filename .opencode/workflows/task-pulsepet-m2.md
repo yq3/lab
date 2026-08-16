@@ -15,7 +15,7 @@ reviewedSha: 53f495b9f9159c09ce7153073ed6e08d887ca0eb
 filesChanged: [pulse-pet/src-tauri/src/http_server.rs, pulse-pet/src-tauri/src/session_state.rs, pulse-pet/src-tauri/src/runtime.rs, pulse-pet/src-tauri/src/lib.rs, pulse-pet/src-tauri/src/db.rs, pulse-pet/src-tauri/src/windows.rs, pulse-pet/src-tauri/Cargo.toml, pulse-pet/src-tauri/Cargo.lock, pulse-pet/opencode-plugin/pulse-pet-hook.js, pulse-pet/opencode-plugin/pulse-pet-hook.d.ts, pulse-pet/opencode-plugin/opencode-config.mjs, pulse-pet/opencode-plugin/opencode-config.d.mts, pulse-pet/opencode-plugin/install.sh, pulse-pet/opencode-plugin/install.ps1, pulse-pet/opencode-plugin/README.md, pulse-pet/src/lib/http-bridge.ts, pulse-pet/src/lib/agent-adapter.ts, pulse-pet/src/lib/adapters/opencode.ts, pulse-pet/src/pet/petStore.ts, pulse-pet/src/pet/PetCanvas.tsx, pulse-pet/src/main.tsx, pulse-pet/package.json, pulse-pet/package-lock.json, pulse-pet/src/lib/opencode.test.ts, pulse-pet/src/lib/http-bridge.test.ts, pulse-pet/src/lib/opencode-config.test.ts, pulse-pet/src/lib/plugin-hook.test.ts, pulse-pet/src/lib/plugin-http.test.ts]
 endReason: null
 createdAt: 2026-08-15T23:00:00+08:00
-updatedAt: 2026-08-16T00:50:00+08:00
+updatedAt: 2026-08-16T01:05:00+08:00
 ---
 
 # task-pulsepet-m2: pulse-pet M2 事件链路开发
@@ -126,7 +126,7 @@ updatedAt: 2026-08-16T00:50:00+08:00
 - **双通过确认（2026-08-15）**：testVerdict=PASS + reviewVerdict=APPROVED，reviewedSha=testedSha=HEAD=53f495b，status=approved。待：向用户汇报 + 回 spec 5 条落笔确认 + 交付确认（分支推远端 + PR → develop + gh pr review 留痕 + evidence manifest）。
 - **回 spec 落笔（2026-08-15 用户确认，supervised-coding）**：DESIGN.md §3.1 节流表补"同桶升级放行"语义（editing(4)>working(1) 绕过冷却，M5 前实现，30s 超时兜底）+ §3.1 插件注册格式修正（export default {id,server}、plugin 路径 spec、全局 plugins/ 不自动扫描）+ §3.3 优先级链 success 定案位（error>waiting-permission>testing>editing>thinking>success>working>idle）+ §10.2 M2 实测结论（tool.execute.after 主复位/chat.message 无完成事件/session.status+session.idle 兜底）+ success 不可达注记（M3/M4 引入）；TEST-CASES.md TC-EV-14 措辞（recv_timeout 2s + AbortSignal 3s 兜底 + Connection close 一次性）+ TC-EV-01 预期 2 路径 spec。共 4 处 DESIGN + 2 处 TEST-CASES。
 - **交付执行（2026-08-15/16）**：Coder 提交回 spec 文档 `bef11ac`（`[task-pulsepet-m2] R1: 回 spec 文档口径`，仅 DESIGN.md+TEST-CASES.md +9/-5）→ 同步 origin/develop（Already up to date）→ SSH 推送 develop_opencode 成功（efd67f1..bef11ac）→ 开 PR：**https://github.com/yq3/lab/pull/2**（base develop / head develop_opencode，title `[pulse-pet] M2 事件链路：tiny_http server + opencode 插件 + 多 session 状态机`，body 8 节：摘要/验收结论/M2 范围/TC-EV 通过摘要/P2 修复/Known Issues/回 spec 5 条/Evidence Manifest）。Committer 已执行 `gh pr review` 留痕——**COMMENTED**（同账号 POC 约定，2026-08-16T00:35:49Z）：正文五节（评审对象核对：30 文件全在 pulse-pet/、双 SHA 三方一致、bef11ac 纯文档免增量重审 + 5 条回写逐条复核一致；APPROVED 结论摘要；knownIssues 移交 M3；不自动合入声明）。Coder 已把 evidence manifest JSON 写入 PR description（JSON.parse 校验通过：taskId/headSha=testedSha=reviewedSha=53f495b/2 commits/verdicts/testEvidence 9 键/knownIssues/specUpdates/reviewers）。**交付三步完成，PR 待用户合入决定**。
-- **回写 M1 检查点**：P2-1~P2-8 全部处理完毕（来源 task-pulsepet-m2），已勾选注记。
+- **合入（2026-08-16 用户确认）**：PR #2 已合入 develop（merge commit `491e504`，`gh pr merge 2 --merge --delete-branch=false`，develop_opencode 分支保留）。检查点已提交并推送 origin/develop（`b35a2d8` docs(opencode): 提交 task-pulsepet-m2 检查点）。**M2 任务完成，status=approved 终态。**
 
 ## 最新验证意见原文
 
