@@ -15,7 +15,7 @@ reviewedSha: efd67f1057e40c3e43f9e5cbf4a61a7841f0aa14
 filesChanged: [pulse-pet/package.json, pulse-pet/tsconfig.json, pulse-pet/tsconfig.node.json, pulse-pet/vite.config.ts, pulse-pet/vitest.config.ts, pulse-pet/index.html, pulse-pet/.gitignore, pulse-pet/src/main.tsx, pulse-pet/src/App.tsx, pulse-pet/src/lib/state.ts, pulse-pet/src/lib/state.test.ts, pulse-pet/src/lib/scaling.ts, pulse-pet/src/lib/scaling.test.ts, pulse-pet/src/pet/petStore.ts, pulse-pet/src/pet/Pet.tsx, pulse-pet/src/pet/PetCanvas.tsx, pulse-pet/src/panel/Panel.tsx, pulse-pet/src/fireworks/Fireworks.tsx, pulse-pet/src/styles/global.css, pulse-pet/src-tauri/Cargo.toml, pulse-pet/src-tauri/Cargo.lock, pulse-pet/src-tauri/tauri.conf.json, pulse-pet/src-tauri/migrations/001-init.sql, pulse-pet/src-tauri/src/lib.rs, pulse-pet/src-tauri/src/db.rs, pulse-pet/src-tauri/src/windows.rs, pulse-pet/src-tauri/src/tray.rs, pulse-pet/src-tauri/src/main.rs, pulse-pet/src-tauri/build.rs, pulse-pet/src-tauri/capabilities/default.json, pulse-pet/src-tauri/.gitignore, pulse-pet/src-tauri/icons/*, pulse-pet/public/placeholder-cat.png, pulse-pet/scripts/gen-assets.mjs, pulse-pet/scripts/app-icon.png, pulse-pet/README.md, pulse-pet/AGENTS.md, pulse-pet/DESIGN.md, pulse-pet/TEST-CASES.md]
 endReason: null（2026-08-15 用户批准突破 maxRounds 继续，R4）
 createdAt: 2026-08-14T22:59:34+08:00
-updatedAt: 2026-08-15T00:45:00+08:00
+updatedAt: 2026-08-16T00:52:00+08:00
 ---
 
 # task-pulsepet-m1: pulse-pet M1 骨架开发
@@ -90,6 +90,10 @@ updatedAt: 2026-08-15T00:45:00+08:00
 ## 需求确认
 
 - [x] 用户已确认（确认后 status=implementing）——2026-08-14 用户确认，进入实施
+
+## 遗留事项（跨任务移交）
+
+- [x] 8 条 P2 已全部清偿（2026-08-16，来源 task-pulsepet-m2，tester M2 R1 逐条 PASS）：P2-1 FK pragma（db.rs:29 + 级联单测）、P2-2 pet ⌘W 防护（lib.rs:111-116 guard 扩到 panel||pet）、P2-3 loadCatImage catch（PetCanvas.tsx:123）、P2-4 dpr rAF 延迟一帧（PetCanvas.tsx:108-113）、P2-5 Moved 150ms trailing 防抖（windows.rs PositionSaver）、P2-6 恢复位置 clamp（clamp_position 纯函数 4 单测 + 运行时实证）、P2-7 状态圆点移除（grep 0 匹配 + 截屏仅猫本体）、P2-8 口径回写（TC-APP-01 预期 6 + TC-SP-01 追加，supervised-coding 落笔）。随 PR #2 交付（53f495b + bef11ac）。
 
 ## 轮次记录
 
