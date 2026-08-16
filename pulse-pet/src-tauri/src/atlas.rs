@@ -1,4 +1,4 @@
-//! M5 atlas 加载器（DESIGN §6.2，TC-SP-04~11）。
+//! M5 atlas 加载器（DESIGN §6.2，TC-SP-04~12）。
 //!
 //! - 素材格式：codex atlas（`pet.json` + `spritesheet.webp`/`.png`），
 //!   v1 8×9 = 1536×1872 / v2 8×11 = 1536×2288，单帧 192×208（或其干净缩放）。
@@ -9,8 +9,11 @@
 //!   pet.json 声明 cols/rows 时须与实际一致；不符 → 拒载 + 面板提示 +
 //!   回退内置占位，不做按单帧强行裁剪。
 //! - 加载顺序（TC-SP-06/09）：用户配置 pet（app_state `pet.selected`）→
-//!   内置占位 → `~/.codex/pets/` 扫描 → `~/.petdex/pets/` 扫描；逐级回退，
+//!   内置宠物 → `~/.codex/pets/` 扫描 → `~/.petdex/pets/` 扫描；逐级回退，
 //!   最终必落内置占位（内嵌资源，永不吃紧）。
+//! - 内置宠物（TC-SP-12，编译期内嵌双可选）：小猫 `blinking-kitty`（默认，
+//!   无用户配置/所有回退路径的落点）+ 小狗 `wagging-doggy`（线条小狗风格、
+//!   摇尾巴；同链路加载/校验/切帧/热替换）。
 //!
 //! 纯逻辑不依赖 Tauri（扫描根目录可注入），`cargo test` 直接覆盖；
 //! Tauri command 在文件末尾薄封装。
@@ -23,8 +26,10 @@ pub const FRAME_H: u32 = 208;
 /// 列数固定 8（v1/v2 同）。
 pub const COLS: u32 = 8;
 
-/// 内置占位 id（app_state `pet.selected` 可存它，等价显式选内置）。
-pub const BUILTIN_ID: &str = "builtin";
+/// 内置小猫 id（默认宠物：无用户配置时加载它；TC-SP-12）。
+pub const BUILTIN_ID: &str = "blinking-kitty";
+/// 内置小狗 id（M5 补充，线条小狗风格摇尾巴；下拉"内置"分组与小猫并列）。
+pub const BUILTIN_DOG_ID: &str = "wagging-doggy";
 pub const SOURCE_BUILTIN: &str = "builtin";
 pub const SOURCE_CODEX: &str = "codex";
 pub const SOURCE_PETDEX: &str = "petdex";
@@ -60,20 +65,20 @@ impl std::fmt::Display for AtlasError {
 }
 
 impl AtlasError {
-    /// 面板提示文案（TC-SP-05/09 措辞）。
+    /// 面板提示文案（TC-SP-05/09 措辞；回退落点 = 默认内置小猫 blinking-kitty）。
     pub fn notice_text(&self, id: &str) -> String {
         match self {
             AtlasError::NonStandardGrid { width, height } => format!(
-                "「{id}」该素材网格尺寸非标准（如 8×9 / 8×11 之外）：spritesheet 为 {width}×{height}，已回退内置占位"
+                "「{id}」该素材网格尺寸非标准（如 8×9 / 8×11 之外）：spritesheet 为 {width}×{height}，已回退内置占位 blinking-kitty"
             ),
             AtlasError::BrokenMeta(reason) => format!(
-                "「{id}」素材加载失败（pet.json 损坏：{reason}），已回退内置占位"
+                "「{id}」素材加载失败（pet.json 损坏：{reason}），已回退内置占位 blinking-kitty"
             ),
             AtlasError::BrokenSheet(reason) => format!(
-                "「{id}」素材加载失败（spritesheet 缺失或无法解码：{reason}），已回退内置占位"
+                "「{id}」素材加载失败（spritesheet 缺失或无法解码：{reason}），已回退内置占位 blinking-kitty"
             ),
             AtlasError::Io(reason) => {
-                format!("「{id}」素材读取失败（{reason}），已回退内置占位")
+                format!("「{id}」素材读取失败（{reason}），已回退内置占位 blinking-kitty")
             }
         }
     }
@@ -261,13 +266,32 @@ pub fn load_pet_dir(dir: &Path) -> Result<(PetMeta, AtlasData), AtlasError> {
     ))
 }
 
-// ---- 内置占位（编译期内嵌，最终兜底永不吃紧）----
+// ---- 内置宠物（编译期内嵌，最终兜底永不吃紧；TC-SP-12 双可选）----
 
-const BUILTIN_META_BYTES: &[u8] = include_bytes!("../assets/placeholder-atlas/pet.json");
-const BUILTIN_SHEET_BYTES: &[u8] = include_bytes!("../assets/placeholder-atlas/spritesheet.png");
+const BUILTIN_CAT_META: &[u8] = include_bytes!("../assets/blinking-kitty/pet.json");
+const BUILTIN_CAT_SHEET: &[u8] = include_bytes!("../assets/blinking-kitty/spritesheet.png");
+const BUILTIN_DOG_META: &[u8] = include_bytes!("../assets/wagging-doggy/pet.json");
+const BUILTIN_DOG_SHEET: &[u8] = include_bytes!("../assets/wagging-doggy/spritesheet.png");
 
+/// 内置宠物表（下拉"内置"分组顺序；第一项 = 无用户配置时的默认）。
+const BUILTIN_PETS: &[(&str, &[u8], &[u8])] = &[
+    (BUILTIN_ID, BUILTIN_CAT_META, BUILTIN_CAT_SHEET),
+    (BUILTIN_DOG_ID, BUILTIN_DOG_META, BUILTIN_DOG_SHEET),
+];
+
+/// 按 id 加载内置宠物（blinking-kitty / wagging-doggy；未知 id → Err）。
+pub fn load_builtin_pet(id: &str) -> Result<(PetMeta, AtlasData), AtlasError> {
+    for (bid, meta, sheet) in BUILTIN_PETS {
+        if *bid == id {
+            return load_from_pair(meta, sheet, bid);
+        }
+    }
+    Err(AtlasError::BrokenMeta(format!("未知的内置宠物 id: {id}")))
+}
+
+/// 默认内置（blinking-kitty）：无用户配置的选择 + 所有回退路径的最终兜底。
 pub fn load_builtin() -> Result<(PetMeta, AtlasData), AtlasError> {
-    load_from_pair(BUILTIN_META_BYTES, BUILTIN_SHEET_BYTES, BUILTIN_ID)
+    load_builtin_pet(BUILTIN_ID)
 }
 
 // ---- 扫描与解析顺序 ----
@@ -330,9 +354,10 @@ pub struct Selection {
     pub notice: Option<String>,
 }
 
-/// 单个 id 的来源查找顺序：内置（id=builtin）→ codex → petdex（TC-SP-06）。
+/// 单个 id 的来源查找顺序：内置（blinking-kitty / wagging-doggy）→ codex →
+/// petdex（TC-SP-06；内置两只都算 SOURCE_BUILTIN，path 为空占位）。
 fn find_pet_dir(id: &str, home: &Path) -> Vec<(&'static str, PathBuf)> {
-    if id == BUILTIN_ID {
+    if id == BUILTIN_ID || id == BUILTIN_DOG_ID {
         return vec![(SOURCE_BUILTIN, PathBuf::new())];
     }
     if !pet_name_ok(id) {
@@ -348,8 +373,8 @@ fn find_pet_dir(id: &str, home: &Path) -> Vec<(&'static str, PathBuf)> {
 }
 
 /// 加载顺序解析（TC-SP-06）：
-/// 用户配置 id（builtin → codex → petdex 中找）→ 内置占位 → codex 首个 →
-/// petdex 首个 → 内置占位（最终兜底）。
+/// 用户配置 id（内置 → codex → petdex 中找）→ 内置默认（blinking-kitty）→
+/// codex 首个 → petdex 首个 → 内置默认（最终兜底）。
 pub fn resolve_requested(requested: Option<&str>, home: &Path) -> Selection {
     let mut notice: Option<String> = None;
 
@@ -357,11 +382,11 @@ pub fn resolve_requested(requested: Option<&str>, home: &Path) -> Selection {
     if let Some(id) = requested.filter(|s| !s.is_empty()) {
         for (source, path) in find_pet_dir(id, home) {
             if source == SOURCE_BUILTIN {
-                match load_builtin() {
+                match load_builtin_pet(id) {
                     Ok((_, data)) => {
                         return Selection {
                             requested: Some(id.to_string()),
-                            current_id: BUILTIN_ID.to_string(),
+                            current_id: id.to_string(),
                             current_source: SOURCE_BUILTIN,
                             data,
                             notice,
@@ -394,7 +419,7 @@ pub fn resolve_requested(requested: Option<&str>, home: &Path) -> Selection {
             }
         }
         if notice.is_none() {
-            notice = Some(format!("「{id}」未找到宠物素材，已回退内置占位"));
+            notice = Some(format!("「{id}」未找到宠物素材，已回退内置占位 blinking-kitty"));
         }
     } else {
         // 2. 无配置：内置占位（显式第二级；成功即用）
@@ -457,25 +482,28 @@ pub struct PetOption {
     pub problem: Option<String>,
 }
 
-/// 面板"选择宠物"下拉数据：内置占位 + codex 扫描 + petdex 扫描（顺序一致）。
-/// 每项做轻量加载校验（损坏 / 非标准网格 → ok=false + problem，TC-SP-11③④）。
+/// 面板"选择宠物"下拉数据：内置分组（blinking-kitty / wagging-doggy）+
+/// codex 扫描 + petdex 扫描（顺序一致）。每项做轻量加载校验（损坏 / 非标准
+/// 网格 → ok=false + problem，TC-SP-11③④；TC-SP-12 内置两只并列）。
 pub fn list_pets_in(home: &Path) -> Vec<PetOption> {
     let mut v = Vec::new();
-    match load_builtin() {
-        Ok((meta, _)) => v.push(PetOption {
-            id: BUILTIN_ID.to_string(),
-            display_name: meta.display_name,
-            source: SOURCE_BUILTIN,
-            ok: true,
-            problem: None,
-        }),
-        Err(e) => v.push(PetOption {
-            id: BUILTIN_ID.to_string(),
-            display_name: "内置占位".to_string(),
-            source: SOURCE_BUILTIN,
-            ok: false,
-            problem: Some(e.notice_text(BUILTIN_ID)),
-        }),
+    for (bid, _, _) in BUILTIN_PETS {
+        match load_builtin_pet(bid) {
+            Ok((meta, _)) => v.push(PetOption {
+                id: bid.to_string(),
+                display_name: meta.display_name,
+                source: SOURCE_BUILTIN,
+                ok: true,
+                problem: None,
+            }),
+            Err(e) => v.push(PetOption {
+                id: bid.to_string(),
+                display_name: bid.to_string(),
+                source: SOURCE_BUILTIN,
+                ok: false,
+                problem: Some(e.notice_text(bid)),
+            }),
+        }
     }
     for scanned in scan_pets_in(home) {
         let (display_name, ok, problem) = match load_pet_dir(&scanned.path) {
@@ -864,17 +892,38 @@ mod tests {
         fs::remove_dir_all(&home).ok();
     }
 
-    // ---- 内置占位 ----
+    // ---- 内置宠物（blinking-kitty 默认 + wagging-doggy，TC-SP-12）----
 
     #[test]
     fn builtin_atlas_is_standard_v1() {
         let (meta, data) = load_builtin().unwrap();
         assert_eq!(meta.id, BUILTIN_ID);
+        assert_eq!(meta.id, "blinking-kitty");
+        assert!(meta.display_name.contains("blinking-kitty"), "{}", meta.display_name);
         assert_eq!((data.cols, data.rows), (8, 9));
         assert_eq!((data.frame_w, data.frame_h), (192, 208));
         assert_eq!(data.rgba.len(), 1536 * 1872 * 4);
         // 有不透明像素（不是全透明图）
         assert!(data.rgba.chunks_exact(4).any(|p| p[3] > 0));
+    }
+
+    #[test]
+    fn builtin_dog_wagging_doggy_is_standard_and_distinct() {
+        let (meta, data) = load_builtin_pet(BUILTIN_DOG_ID).unwrap();
+        assert_eq!(meta.id, "wagging-doggy");
+        assert!(meta.display_name.contains("wagging-doggy"), "{}", meta.display_name);
+        assert_eq!((data.cols, data.rows), (8, 9));
+        assert_eq!((data.frame_w, data.frame_h), (192, 208));
+        assert_eq!(data.rgba.len(), 1536 * 1872 * 4);
+        assert!(data.rgba.chunks_exact(4).any(|p| p[3] > 0));
+        // 与小猫图块不同（不是同一张图的拷贝）
+        let (_, cat) = load_builtin().unwrap();
+        assert_ne!(data.rgba, cat.rgba, "dog sheet must differ from cat sheet");
+    }
+
+    #[test]
+    fn builtin_pet_unknown_id_is_error() {
+        assert!(load_builtin_pet("no-such-builtin").is_err());
     }
 
     // ---- 扫描顺序（TC-SP-06）----
@@ -924,14 +973,23 @@ mod tests {
         let home = tempdir("resolve");
         let sheet = make_sheet(image::ImageFormat::WebP, 1536, 1872, [1, 1, 1, 255]);
 
-        // 无配置无素材 → 内置
+        // 无配置无素材 → 内置默认 blinking-kitty（TC-SP-12）
         let s = resolve_requested(None, &home);
         assert_eq!((s.current_id.as_str(), s.current_source), (BUILTIN_ID, SOURCE_BUILTIN));
+        assert_eq!(s.current_id, "blinking-kitty");
         assert!(s.notice.is_none());
 
-        // 配置 id=builtin → 显式内置
+        // 配置 id=blinking-kitty → 显式内置小猫
         let s = resolve_requested(Some(BUILTIN_ID), &home);
         assert_eq!((s.current_id.as_str(), s.current_source), (BUILTIN_ID, SOURCE_BUILTIN));
+
+        // 配置 id=wagging-doggy → 内置小狗（TC-SP-12：下拉可切、同链路加载）
+        let s = resolve_requested(Some(BUILTIN_DOG_ID), &home);
+        assert_eq!(
+            (s.current_id.as_str(), s.current_source),
+            (BUILTIN_DOG_ID, SOURCE_BUILTIN)
+        );
+        assert!(s.notice.is_none());
 
         // 配置 codex 里的 pet → codex
         write_pet(&home.join(".codex/pets/kitty"), OK_META, &sheet, "spritesheet.webp");
@@ -989,10 +1047,12 @@ mod tests {
         let home = tempdir("noconf");
         let sheet = make_sheet(image::ImageFormat::WebP, 1536, 1872, [1, 1, 1, 255]);
 
-        // 只有 petdex 素材 → 无配置时仍落内置占位（内置在 codex 之前）
+        // 只有 petdex 素材 → 无配置时仍落内置占位（内置在 codex 之前），
+        // 且默认是 blinking-kitty 而非 wagging-doggy（TC-SP-12）
         write_pet(&home.join(".petdex/pets/lonely"), OK_META, &sheet, "spritesheet.webp");
         let s = resolve_requested(None, &home);
         assert_eq!(s.current_source, SOURCE_BUILTIN);
+        assert_eq!(s.current_id, "blinking-kitty");
 
         fs::remove_dir_all(&home).ok();
     }
@@ -1010,19 +1070,24 @@ mod tests {
         write_pet(&home.join(".petdex/pets/badgrid"), OK_META, &bad, "spritesheet.webp");
 
         let pets = list_pets_in(&home);
-        assert_eq!(pets.len(), 4, "{pets:?}");
-        assert_eq!(&pets[0].id, BUILTIN_ID);
+        assert_eq!(pets.len(), 5, "{pets:?}");
+        // 内置分组两只并列（顺序 = 默认在前，TC-SP-11/12）
+        assert_eq!(&pets[0].id, "blinking-kitty");
         assert!(pets[0].ok);
+        assert!(pets[0].display_name.contains("blinking-kitty"));
+        assert_eq!(&pets[1].id, "wagging-doggy");
+        assert!(pets[1].ok);
+        assert!(pets[1].display_name.contains("wagging-doggy"));
         // codex 内按名字序：broken < good
-        assert_eq!(&pets[1].id, "broken");
-        assert!(!pets[1].ok);
-        assert!(pets[1].problem.as_deref().unwrap_or("").contains("pet.json"));
-        assert_eq!(&pets[2].id, "good");
-        assert!(pets[2].ok);
-        assert_eq!(&pets[2].display_name, "好的");
-        assert_eq!(&pets[3].id, "badgrid");
-        assert!(!pets[3].ok);
-        assert!(pets[3].problem.as_deref().unwrap_or("").contains("网格尺寸非标准"));
+        assert_eq!(&pets[2].id, "broken");
+        assert!(!pets[2].ok);
+        assert!(pets[2].problem.as_deref().unwrap_or("").contains("pet.json"));
+        assert_eq!(&pets[3].id, "good");
+        assert!(pets[3].ok);
+        assert_eq!(&pets[3].display_name, "好的");
+        assert_eq!(&pets[4].id, "badgrid");
+        assert!(!pets[4].ok);
+        assert!(pets[4].problem.as_deref().unwrap_or("").contains("网格尺寸非标准"));
 
         fs::remove_dir_all(&home).ok();
     }

@@ -1,6 +1,0 @@
-{
-  "id": "builtin",
-  "displayName": "内置占位小猫",
-  "description": "PulsePet 内置占位 atlas（codex 格式 8×9 = 1536×1872，单帧 192×208，9 行姿态）。作者自绘，CC0。",
-  "spritesheetPath": "spritesheet.png"
-}

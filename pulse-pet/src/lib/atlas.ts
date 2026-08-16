@@ -140,7 +140,7 @@ export async function fetchPetOptions(): Promise<PetOption[]> {
   return list;
 }
 
-/** 选择宠物（null = 恢复自动）；返回加载结果 meta（失败时已回退内置占位）。 */
+/** 选择宠物（null = 恢复自动，默认 blinking-kitty）；返回加载结果 meta（失败时已回退内置占位）。 */
 export async function selectPet(id: string | null): Promise<AtlasMeta> {
   if (!isTauriRuntime()) throw new Error("atlas 需要在 PulsePet App（Tauri）内使用");
   const { invoke } = await import("@tauri-apps/api/core");

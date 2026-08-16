@@ -8,13 +8,14 @@ import {
 import { isTauriRuntime } from "../lib/token-stats";
 
 /**
- * 设置页（M5 落地"选择宠物"，DESIGN §6.2 / §10.2，TC-SP-11 + TC-APP-12）：
- * - 下拉列出 内置占位 → `~/.codex/pets/` 扫描 → `~/.petdex/pets/` 扫描（与加载顺序一致）；
+ * 设置页（M5 落地"选择宠物"，DESIGN §6.2 / §10.2，TC-SP-11/12 + TC-APP-12）：
+ * - 下拉列出 内置分组（blinking-kitty / wagging-doggy）→ `~/.codex/pets/` 扫描 →
+ *   `~/.petdex/pets/` 扫描（与加载顺序一致）；
  * - 切换立即热替换 webview 帧（Rust 加载 + atlas://changed 事件，无需重启）；
  * - 损坏 / 非标准网格项旁有回退提示（Rust 侧逐项校验结果）；
  * - 选择持久化到 app_state `pet.selected`（重启保留；TC-APP-12）。
  *
- * 「自动（跟随内置占位）」= 清除配置（atlas_select(null)）。
+ * 「自动」= 清除配置（atlas_select(null)），默认加载内置小猫 blinking-kitty。
  * 穿透开关等其余设置为 M6（原占位文案中"烟花全局开关"已于 M4 落地提醒页）。
  */
 
@@ -82,7 +83,7 @@ export default function Settings() {
         disabled={switching || !options}
         onChange={(e) => void onSwitch(e.target.value)}
       >
-        <option value="">自动（默认内置占位）</option>
+        <option value="">自动（默认 blinking-kitty）</option>
         {options?.map((o) => (
           <option key={`${o.source}:${o.id}`} value={o.id} disabled={!o.ok}>
             {o.displayName}（{SOURCE_LABELS[o.source] ?? o.source}）
