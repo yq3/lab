@@ -6,6 +6,7 @@ import {
   type SpriteState,
 } from "../lib/state";
 import { BUBBLE_AUTO_HIDE_MS, sanitizeBubbleText } from "../lib/bubble";
+import type { AtlasMeta, AtlasPixels } from "../lib/atlas";
 
 /** 当前展示的气泡（M3：token 会话汇报；M4 起复用于提醒文案）。 */
 export interface BubbleState {
@@ -31,8 +32,14 @@ interface PetState {
   sprite: SpriteState;
   /** 气泡（null = 不显示）。 */
   bubble: BubbleState | null;
+  /** M5：当前 atlas RGBA 图块（null = 无 atlas，占位 PNG 渲染）。 */
+  atlas: AtlasPixels | null;
+  /** M5：当前 atlas 元数据（含回退 notice；null = 未加载/非 Tauri）。 */
+  atlasMeta: AtlasMeta | null;
   setRaw: (raw: NormalizedState) => void;
   next: () => void;
+  /** M5：atlas 加载/热替换（atlas-bridge 调用；对象身份变化驱动 canvas 重建）。 */
+  setAtlas: (meta: AtlasMeta, pixels: AtlasPixels | null) => void;
   /** 展示气泡（净化约束：单行 1-140；非法输入丢弃；8s 自动消失，DESIGN §5.2）。 */
   showBubble: (text: string) => void;
   hideBubble: () => void;
@@ -91,6 +98,9 @@ export const usePetStore = create<PetState>((set, get) => ({
   raw: "idle",
   sprite: "idle",
   bubble: null,
+  atlas: null,
+  atlasMeta: null,
+  setAtlas: (meta, pixels) => set({ atlasMeta: meta, atlas: pixels }),
   setRaw: (raw) => set({ raw, sprite: degradeState(raw) }),
   next: () =>
     set((s) => {

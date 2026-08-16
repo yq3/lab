@@ -145,9 +145,8 @@ describe("插件 Throttle：三类冷却互不干扰（TC-EV-18）", () => {
     expect(th.shouldSend("waiting-permission")).toBe(true); // permission
     expect(th.shouldSend("working")).toBe(true); // reaction
 
-    // t=0：同类冷却中丢弃，跨类互不干扰
+    // t=0：冷却中同类（同优先级）丢弃，跨类互不干扰
     expect(th.shouldSend("thinking")).toBe(false);
-    expect(th.shouldSend("error")).toBe(false); // 与 thinking 同 speech 桶
     expect(th.shouldSend("waiting-permission")).toBe(false);
     expect(th.shouldSend("working")).toBe(false);
 
@@ -159,7 +158,7 @@ describe("插件 Throttle：三类冷却互不干扰（TC-EV-18）", () => {
     // t=10s：reaction 冷却结束，speech 仍冷却
     t = 10000;
     expect(th.shouldSend("editing")).toBe(true);
-    expect(th.shouldSend("success")).toBe(false);
+    expect(th.shouldSend("success")).toBe(false); // speech 冷却中且 2 < 已投递 thinking(3)
 
     // t=20s：speech 冷却结束
     t = 20000;
@@ -175,6 +174,71 @@ describe("插件 Throttle：三类冷却互不干扰（TC-EV-18）", () => {
     expect(bucketFor("editing")).toBe("reaction");
     expect(bucketFor("testing")).toBe("reaction");
     expect(bucketFor("idle")).toBe("reaction");
+  });
+});
+
+describe("插件 Throttle：同桶升级放行（DESIGN §3.1，TC-EV-18 语义扩展）", () => {
+  // 优先级：error 7 > waiting-permission 6 > testing 5 > editing 4 >
+  //         thinking 3 > success 2 > working 1 > idle 0（与 Rust session_state 一致）
+
+  it("冷却内新事件优先级高于已投递 → 绕过冷却直接放行（editing(4) > working(1)）", () => {
+    let t = 0;
+    const th = new Throttle(() => t);
+    expect(th.shouldSend("working")).toBe(true); // t=0 占 reaction 桶
+    t = 500; // reaction 10s 冷却内
+    expect(th.shouldSend("editing")).toBe(true); // 4 > 1 → 放行
+    expect(th.shouldSend("testing")).toBe(true); // 5 > 4 → 再升级仍放行
+  });
+
+  it("优先级不高于已投递 → 维持节流（working(1) ≤ editing(4)；同优先级也节流）", () => {
+    let t = 0;
+    const th = new Throttle(() => t);
+    expect(th.shouldSend("editing")).toBe(true); // 已投递 editing(4)
+    t = 1000;
+    expect(th.shouldSend("working")).toBe(false); // 1 < 4 → 节流
+    expect(th.shouldSend("idle")).toBe(false); // 0 < 4 → 节流
+    expect(th.shouldSend("editing")).toBe(false); // 4 = 4 不高于 → 节流
+  });
+
+  it("speech 桶升级：thinking(3) 后 error(7) 放行；error 后 success(2) 节流", () => {
+    let t = 0;
+    const th = new Throttle(() => t);
+    expect(th.shouldSend("thinking")).toBe(true);
+    t = 100;
+    expect(th.shouldSend("error")).toBe(true); // 7 > 3 → 放行
+    t = 200;
+    expect(th.shouldSend("success")).toBe(false); // 2 < 7 → 节流
+    expect(th.shouldSend("thinking")).toBe(false); // 3 < 7 → 节流
+  });
+
+  it("permission 桶单成员（6=6）无升级空间 → 维持节流", () => {
+    let t = 0;
+    const th = new Throttle(() => t);
+    expect(th.shouldSend("waiting-permission")).toBe(true);
+    t = 1000; // 3s 冷却内
+    expect(th.shouldSend("waiting-permission")).toBe(false); // 6 = 6 → 节流
+  });
+
+  it("升级放行后，冷却窗以最近一次投递时刻起算（低优先级仍受节流约束）", () => {
+    let t = 0;
+    const th = new Throttle(() => t);
+    expect(th.shouldSend("working")).toBe(true); // t=0
+    t = 1000;
+    expect(th.shouldSend("editing")).toBe(true); // t=1s 升级放行 → last=1s
+    t = 2000;
+    expect(th.shouldSend("editing")).toBe(false); // 距 last 1s < 10s → 节流
+    t = 11000; // 距 t=1s 已 10s → 冷却结束
+    expect(th.shouldSend("working")).toBe(true);
+  });
+
+  it("背景场景：session.status busy(working) 占桶后紧随的 editing/testing 不被吞（M5 前定案动机）", () => {
+    let t = 0;
+    const th = new Throttle(() => t);
+    expect(th.shouldSend("working")).toBe(true); // session.status busy
+    t = 50;
+    expect(th.shouldSend("editing")).toBe(true); // tool.execute.before edit
+    t = 100;
+    expect(th.shouldSend("working")).toBe(false); // tool.execute.after 复位信号被节流（App 侧 30s 超时兜底）
   });
 });
 

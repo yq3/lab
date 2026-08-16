@@ -109,6 +109,64 @@ body,
   color: #9ca3af;
 }
 
+/* ---- 设置页（M5 选择宠物，TC-SP-11） ---- */
+
+.panel-settings h2 {
+  font-size: 15px;
+  color: #111827;
+  margin: 20px 0 10px;
+}
+
+.panel-settings h2:first-child {
+  margin-top: 0;
+}
+
+.settings-pet-label {
+  display: block;
+  font-size: 13px;
+  color: #6b7280;
+  margin-bottom: 6px;
+}
+
+.panel-settings select {
+  appearance: none;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 14px;
+  background: #fff;
+  min-width: 320px;
+  color: #111827;
+}
+
+.panel-settings select:disabled {
+  color: #9ca3af;
+  cursor: wait;
+}
+
+.settings-notice {
+  margin-top: 12px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: #fef3c7;
+  color: #92400e;
+  font-size: 13px;
+}
+
+.settings-current {
+  margin-top: 10px;
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.settings-problems {
+  margin-top: 8px;
+  padding-left: 18px;
+  font-size: 12px;
+  color: #b45309;
+  line-height: 1.7;
+}
+
 /* ---- Token 统计（M3，TC-TK-08/09） ---- */
 
 .token-controls {

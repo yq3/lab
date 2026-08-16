@@ -27,3 +27,7 @@ rand = "0.8"
 tokio = { version = "1", features = ["time"] }
 # M4：本地时间（HH:MM 窗口 / RFC3339 时间戳；iana-time-zone 随 chrono 已缓存）
 chrono = "0.4"
+# M5：atlas 解码（DESIGN §6.2）。webp feature = image-webp 解码器。
+# Windows 编译 image-webp 需 nasm（TC-SP-10 风险项）；若 CI 复杂度上升，
+# 回退方案是 atlas 直接要求 png 格式（petdex 也接受 png，DESIGN §12）。
+image = { version = "0.25", default-features = false, features = ["png", "webp"] }

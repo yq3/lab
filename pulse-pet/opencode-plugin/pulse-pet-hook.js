@@ -83,12 +83,25 @@ export function classifyToolBefore(tool, args, command) {
   return "working";
 }
 
-// ---- 节流（TC-EV-18，三类互不干扰） ----
+// ---- 节流（TC-EV-18，三类互不干扰 + 同桶升级放行） ----
 
 const SPEECH_KINDS = new Set(["thinking", "success", "error"]);
 const PERMISSION_KINDS = new Set(["waiting-permission"]);
 const REACTION_KINDS = new Set(["working", "editing", "testing", "idle"]);
 const COOLDOWNS = { speech: 20000, permission: 3000, reaction: 10000 };
+
+// 视觉优先级（与 Rust session_state.rs / DESIGN §3.3 一致，M5 同桶升级放行用）：
+// error 7 > waiting-permission 6 > testing 5 > editing 4 > thinking 3 > success 2 > working 1 > idle 0
+export const VISUAL_PRIORITY = Object.freeze({
+  error: 7,
+  "waiting-permission": 6,
+  testing: 5,
+  editing: 4,
+  thinking: 3,
+  success: 2,
+  working: 1,
+  idle: 0,
+});
 
 export function bucketFor(kind) {
   if (SPEECH_KINDS.has(kind)) return "speech";
@@ -101,15 +114,36 @@ export class Throttle {
   constructor(now = () => Date.now()) {
     this.now = now;
     this.last = { speech: -Infinity, permission: -Infinity, reaction: -Infinity };
+    // 各桶最近一次**实际放行**的 kind（同桶升级放行的比较基准）
+    this.delivered = { speech: null, permission: null, reaction: null };
   }
 
-  /** 返回 true 表示放行（并记录本次发送时刻）。 */
+  /**
+   * 返回 true 表示放行（并记录本次发送时刻）。
+   *
+   * 同桶升级放行（DESIGN §3.1，M2 移交 M5 前定案）：冷却期内，若新事件的
+   * 视觉优先级**高于**该桶已投递事件（如 editing(4) > 已投递 working(1)，
+   * 背景：session.status busy 先占 reaction 桶会把紧随的 tool.execute.before
+   * editing/testing 吞掉——占位降级渲染无视觉影响，M5 切 atlas 后有独立动画
+   * 需放行）→ 绕过冷却直接放行，且冷却窗从该次放行时刻重新起算；
+   * 优先级不高于（≤）已投递事件时维持节流。瞬态被 tool.execute.after 复位
+   * 吞没的情况由 App 侧 30s 超时兜底。
+   */
   shouldSend(kind) {
     const bucket = bucketFor(kind);
     if (!bucket) return true; // 无冷却分类的 kind 直接放行
     const t = this.now();
     if (t - this.last[bucket] >= COOLDOWNS[bucket]) {
       this.last[bucket] = t;
+      this.delivered[bucket] = kind;
+      return true;
+    }
+    const prio = VISUAL_PRIORITY[kind] ?? -1;
+    const lastKind = this.delivered[bucket];
+    const lastPrio = lastKind == null ? -1 : (VISUAL_PRIORITY[lastKind] ?? -1);
+    if (prio > lastPrio) {
+      this.last[bucket] = t; // 升级放行：冷却窗重新起算
+      this.delivered[bucket] = kind;
       return true;
     }
     return false;
