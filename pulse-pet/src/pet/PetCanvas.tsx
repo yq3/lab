@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { computeCanvasSize, computeFrameRect } from "../lib/scaling";
 import { SpriteAnimator } from "../lib/sprite";
-import { shouldStartDrag } from "../lib/pet-drag";
+import { DragClickGuard } from "../lib/pet-drag";
 import { startPetDrag } from "../lib/interaction";
 import { usePetStore } from "./petStore";
 
@@ -79,8 +79,9 @@ export default function PetCanvas() {
   const openContextMenu = usePetStore((s) => s.openContextMenu);
   const closeContextMenu = usePetStore((s) => s.closeContextMenu);
 
-  // M6 拖拽起点（pointerdown 记录、move 超阈值启动原生拖拽、up/cancel/leave 清除）
-  const dragStartRef = useRef<{ x: number; y: number } | null>(null);
+  // M6 拖拽/点击判定状态机（R2：拖拽尾巴的补发 click 不再触发状态轮换；
+  // 纯逻辑在 lib/pet-drag.ts，单测覆盖拖拽/纯点击/平台差异兜底路径）
+  const dragGuardRef = useRef(new DragClickGuard());
   const passThroughRef = useRef(passThrough);
   passThroughRef.current = passThrough;
 
@@ -251,21 +252,21 @@ export default function PetCanvas() {
   // M6 交互（TC-WIN-01/02/03）：主键按下记录起点，位移超阈值 → 原生窗口拖拽
   // （跨屏由系统处理，TC-APP-11）；右键弹 PetMenu。穿透态下 webview 收不到
   // 事件（DESIGN §6.3），passThroughRef 双保险不触发任何交互。
-  // 点击语义保留：未超阈值的按下-抬起仍是 click（M1 状态轮换 + TC-RM-04 确认）。
+  // 点击语义保留：未超阈值的按下-抬起仍是 click（M1 状态轮换 + TC-RM-04 确认）；
+  // 拖拽结束后 OS/WKWebView 可能补发一次 click（R2 实测），由 DragClickGuard
+  // 识别并吞掉——拖拽绝不附加单击效果，真实单击不受影响。
   const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (e.button !== 0 || passThroughRef.current) return;
-    dragStartRef.current = { x: e.clientX, y: e.clientY };
+    dragGuardRef.current.onPointerDown(e.clientX, e.clientY);
   };
   const onPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    const start = dragStartRef.current;
-    if (!start || passThroughRef.current) return;
-    if (shouldStartDrag(start.x, start.y, e.clientX, e.clientY)) {
-      dragStartRef.current = null; // 只启动一次，此后 OS drag loop 接管
+    if (passThroughRef.current) return;
+    if (dragGuardRef.current.onPointerMove(e.clientX, e.clientY)) {
       startPetDrag().catch((err) => console.error("[pulsepet] start_drag failed:", err));
     }
   };
   const endDragTrack = () => {
-    dragStartRef.current = null;
+    dragGuardRef.current.onPointerUp();
   };
   const onContextMenu = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (passThroughRef.current) return; // 正常不会发生（穿透收不到事件）
@@ -286,6 +287,8 @@ export default function PetCanvas() {
       onPointerLeave={endDragTrack}
       onContextMenu={onContextMenu}
       onClick={() => {
+        // R2：拖拽结束后系统补发的尾巴 click 直接吞掉（不轮换、不触碰菜单语义）
+        if (dragGuardRef.current.shouldSuppressClick()) return;
         // 菜单打开时点击画布 = 点外部：仅关菜单，不触发状态轮换
         const hadMenu = usePetStore.getState().contextMenu !== null;
         closeContextMenu();

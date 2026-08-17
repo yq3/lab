@@ -27,3 +27,59 @@ export function shouldStartDrag(
 ): boolean {
   return Math.abs(x - startX) >= threshold || Math.abs(y - startY) >= threshold;
 }
+
+/**
+ * 拖拽/点击判定状态机（R2 修复，用户反馈：拖拽结束后附加了一次左键单击效果）。
+ *
+ * 根因：超阈值启动 `start_dragging()`（OS 原生窗口拖拽）后，松开鼠标时 macOS
+ * WKWebView 的 pointer 流不会被取消（无 pointercancel），浏览器把该按下-抬起
+ * 序列补发成完整 `pointerup` + `click`——若不区分，`onClick` 的状态轮换
+ *（M1 单击语义）会在每次拖拽后误触发一次。
+ *
+ * 本类把"本轮按下是否发生过拖拽"独立成可单测的纯逻辑：
+ * - `onPointerDown(x, y)` 记录起点并重置抑制标志（兜底：平台不补发 click 时
+ *   标志不残留到下一次真实单击）；
+ * - `onPointerMove(x, y)` 首次超阈值返回 true（调用方启动原生拖拽，只此一次），
+ *   并置抑制标志；
+ * - `onPointerUp()` 结束本轮；
+ * - `shouldSuppressClick()` 读一次即消费：拖拽尾巴的 click 吞掉一次，之后的
+ *   真实单击正常放行。
+ *
+ * 仅主键（button 0）路径使用；右键（contextmenu，无 click）与穿透态（收不到
+ * 事件）不受影响。
+ */
+export class DragClickGuard {
+  private start: { x: number; y: number } | null = null;
+  private dragging = false;
+  private suppressClick = false;
+
+  onPointerDown(x: number, y: number): void {
+    this.start = { x, y };
+    this.dragging = false;
+    this.suppressClick = false;
+  }
+
+  /** 返回 true = 应启动原生窗口拖拽（每轮按下至多一次）。 */
+  onPointerMove(x: number, y: number): boolean {
+    const start = this.start;
+    if (!start || this.dragging) return false;
+    if (shouldStartDrag(start.x, start.y, x, y)) {
+      this.dragging = true;
+      this.suppressClick = true;
+      return true;
+    }
+    return false;
+  }
+
+  onPointerUp(): void {
+    this.start = null;
+    this.dragging = false;
+  }
+
+  /** 本次 click 是否应被吞掉（拖拽尾巴）；读一次即消费。 */
+  shouldSuppressClick(): boolean {
+    const s = this.suppressClick;
+    this.suppressClick = false;
+    return s;
+  }
+}
