@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { computeCanvasSize, computeFrameRect } from "../lib/scaling";
 import { SpriteAnimator } from "../lib/sprite";
-import { DragClickGuard } from "../lib/pet-drag";
+import { DragClickGuard, shouldRotateOnClick } from "../lib/pet-drag";
 import { startPetDrag } from "../lib/interaction";
 import { usePetStore } from "./petStore";
 
@@ -82,6 +82,9 @@ export default function PetCanvas() {
   // M6 拖拽/点击判定状态机（R2：拖拽尾巴的补发 click 不再触发状态轮换；
   // 纯逻辑在 lib/pet-drag.ts，单测覆盖拖拽/纯点击/平台差异兜底路径）
   const dragGuardRef = useRef(new DragClickGuard());
+  // R3 P1：pointerdown 时刻的菜单开态快照——PetMenu 在 document 冒泡阶段关菜单
+  //（晚于本组件的 React onPointerDown），click 时读实时状态恒为 null，会误轮换
+  const menuOpenAtPointerDownRef = useRef(false);
   const passThroughRef = useRef(passThrough);
   passThroughRef.current = passThrough;
 
@@ -257,6 +260,8 @@ export default function PetCanvas() {
   // 识别并吞掉——拖拽绝不附加单击效果，真实单击不受影响。
   const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (e.button !== 0 || passThroughRef.current) return;
+    // R3 P1：先快照菜单开态（此刻 PetMenu 的冒泡关闭尚未执行）
+    menuOpenAtPointerDownRef.current = usePetStore.getState().contextMenu !== null;
     dragGuardRef.current.onPointerDown(e.clientX, e.clientY);
   };
   const onPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -287,12 +292,15 @@ export default function PetCanvas() {
       onPointerLeave={endDragTrack}
       onContextMenu={onContextMenu}
       onClick={() => {
-        // R2：拖拽结束后系统补发的尾巴 click 直接吞掉（不轮换、不触碰菜单语义）
-        if (dragGuardRef.current.shouldSuppressClick()) return;
-        // 菜单打开时点击画布 = 点外部：仅关菜单，不触发状态轮换
-        const hadMenu = usePetStore.getState().contextMenu !== null;
-        closeContextMenu();
-        if (hadMenu) return;
+        // R2：拖拽结束后系统补发的尾巴 click；R3 P1：pointerdown 时菜单开着
+        //（= 本次按下用于点外部关菜单）——两者都不轮换，不触碰气泡 ack
+        const rotate = shouldRotateOnClick({
+          dragTail: dragGuardRef.current.shouldSuppressClick(),
+          menuOpenAtPointerDown: menuOpenAtPointerDownRef.current,
+        });
+        menuOpenAtPointerDownRef.current = false; // 快照一次即消费
+        closeContextMenu(); // 幂等（PetMenu 已关时 no-op）
+        if (!rotate) return;
         if (!ackReminder()) next();
       }}
     />

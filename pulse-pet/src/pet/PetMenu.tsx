@@ -37,6 +37,10 @@ export default function PetMenu() {
   }, [pos]);
 
   useEffect(() => {
+    // R3 P1：pointerdown 走**冒泡**阶段（不传 capture）——React root 在 #root、
+    // document 之下，canvas 的 React onPointerDown 先执行并快照菜单开态，
+    // 本 handler 随后才关菜单；capture 会把快照读成 null，导致"点画布关菜单"
+    // 误轮换一次宠物状态（committer R1 P1）。
     const onDown = (e: PointerEvent) => {
       if (ref.current && e.target instanceof Node && !ref.current.contains(e.target)) {
         close();
@@ -46,11 +50,11 @@ export default function PetMenu() {
       if (e.key === "Escape") close();
     };
     const onBlur = () => close();
-    document.addEventListener("pointerdown", onDown, true);
+    document.addEventListener("pointerdown", onDown);
     document.addEventListener("keydown", onKey);
     window.addEventListener("blur", onBlur);
     return () => {
-      document.removeEventListener("pointerdown", onDown, true);
+      document.removeEventListener("pointerdown", onDown);
       document.removeEventListener("keydown", onKey);
       window.removeEventListener("blur", onBlur);
     };

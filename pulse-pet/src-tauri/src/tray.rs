@@ -68,10 +68,17 @@ pub fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     )?;
     let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/32x32.png"))?;
 
-    // 句柄登记进 TrayItems（热键/设置通道切换后同步勾选态用）
+    // 句柄登记进 TrayItems（热键/设置通道切换后同步勾选态用）；
+    // poison 容忍：锁中毒时恢复数据（与库内 unwrap_or_else(|p| p.into_inner()) 惯例一致）
     if let Some(items) = app.try_state::<TrayItems>() {
-        *items.pause_reminders.lock().unwrap() = Some(pause_reminders.clone());
-        *items.interaction.lock().unwrap() = Some(interaction_item.clone());
+        *items
+            .pause_reminders
+            .lock()
+            .unwrap_or_else(|p| p.into_inner()) = Some(pause_reminders.clone());
+        *items
+            .interaction
+            .lock()
+            .unwrap_or_else(|p| p.into_inner()) = Some(interaction_item.clone());
     }
 
     TrayIconBuilder::with_id("pulsepet-tray")

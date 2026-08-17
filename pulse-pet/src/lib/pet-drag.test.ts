@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { DRAG_THRESHOLD_PX, shouldStartDrag, DragClickGuard } from "./pet-drag";
+import {
+  DRAG_THRESHOLD_PX,
+  shouldStartDrag,
+  DragClickGuard,
+  shouldRotateOnClick,
+} from "./pet-drag";
 
 describe("pet-drag 拖拽阈值判定（M6，TC-WIN-01/02）", () => {
   it("按下后未移动 / 移动小于阈值 → 不进入拖拽（保留点击语义）", () => {
@@ -75,5 +80,28 @@ describe("DragClickGuard 拖拽尾巴 click 抑制（M6 R2，用户反馈：拖�
     const g = new DragClickGuard();
     expect(g.onPointerMove(1000, 1000)).toBe(false); // 悬停滑动（无按键）
     expect(g.shouldSuppressClick()).toBe(false);
+  });
+});
+
+describe("shouldRotateOnClick 点击轮换总判定（M6 R3 P1：菜单开时点画布不轮换）", () => {
+  it("pointerdown 快照菜单开 → click 不轮换（关菜单误轮换回归）", () => {
+    expect(
+      shouldRotateOnClick({ dragTail: false, menuOpenAtPointerDown: true }),
+    ).toBe(false);
+  });
+
+  it("菜单关 + 非拖拽尾巴 → 正常轮换（M1 单击语义）", () => {
+    expect(
+      shouldRotateOnClick({ dragTail: false, menuOpenAtPointerDown: false }),
+    ).toBe(true);
+  });
+
+  it("拖拽尾巴（R2）→ 不轮换；与菜单开叠加 → 仍不轮换", () => {
+    expect(
+      shouldRotateOnClick({ dragTail: true, menuOpenAtPointerDown: false }),
+    ).toBe(false);
+    expect(
+      shouldRotateOnClick({ dragTail: true, menuOpenAtPointerDown: true }),
+    ).toBe(false);
   });
 });

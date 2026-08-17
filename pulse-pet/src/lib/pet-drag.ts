@@ -83,3 +83,28 @@ export class DragClickGuard {
     return s;
   }
 }
+
+/**
+ * 点击 → 状态轮换 的总判定（R3 P1，纯函数供单测）。
+ *
+ * P1 根因：PetMenu 曾以 document **capture** 阶段监听 pointerdown 先关菜单，
+ * click 时读实时 `contextMenu` 恒为 null → "菜单开时点画布仅关菜单"防线失效，
+ * 每次关菜单误轮换一次（气泡时还会误 ack）。
+ *
+ * 修复后的时序约定（组件层保证）：
+ * - PetMenu 的 document pointerdown 监听走**冒泡**阶段（React root 在 #root、
+ *   document 之下，canvas 的 React onPointerDown 先于 PetMenu 关菜单执行）；
+ * - canvas `onPointerDown` 快照菜单开态（PetMenu 关闭前读到 true）；
+ * - `onClick` 用本函数判定：拖拽尾巴（R2）或快照菜单开 → 不轮换。
+ */
+export interface ClickGateInput {
+  /** R2：DragClickGuard.shouldSuppressClick() 的返回值（已消费）。 */
+  dragTail: boolean;
+  /** R3：本次按下的 pointerdown 时刻（PetMenu 关菜单前）菜单是否打开。 */
+  menuOpenAtPointerDown: boolean;
+}
+
+/** 返回 true = 本次 click 应执行状态轮换（无提醒气泡时）语义。 */
+export function shouldRotateOnClick(gate: ClickGateInput): boolean {
+  return !gate.dragTail && !gate.menuOpenAtPointerDown;
+}
