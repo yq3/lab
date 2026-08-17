@@ -3,7 +3,10 @@
 //! M1 菜单项 3 项：显示/隐藏宠物、打开控制面板、退出。
 //! M4 补全："暂停所有提醒"（勾选态开关，TC-RM-08，持久化 app_state
 //! `reminders.paused`，暂停期间调度器不触发任何提醒，取消即恢复）。
-//! （"切换交互模式" 随 M6 补全。）
+//! M6 补全："切换交互模式（穿透开/关）"CheckMenuItem（TC-APP-04/05、
+//! TC-WIN-04/05）——勾选 = 穿透开启；与全局热键共用 interaction::toggle，
+//! 切换后勾选态经 TrayItems 同步（穿透态下托盘仍是系统级菜单，可切回）。
+//! 完整五项：显示/隐藏宠物、切换交互模式、打开控制面板、暂停所有提醒、退出。
 //!
 //! 左键单击切换 pet 可见性：`TrayIconEvent::Click` 在 Down/Up 各触发一次，
 //! 因此必须判断 `button_state`（只处理 Down），否则一次单击会连切两次（todo-lite 同坑）。
@@ -17,11 +20,33 @@ use tauri::{
     Manager,
 };
 
+use crate::interaction::{self, InteractionState};
 use crate::reminder_scheduler::{self, RemindersState};
 use crate::windows;
 
+/// 托盘 CheckMenuItem 句柄（供菜单外的通道——全局热键 / 设置页——同步勾选态；
+/// Tauri 2 的 `app.menu()` 只取应用菜单栏，不含托盘菜单，必须自持句柄）。
+#[derive(Default)]
+pub struct TrayItems {
+    pub pause_reminders: Mutex<Option<CheckMenuItem<tauri::Wry>>>,
+    pub interaction: Mutex<Option<CheckMenuItem<tauri::Wry>>>,
+}
+
 pub fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     let toggle = MenuItem::with_id(app, "toggle", "显示/隐藏宠物", true, None::<&str>)?;
+    // M6：切换交互模式（穿透开/关）。初始勾选 = 持久化的穿透状态。
+    let pass_through = app
+        .try_state::<InteractionState>()
+        .map(|s| s.get())
+        .unwrap_or(false);
+    let interaction_item = CheckMenuItem::with_id(
+        app,
+        "interaction",
+        "切换交互模式（穿透开/关）",
+        true,
+        pass_through,
+        None::<&str>,
+    )?;
     let panel = MenuItem::with_id(app, "panel", "打开控制面板", true, None::<&str>)?;
     // TC-RM-08：初始勾选态从 app_state 恢复（重启保持勿扰状态）
     let paused = app
@@ -36,8 +61,25 @@ pub fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     let pause_reminders =
         CheckMenuItem::with_id(app, "pause_reminders", "暂停所有提醒", true, paused, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&toggle, &panel, &pause_reminders, &quit])?;
+    // DESIGN §7.2 顺序：显示/隐藏宠物、切换交互模式、打开控制面板、暂停所有提醒、退出
+    let menu = Menu::with_items(
+        app,
+        &[&toggle, &interaction_item, &panel, &pause_reminders, &quit],
+    )?;
     let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/32x32.png"))?;
+
+    // 句柄登记进 TrayItems（热键/设置通道切换后同步勾选态用）；
+    // poison 容忍：锁中毒时恢复数据（与库内 unwrap_or_else(|p| p.into_inner()) 惯例一致）
+    if let Some(items) = app.try_state::<TrayItems>() {
+        *items
+            .pause_reminders
+            .lock()
+            .unwrap_or_else(|p| p.into_inner()) = Some(pause_reminders.clone());
+        *items
+            .interaction
+            .lock()
+            .unwrap_or_else(|p| p.into_inner()) = Some(interaction_item.clone());
+    }
 
     TrayIconBuilder::with_id("pulsepet-tray")
         .icon(icon)
@@ -46,6 +88,11 @@ pub fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "toggle" => windows::toggle_pet(app),
+            "interaction" => {
+                // CheckMenuItem 点击后系统自动翻转勾选；真正状态以 interaction
+                // 权威翻转结果再同步一次（防 apply 失败时勾选错位）
+                interaction::toggle(app);
+            }
             "panel" => windows::show_panel(app),
             "pause_reminders" => toggle_pause_reminders(app),
             "quit" => app.exit(0),
@@ -63,7 +110,9 @@ pub fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
         })
         .build(app)?;
 
-    eprintln!("[pulsepet] tray built (pause_reminders checked={paused})");
+    eprintln!(
+        "[pulsepet] tray built (pause_reminders checked={paused}, interaction checked={pass_through})"
+    );
     Ok(())
 }
 
@@ -84,12 +133,13 @@ fn toggle_pause_reminders(app: &tauri::AppHandle) {
             reminder_scheduler::set_paused(&conn, next);
         }
     }
-    if let Some(item) = app
-        .menu()
-        .and_then(|m| m.get("pause_reminders"))
-        .and_then(|kind| kind.as_check_menuitem().cloned())
-    {
-        let _ = item.set_checked(next);
+    // M6：句柄直连托盘菜单项（原 app.menu() 路径只覆盖应用菜单栏，托盘项取不到）
+    if let Some(items) = app.try_state::<TrayItems>() {
+        if let Ok(slot) = items.pause_reminders.lock() {
+            if let Some(item) = slot.as_ref() {
+                let _ = item.set_checked(next);
+            }
+        }
     }
     eprintln!("[pulsepet] reminders paused = {next} (tray)");
 }

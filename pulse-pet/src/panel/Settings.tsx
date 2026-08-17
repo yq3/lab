@@ -6,6 +6,8 @@ import {
   type PetOption,
 } from "../lib/atlas";
 import { isTauriRuntime } from "../lib/token-stats";
+import { setPassThrough } from "../lib/interaction";
+import { usePetStore } from "../pet/petStore";
 
 /**
  * 设置页（M5 落地"选择宠物"，DESIGN §6.2 / §10.2，TC-SP-11/12 + TC-APP-12）：
@@ -15,8 +17,10 @@ import { isTauriRuntime } from "../lib/token-stats";
  * - 损坏 / 非标准网格项旁有回退提示（Rust 侧逐项校验结果）；
  * - 选择持久化到 app_state `pet.selected`（重启保留；TC-APP-12）。
  *
- * 「自动」= 清除配置（atlas_select(null)），默认加载内置小猫 blinking-kitty。
- * 穿透开关等其余设置为 M6（原占位文案中"烟花全局开关"已于 M4 落地提醒页）。
+ * M6 落地"点击穿透"开关（TC-APP-12 / TC-APP-07）：状态权威在 Rust
+ * （app_state `pet.pass_through`），热键/托盘切换经 `pulsepet://pass-through`
+ * 事件同步到本开关。「自动」= 清除配置（atlas_select(null)），默认加载内置
+ * 小猫 blinking-kitty。
  */
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -30,6 +34,8 @@ export default function Settings() {
   const [current, setCurrent] = useState<AtlasMeta | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [switching, setSwitching] = useState(false);
+  const [passThroughBusy, setPassThroughBusy] = useState(false);
+  const passThrough = usePetStore((s) => s.passThrough);
 
   const load = useCallback(async () => {
     if (!isTauriRuntime()) {
@@ -43,6 +49,8 @@ export default function Settings() {
       setCurrent(meta);
       setError(null);
     } catch (e) {
+      // P2-④（M5 移交，M6 清偿）：读取失败也要渲染错误（此前仅 options 为空时
+      // 提前 return，列表加载失败时错误横幅被吞）；已加载的列表保持展示。
       setError(`读取宠物列表失败：${e instanceof Error ? e.message : String(e)}`);
     }
   }, []);
@@ -56,6 +64,7 @@ export default function Settings() {
     try {
       const meta = await selectPet(value === "" ? null : value);
       setCurrent(meta);
+      setError(null);
       await load();
     } catch (e) {
       setError(`切换宠物失败：${e instanceof Error ? e.message : String(e)}`);
@@ -64,15 +73,29 @@ export default function Settings() {
     }
   };
 
-  if (error && !options) {
-    return <p className="panel-placeholder">{error}</p>;
-  }
+  const onPassThrough = async (enabled: boolean) => {
+    setPassThroughBusy(true);
+    try {
+      await setPassThrough(enabled); // Rust 应用窗口 + 持久化 + 广播事件同步本开关
+      setError(null);
+    } catch (e) {
+      setError(`切换穿透失败：${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setPassThroughBusy(false);
+    }
+  };
 
   // 下拉选中值：用户配置 pet（requested）；未配置 = 自动
   const selectedValue = current?.requested ?? "";
+  // P2-④（M5 移交，M6 清偿）：requested 指向的项不在可选列表（如目录被删）
+  // 时，补一个显式的 disabled 占位 option，避免 select value 落在不存在的
+  // option 上（浏览器会静默显示第一项，造成"值与显示不一致"）。
+  const requestedMissing =
+    selectedValue !== "" && options !== null && !options.some((o) => o.id === selectedValue);
 
   return (
     <section className="panel-settings">
+      {error && <p className="settings-error">⚠️ {error}</p>}
       <h2>宠物</h2>
       <label className="settings-pet-label" htmlFor="pet-select">
         选择宠物（切换立即生效；重启保留）
@@ -84,6 +107,11 @@ export default function Settings() {
         onChange={(e) => void onSwitch(e.target.value)}
       >
         <option value="">自动（默认 blinking-kitty）</option>
+        {requestedMissing && (
+          <option value={selectedValue} disabled>
+            {selectedValue} — 素材损坏或不存在，已回退
+          </option>
+        )}
         {options?.map((o) => (
           <option key={`${o.source}:${o.id}`} value={o.id} disabled={!o.ok}>
             {o.displayName}（{SOURCE_LABELS[o.source] ?? o.source}）
@@ -115,9 +143,22 @@ export default function Settings() {
         </ul>
       )}
 
-      <h2>其余设置</h2>
-      <p className="panel-placeholder">
-        点击穿透 / 全局热键 / 右键菜单 — M6；烟花全局开关已在「提醒」页（M4）。
+      <h2>交互</h2>
+      <label className="settings-check">
+        <input
+          type="checkbox"
+          checked={passThrough}
+          disabled={passThroughBusy || !isTauriRuntime()}
+          onChange={(e) => void onPassThrough(e.target.checked)}
+        />
+        <span>
+          点击穿透（纯展示模式）：开启后鼠标事件透出——宠物不可拖拽、右键菜单不可达，
+          动画照常播放；可经全局热键 ⌘/Ctrl+Shift+Alt+P 或托盘菜单「切换交互模式」切回。
+        </span>
+      </label>
+      <p className="settings-hotkey-hint">
+        全局热键：⌘/Ctrl+Shift+P 唤起/隐藏面板；⌘/Ctrl+Shift+Alt+P 切换穿透；
+        {import.meta.env.DEV ? " ⌘/Ctrl+Shift+Alt+F 调试烟花（仅开发构建）。" : ""}
       </p>
     </section>
   );

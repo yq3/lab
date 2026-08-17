@@ -1,6 +1,8 @@
 mod atlas;
 mod db;
+mod hotkeys;
 mod http_server;
+mod interaction;
 mod reminder_scheduler;
 mod runtime;
 mod session_state;
@@ -83,6 +85,9 @@ pub fn run() {
             eprintln!("[pulsepet] second instance detected, showing panel");
             windows::show_panel(app);
         }))
+        // M6 全局快捷键（DESIGN §7.3）：插件本体在 builder 注册，具体热键在
+        // setup（state 就绪后）经 hotkeys::register_all 登记 + 分发
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(|app| {
             let conn = db::init(app.handle())?;
             app.manage(Mutex::new(conn));
@@ -144,6 +149,19 @@ pub fn run() {
             // Moved 防抖保存器（P2-5）
             app.manage(windows::PositionSaver::new(app.handle().clone()));
 
+            // ---- M6 交互模式（穿透开/关，DESIGN §6.3）----
+            // 状态从 app_state 恢复（TC-APP-12 重启保留）；持久化过"开"则启动
+            // 即应用穿透（apply 内持久化/托盘同步在早期阶段安全跳过/后建）。
+            let pass_through = {
+                let db = app.state::<Mutex<Connection>>();
+                let conn = db.lock().map_err(|e| format!("db lock: {e}"))?;
+                interaction::read_persisted(&conn)
+            };
+            app.manage(interaction::InteractionState::new(pass_through));
+            if pass_through {
+                interaction::apply_pass_through(app.handle(), true);
+            }
+
             // ---- M4 提醒调度器：读表 → in-memory 倒计时 → tokio interval（Skip） ----
             let reminders_state = {
                 let db = app.state::<Mutex<Connection>>();
@@ -156,11 +174,23 @@ pub fn run() {
             reminder_scheduler::spawn_scheduler(app.handle().clone(), reminders_state);
 
             windows::restore_pet_position(app.handle());
+            // ---- M6 托盘（五项菜单 + 勾选句柄）与全局热键 ----
+            app.manage(tray::TrayItems::default());
             tray::build_tray(app.handle())?;
+            if let Err(e) = hotkeys::register_all(app.handle()) {
+                // 热键注册失败（如组合被其它 App 占用）不阻断启动：面板/穿透
+                // 仍有托盘菜单通道（TC-WIN-05 双通道互备）
+                eprintln!("[pulsepet] global shortcut register failed: {e}");
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             get_display_state,
+            interaction::pet_get_pass_through,
+            interaction::pet_set_pass_through,
+            windows::pet_start_drag,
+            windows::pet_toggle_visible,
+            windows::panel_open,
             atlas::atlas_meta,
             atlas::atlas_pixels,
             atlas::atlas_list_pets,

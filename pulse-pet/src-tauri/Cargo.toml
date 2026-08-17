@@ -18,6 +18,9 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = ["macos-private-api", "tray-icon", "image-png"] }
 tauri-plugin-single-instance = "2"
+# M6：全局快捷键（DESIGN §7.3，TC-APP-06/07/08）——仅 Rust 侧注册与分发，
+# 无 JS 插件包依赖（前端不经 global-shortcut API）。
+tauri-plugin-global-shortcut = "2"
 rusqlite = { version = "0.40", features = ["bundled"] }
 tiny_http = "0.12"
 serde = { version = "1", features = ["derive"] }
