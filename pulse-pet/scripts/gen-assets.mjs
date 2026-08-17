@@ -232,6 +232,11 @@ function blitCat(
     // 闭眼 = 单只眼睛变一条缝（R1 修复轮 5，用户最终口径 22:09）：
     // 眼位保持原宽度（2 格），高度压成 1 格细缝——顶行清除、眼底行画 K 色缝。
     // （e97a4ac 的 4 格宽整块 K 横条作废：不要横向拉长。）
+    //
+    // 【保留备用——M5 committer R1 P2-①】idle 定案常驻"左眼睁、右眼一条缝"
+    // 造型（rightEyeSlit，图标同款）后本分支无调用方（atlasFrameCells 不再
+    // 传 eyes="blink"）；与 drawDogFront 的 blink 分支一样保留画法供后续
+    // 恢复动态眨眼时复用，勿删。
     for (const e of [EYE_L, EYE_R]) {
       // 顶行（y）清除为透明
       for (let dx = 0; dx <= 1; dx++) {
@@ -389,7 +394,9 @@ function genCatAtlas() {
     for (let col = 0; col < 8; col++) {
       const srcCol = Math.min(col, lastCol);
       const cells = atlasFrameCells(row, srcCol);
-      const pal = { ...PAL, W: ROW_FUR[row], W2: ROW_FUR[row] };
+      // pal：W=行毛色（替换白毛）。【M5 committer R1 P2-②】历史遗留键 W2 已删
+      // （e97a4ac 挥手手臂改 K 线后无网格字符会命中 W2，属死键）。
+      const pal = { ...PAL, W: ROW_FUR[row] };
       const rgba = cellsToRGBA(cells, pal);
       // 逐行拷贝（帧宽 192 < sheet 步长 1536，不能整块 copy）
       const ox = col * fw;
@@ -675,8 +682,10 @@ function main() {
       {
         id: "blinking-kitty",
         displayName: "blinking-kitty（内置小猫）",
+        // 【M5 committer R1 P2-③】idle 描述与视觉一致：M5 修复轮 6 定案常驻
+        // "左眼睁、右眼一条缝"单眨眼造型（与 app 图标同款，非 6 帧动态眨眼）。
         description:
-          "PulsePet 内置小猫（默认宠物）。codex 格式 atlas 8×9 = 1536×1872，单帧 192×208，9 行姿态；idle 6 帧不规则眨眼。作者自绘，CC0。",
+          "PulsePet 内置小猫（默认宠物）。codex 格式 atlas 8×9 = 1536×1872，单帧 192×208，9 行姿态；idle 常驻「左眼睁、右眼一条缝」单眨眼造型（与 App 图标同款，另带长帧呼吸下沉）。作者自绘，CC0。",
         spritesheetPath: "spritesheet.png",
       },
       null,

@@ -1,6 +1,8 @@
 import { useEffect, useRef } from "react";
 import { computeCanvasSize, computeFrameRect } from "../lib/scaling";
 import { SpriteAnimator } from "../lib/sprite";
+import { shouldStartDrag } from "../lib/pet-drag";
+import { startPetDrag } from "../lib/interaction";
 import { usePetStore } from "./petStore";
 
 const CSS_SIZE = 220;
@@ -73,6 +75,14 @@ export default function PetCanvas() {
   const ackReminder = usePetStore((s) => s.ackReminderBubble);
   const raw = usePetStore((s) => s.raw);
   const atlas = usePetStore((s) => s.atlas);
+  const passThrough = usePetStore((s) => s.passThrough);
+  const openContextMenu = usePetStore((s) => s.openContextMenu);
+  const closeContextMenu = usePetStore((s) => s.closeContextMenu);
+
+  // M6 拖拽起点（pointerdown 记录、move 超阈值启动原生拖拽、up/cancel/leave 清除）
+  const dragStartRef = useRef<{ x: number; y: number } | null>(null);
+  const passThroughRef = useRef(passThrough);
+  passThroughRef.current = passThrough;
 
   // rAF 循环读取最新的 sprite/raw，避免每帧重建 effect
   const spriteRef = useRef(sprite);
@@ -238,13 +248,48 @@ export default function PetCanvas() {
     };
   }, []);
 
+  // M6 交互（TC-WIN-01/02/03）：主键按下记录起点，位移超阈值 → 原生窗口拖拽
+  // （跨屏由系统处理，TC-APP-11）；右键弹 PetMenu。穿透态下 webview 收不到
+  // 事件（DESIGN §6.3），passThroughRef 双保险不触发任何交互。
+  // 点击语义保留：未超阈值的按下-抬起仍是 click（M1 状态轮换 + TC-RM-04 确认）。
+  const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (e.button !== 0 || passThroughRef.current) return;
+    dragStartRef.current = { x: e.clientX, y: e.clientY };
+  };
+  const onPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const start = dragStartRef.current;
+    if (!start || passThroughRef.current) return;
+    if (shouldStartDrag(start.x, start.y, e.clientX, e.clientY)) {
+      dragStartRef.current = null; // 只启动一次，此后 OS drag loop 接管
+      startPetDrag().catch((err) => console.error("[pulsepet] start_drag failed:", err));
+    }
+  };
+  const endDragTrack = () => {
+    dragStartRef.current = null;
+  };
+  const onContextMenu = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (passThroughRef.current) return; // 正常不会发生（穿透收不到事件）
+    e.preventDefault();
+    openContextMenu(e.clientX, e.clientY);
+  };
+
   // 点击宠物：有提醒气泡时视为"已确认"（TC-RM-04，提前消失 + 记 acked_at）；
   // 否则沿用 M1 的状态轮换（占位阶段的手动驱动）。
   return (
     <canvas
       ref={canvasRef}
       className="pet-canvas"
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={endDragTrack}
+      onPointerCancel={endDragTrack}
+      onPointerLeave={endDragTrack}
+      onContextMenu={onContextMenu}
       onClick={() => {
+        // 菜单打开时点击画布 = 点外部：仅关菜单，不触发状态轮换
+        const hadMenu = usePetStore.getState().contextMenu !== null;
+        closeContextMenu();
+        if (hadMenu) return;
         if (!ackReminder()) next();
       }}
     />

@@ -895,10 +895,29 @@ pub fn reminder_play_fireworks(
     state: tauri::State<'_, Arc<Mutex<RemindersState>>>,
     log_id: i64,
 ) -> Result<(), String> {
-    let payload = compute_play_payload(&app, log_id);
+    dispatch_play(&app, state.inner(), log_id);
+    Ok(())
+}
+
+/// M6 调试烟花（TC-WIN-07，热键 ⌘/Ctrl+Shift+Alt+F 手动放一束）：复用 M4
+/// 烟花链路（定位/ready 握手/watchdog 全同），log_id=-1 表示非提醒来源——
+/// fireworks_finished 对 -1 记账是无害空更新（0 行）。仅 debug 构建的热键
+/// 规格表会分发到本函数（hotkeys::hotkey_specs，release 不注册）。
+pub fn play_debug_fireworks(app: &tauri::AppHandle) {
+    let Some(state) = app.try_state::<Arc<Mutex<RemindersState>>>() else {
+        return;
+    };
+    eprintln!("[pulsepet] debug fireworks (hotkey)");
+    dispatch_play(app, &state, -1);
+}
+
+/// 烟花派发公共段（reminder_play_fireworks / play_debug_fireworks 共用）：
+/// gen++（作废旧 watchdog）→ ready 直发 / 未 ready 挂 pending → show 窗口 → watchdog。
+fn dispatch_play(app: &tauri::AppHandle, state: &Arc<Mutex<RemindersState>>, log_id: i64) {
+    let payload = compute_play_payload(app, log_id);
     let gen;
     {
-        let mut st = state.lock().map_err(|e| format!("state lock: {e}"))?;
+        let mut st = state.lock().unwrap_or_else(|p| p.into_inner());
         st.fw_gen += 1;
         gen = st.fw_gen;
         if st.fw_ready {
@@ -910,10 +929,10 @@ pub fn reminder_play_fireworks(
             st.fw_pending = Some(payload);
         }
     }
-    windows::show_fireworks(&app);
+    windows::show_fireworks(app);
     // watchdog：6.5s 内前端未回报 finished 则强制 hide（防常驻窗口）。
     // 前端正常 finished 已 hide 过时窗口不可见 → 跳过，避免冗余 hide（E2E 实测修正）。
-    let state_for_wd = state.inner().clone();
+    let state_for_wd = state.clone();
     let app_for_wd = app.clone();
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_millis(6500)).await;
@@ -932,7 +951,6 @@ pub fn reminder_play_fireworks(
             }
         }
     });
-    Ok(())
 }
 
 /// fireworks 窗口挂载完成（ready 握手）：补发 pending 的 play。

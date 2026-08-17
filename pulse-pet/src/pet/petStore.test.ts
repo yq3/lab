@@ -53,6 +53,37 @@ describe("petStore M5 atlas 状态（热替换基础，TC-SP-11②）", () => {
   });
 });
 
+describe("petStore M6 交互模式 / 右键菜单状态（TC-WIN-02/03/05）", () => {
+  beforeEach(() => {
+    usePetStore.setState({ passThrough: false, contextMenu: null });
+  });
+
+  it("默认非穿透（运行时默认可拖拽/右键，DESIGN §7.1）", () => {
+    expect(usePetStore.getState().passThrough).toBe(false);
+    expect(usePetStore.getState().contextMenu).toBeNull();
+  });
+
+  it("setPassThrough：热键/托盘/设置三通道共用同一状态位", () => {
+    usePetStore.getState().setPassThrough(true);
+    expect(usePetStore.getState().passThrough).toBe(true);
+    usePetStore.getState().setPassThrough(false);
+    expect(usePetStore.getState().passThrough).toBe(false);
+  });
+
+  it("openContextMenu / closeContextMenu：右键菜单坐标进出", () => {
+    usePetStore.getState().openContextMenu(30, 60);
+    expect(usePetStore.getState().contextMenu).toEqual({ x: 30, y: 60 });
+    usePetStore.getState().closeContextMenu();
+    expect(usePetStore.getState().contextMenu).toBeNull();
+  });
+
+  it("切换穿透时已打开的右键菜单自动关闭（穿透态菜单不可达，TC-WIN-04）", () => {
+    usePetStore.getState().openContextMenu(10, 10);
+    usePetStore.getState().setPassThrough(true);
+    expect(usePetStore.getState().contextMenu).toBeNull();
+  });
+});
+
 describe("petStore 气泡状态（M3 token 汇报，TC-TK-10/12）", () => {
   beforeEach(() => {
     vi.useFakeTimers();

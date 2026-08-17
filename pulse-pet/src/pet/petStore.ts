@@ -36,10 +36,20 @@ interface PetState {
   atlas: AtlasPixels | null;
   /** M5：当前 atlas 元数据（含回退 notice；null = 未加载/非 Tauri）。 */
   atlasMeta: AtlasMeta | null;
+  /** M6：穿透模式（true = 纯展示：鼠标穿透，不可拖拽/右键；Rust 为唯一权威）。 */
+  passThrough: boolean;
+  /** M6：右键菜单坐标（null = 关闭；穿透态恒 null，TC-WIN-04）。 */
+  contextMenu: { x: number; y: number } | null;
   setRaw: (raw: NormalizedState) => void;
   next: () => void;
   /** M5：atlas 加载/热替换（atlas-bridge 调用；对象身份变化驱动 canvas 重建）。 */
   setAtlas: (meta: AtlasMeta, pixels: AtlasPixels | null) => void;
+  /** M6：更新穿透状态（interaction-bridge 订阅 Rust 广播后调用）。 */
+  setPassThrough: (enabled: boolean) => void;
+  /** M6：打开右键菜单（PetCanvas contextmenu 事件）。 */
+  openContextMenu: (x: number, y: number) => void;
+  /** M6：关闭右键菜单（菜单项动作 / 点击外部 / 窗口失焦）。 */
+  closeContextMenu: () => void;
   /** 展示气泡（净化约束：单行 1-140；非法输入丢弃；8s 自动消失，DESIGN §5.2）。 */
   showBubble: (text: string) => void;
   hideBubble: () => void;
@@ -100,7 +110,14 @@ export const usePetStore = create<PetState>((set, get) => ({
   bubble: null,
   atlas: null,
   atlasMeta: null,
+  passThrough: false,
+  contextMenu: null,
   setAtlas: (meta, pixels) => set({ atlasMeta: meta, atlas: pixels }),
+  setPassThrough: (enabled) =>
+    // 切到穿透时已打开的右键菜单一并关闭（穿透态菜单不可达，TC-WIN-04）
+    set((s) => ({ passThrough: enabled, contextMenu: enabled ? null : s.contextMenu })),
+  openContextMenu: (x, y) => set({ contextMenu: { x, y } }),
+  closeContextMenu: () => set({ contextMenu: null }),
   setRaw: (raw) => set({ raw, sprite: degradeState(raw) }),
   next: () =>
     set((s) => {
