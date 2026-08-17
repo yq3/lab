@@ -696,3 +696,110 @@ body,
   font-size: 13px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
 }
+
+/* ---- M7 Todo 插件（内置 built-in-todo，TC-TD-01/02） ---- */
+
+.todo-plugin-meta {
+  font-size: 12px;
+  color: #6b7280;
+  padding: 4px 2px 10px;
+  border-bottom: 1px dashed #e5e7eb;
+  margin-bottom: 8px;
+}
+
+.todo-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.todo-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 6px;
+  border-bottom: 1px dashed #f3f4f6;
+  font-size: 13px;
+}
+
+.todo-item.done .todo-title {
+  text-decoration: line-through;
+  color: #9ca3af;
+}
+
+.todo-item.done {
+  opacity: 0.7;
+}
+
+.todo-check input {
+  width: 16px;
+  height: 16px;
+}
+
+.todo-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.todo-title {
+  color: #111827;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.todo-notes {
+  color: #6b7280;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.todo-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #6b7280;
+  font-size: 12px;
+  flex-wrap: wrap;
+}
+
+.todo-priority {
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: #f3f4f6;
+  color: #6b7280;
+}
+
+.todo-priority.p2 {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.todo-priority.p3 {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.todo-tags code {
+  margin-right: 4px;
+  padding: 1px 5px;
+  border-radius: 6px;
+  background: #eef2ff;
+  color: #4338ca;
+  font-size: 11px;
+}
+
+.todo-actions {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.todo-actions .seg {
+  padding: 4px 10px;
+}

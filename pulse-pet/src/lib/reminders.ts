@@ -32,12 +32,14 @@ export interface ReminderRule {
   use_fireworks: boolean;
   last_triggered_at: string | null;
   source_todo_id: number | null;
+  /** M7：todo 派生提醒的截止时刻（"YYYY-MM-DDTHH:MM"）；非 todo 为 null。 */
+  todo_due_at: string | null;
   created_at: string;
 }
 
-/** CRUD 入参（与 Rust `ReminderInput` 对应）。 */
+/** CRUD 入参（与 Rust `ReminderInput` 对应；kind=todo 仅出现在编辑派生规则时）。 */
 export interface ReminderInput {
-  kind: ReminderKind;
+  kind: ReminderKindAll;
   label: string;
   interval_minutes: number;
   start_time: string | null;
@@ -60,6 +62,8 @@ export interface ReminderTrigger {
   use_fireworks: boolean;
   fireworks_global: boolean;
   log_id: number;
+  /** M7（TC-TD-03）：kind='todo' 时为截止时刻 epoch ms（前端算"还有 X 分钟"）。 */
+  todo_due_ms: number | null;
 }
 
 /** 内置模板（DESIGN §5.2 默认文案；面板一键套用）。 */
@@ -117,14 +121,41 @@ export function sanitizeReminderText(text: unknown): string {
 
 export const MAX_INTERVAL_MINUTES = 1440;
 
+/**
+ * 规则行 → 表单值（M4 P2 ②，M7 清偿）：**保留原始 kind**（todo 派生规则不再
+ * 降级为 custom——快捷开关/编辑不得改写 kind，source_todo_id 在 Rust update
+ * 不触碰该列天然保留）；interval=0（todo 单次）原样带回由校验放行。
+ */
+export function ruleToForm(r: ReminderRule): ReminderInput {
+  return {
+    kind: r.kind,
+    label: r.label,
+    interval_minutes: r.interval_minutes,
+    start_time: r.start_time,
+    end_time: r.end_time,
+    enabled: r.enabled,
+    use_fireworks: r.use_fireworks,
+  };
+}
+
 export function validateReminderInput(input: ReminderInput): string | null {
   const label = input.label.trim();
   if (!label) return "文案不能为空";
   if (label.length > 140) return "文案超长（≤140 字符）";
-  if (!["hydration", "rest", "custom"].includes(input.kind)) {
+  if (!["hydration", "rest", "custom", "todo"].includes(input.kind)) {
     return `类型非法：${input.kind}`;
   }
-  // 面板只创建 hydration/rest/custom（todo 由 M7 插件派生，Rust 侧另校验）
+  // M4 P2 ③（M7 清偿）：todo kind 恒 interval=0（一次性）；非 todo 至少 1 分钟。
+  // 新建表单只提供 hydration/rest/custom（todo 由 Todo 插件派生），此处放行
+  // 仅为编辑/快捷开关已有 todo 规则时不再破坏其 kind 与 interval。
+  if (input.kind === "todo") {
+    if (input.interval_minutes !== 0) return "todo 派生提醒间隔恒为 0（单次）";
+    const checkAbs = (s: string | null | undefined, what: string): string | null => {
+      if (!s) return null;
+      return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(s) ? null : `${what}应为 YYYY-MM-DDTHH:MM（todo 派生）`;
+    };
+    return checkAbs(input.start_time, "起始") ?? checkAbs(input.end_time, "结束");
+  }
   if (input.interval_minutes < 1 || input.interval_minutes > MAX_INTERVAL_MINUTES) {
     return `间隔非法（1-${MAX_INTERVAL_MINUTES} 分钟）`;
   }
@@ -193,6 +224,8 @@ export function parseReminderTrigger(payload: unknown): ReminderTrigger | null {
     use_fireworks: p.use_fireworks,
     fireworks_global: p.fireworks_global,
     log_id: p.log_id,
+    // M7：todo_due_ms 可选（非 todo 提醒不带；缺省 → null）
+    todo_due_ms: num(p.todo_due_ms) ? p.todo_due_ms : null,
   };
 }
 

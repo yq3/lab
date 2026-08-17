@@ -5,10 +5,12 @@ import {
   isCrossMidnight,
   kindLabel,
   parseReminderTrigger,
+  ruleToForm,
   sanitizeReminderText,
   usesFireworks,
   validateReminderInput,
   type ReminderInput,
+  type ReminderRule,
 } from "./reminders";
 
 function input(overrides: Partial<ReminderInput> = {}): ReminderInput {
@@ -109,7 +111,8 @@ describe("parseReminderTrigger / usesFireworks（TC-RM-11 OR 语义）", () => {
   };
 
   it("合法 payload 解析", () => {
-    expect(parseReminderTrigger(valid)).toEqual(valid);
+    // M7：解析结果补 todo_due_ms（可选字段缺省 null）
+    expect(parseReminderTrigger(valid)).toEqual({ ...valid, todo_due_ms: null });
   });
 
   it("缺字段/类型不对 → null（静默忽略）", () => {
@@ -154,5 +157,64 @@ describe("展示辅助", () => {
     expect(kindLabel("custom")).toBe("自定义");
     expect(kindLabel("todo")).toBe("待办");
     expect(kindLabel("unknown")).toBe("unknown");
+  });
+});
+
+describe("M7：todo 派生规则的表单保真（M4 P2 ② 清偿，TC-TD 章节）", () => {
+  const todoRule: ReminderRule = {
+    id: 7,
+    kind: "todo",
+    label: "交报告",
+    interval_minutes: 0,
+    start_time: "2026-08-18T15:25",
+    end_time: null,
+    enabled: true,
+    use_fireworks: false,
+    last_triggered_at: null,
+    source_todo_id: 3,
+    todo_due_at: "2026-08-18T15:30",
+    created_at: "2026-08-17T10:00:00.000+08:00",
+  };
+
+  it("ruleToForm：todo 规则不再降级 custom——kind/interval=0/绝对 start_time 原样保留", () => {
+    const f = ruleToForm(todoRule);
+    expect(f.kind).toBe("todo");
+    expect(f.interval_minutes).toBe(0);
+    expect(f.start_time).toBe("2026-08-18T15:25");
+    // 快捷开关路径（enabled patch）往返不破坏语义
+    expect(ruleToForm({ ...todoRule, enabled: false }).kind).toBe("todo");
+  });
+
+  it("validateReminderInput：todo kind 恒 interval=0；绝对时刻格式校验", () => {
+    expect(validateReminderInput(ruleToForm(todoRule))).toBeNull();
+    expect(
+      validateReminderInput({ ...ruleToForm(todoRule), interval_minutes: 30 }),
+    ).toMatch(/todo/);
+    expect(
+      validateReminderInput({ ...ruleToForm(todoRule), interval_minutes: 0 }),
+    ).toBeNull();
+    // todo 的 start_time 是绝对时刻：HH:MM 反而拒绝
+    expect(
+      validateReminderInput({ ...ruleToForm(todoRule), start_time: "15:25" }),
+    ).toMatch(/起始/);
+  });
+
+  it("parseReminderTrigger：todo_due_ms 可选字段（缺失 → null，携带 → 透传）", () => {
+    const valid = {
+      id: 1,
+      kind: "todo",
+      label: "交报告",
+      use_fireworks: false,
+      fireworks_global: false,
+      log_id: 9,
+    };
+    expect(parseReminderTrigger(valid)).toEqual({ ...valid, todo_due_ms: null });
+    expect(
+      parseReminderTrigger({ ...valid, todo_due_ms: 1787038200000 }),
+    ).toEqual({ ...valid, todo_due_ms: 1787038200000 });
+    expect(parseReminderTrigger({ ...valid, todo_due_ms: "x" })).toEqual({
+      ...valid,
+      todo_due_ms: null,
+    });
   });
 });

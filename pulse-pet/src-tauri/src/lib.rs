@@ -3,10 +3,12 @@ mod db;
 mod hotkeys;
 mod http_server;
 mod interaction;
+mod plugins;
 mod reminder_scheduler;
 mod runtime;
 mod session_state;
 mod token_stats;
+mod todos;
 mod tray;
 mod windows;
 
@@ -91,6 +93,14 @@ pub fn run() {
         .setup(|app| {
             let conn = db::init(app.handle())?;
             app.manage(Mutex::new(conn));
+
+            // ---- M7 插件机制骨架：物化内置 todo manifest + plugins 表登记（TC-TD-01）----
+            {
+                let db = app.state::<Mutex<Connection>>();
+                let conn = db.lock().map_err(|e| format!("db lock: {e}"))?;
+                plugins::ensure_builtin_plugins(&conn)
+                    .map_err(|e| format!("ensure builtin plugins: {e}"))?;
+            }
 
             // ---- M5 atlas：按加载顺序解析当前宠物（pet.selected → 内置 → codex → petdex）----
             let atlas_state = {
@@ -212,6 +222,12 @@ pub fn run() {
             reminder_scheduler::reminder_play_fireworks,
             reminder_scheduler::fireworks_ready,
             reminder_scheduler::fireworks_finished,
+            plugins::plugins_list,
+            todos::todo_list,
+            todos::todo_upsert,
+            todos::todo_delete,
+            todos::todo_complete,
+            todos::todo_reorder,
         ])
         .on_window_event(|window, event| match event {
             // 关闭控制面板 / 宠物窗口时隐藏而非销毁，托盘可再次唤起（P2-2：pet 也防护）

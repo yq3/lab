@@ -5,6 +5,7 @@ import { initHttpBridge } from "./lib/http-bridge";
 import { initReminderBridge } from "./lib/reminder-bridge";
 import { initAtlasBridge } from "./lib/atlas-bridge";
 import { initInteractionBridge } from "./lib/interaction";
+import { initTodoBridge } from "./lib/todo-bridge";
 import "./styles/global.css";
 
 // M2：启动时接入 Rust 事件链路（监听 pulsepet://state → petStore）。
@@ -16,6 +17,8 @@ void initAtlasBridge();
 // M6：交互模式链路（查询穿透状态 + 监听 pulsepet://pass-through → petStore；
 // pet 的拖拽/右键守卫与 panel 设置页开关都依赖该状态位）。
 void initInteractionBridge();
+// M7：todo 完成联动（监听 todo://completed → waving + 气泡；仅 pet 路由生效）。
+void initTodoBridge();
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>

@@ -34,3 +34,8 @@ chrono = "0.4"
 # Windows 编译 image-webp 需 nasm（TC-SP-10 风险项）；若 CI 复杂度上升，
 # 回退方案是 atlas 直接要求 png 格式（petdex 也接受 png，DESIGN §12）。
 image = { version = "0.25", default-features = false, features = ["png", "webp"] }
+
+[dev-dependencies]
+# M7：mock runtime（tauri::test）——todo/plugins 命令级集成测试
+# （真实 command 函数 + managed state + 事件 emit，无需 GUI）。
+tauri = { version = "2", features = ["test"] }

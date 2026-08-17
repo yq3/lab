@@ -3,6 +3,7 @@ import { computeCanvasSize, computeFrameRect } from "../lib/scaling";
 import { SpriteAnimator } from "../lib/sprite";
 import { DragClickGuard, shouldRotateOnClick } from "../lib/pet-drag";
 import { startPetDrag } from "../lib/interaction";
+import type { NormalizedState } from "../lib/state";
 import { usePetStore } from "./petStore";
 
 const CSS_SIZE = 220;
@@ -68,6 +69,11 @@ function buildSheetCanvas(
   return sheet;
 }
 
+/** M7：庆祝期判定（TC-TD-04/05 waving 覆盖；到期自动失效）。 */
+function celebrationActive(c: { id: number; until: number } | null): boolean {
+  return !!c && Date.now() < c.until;
+}
+
 export default function PetCanvas() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sprite = usePetStore((s) => s.sprite);
@@ -93,6 +99,10 @@ export default function PetCanvas() {
   spriteRef.current = sprite;
   const rawRef = useRef(raw);
   rawRef.current = raw;
+  // M7：完成庆祝（waving 覆盖期）；rAF 内按 Date.now < until 自过期
+  const celebration = usePetStore((s) => s.celebration);
+  const celebrationRef = useRef(celebration);
+  celebrationRef.current = celebration;
 
   // M5：atlas 离屏 sheet（atlas 对象身份变化 = 热替换，重建一次）
   const sheetRef = useRef<HTMLCanvasElement | null>(null);
@@ -179,6 +189,9 @@ export default function PetCanvas() {
       const canvasW = computeCanvasSize(CSS_SIZE, dpr);
       const canvasH = canvasW;
       const img = imgRef.current;
+      // M7：庆祝期占位画面切到 success（挥手语义最贴近；TC-TD-04）
+      const celebrating = celebrationActive(celebrationRef.current);
+      const sprite = celebrating ? "success" : spriteRef.current;
       ctx.clearRect(0, 0, canvasW, canvasH);
 
       if (!img) {
@@ -194,8 +207,8 @@ export default function PetCanvas() {
       const { dx, dy, dw, dh } = computeFrameRect(canvasW, canvasH, FRAME_W, FRAME_H);
       ctx.drawImage(img, dx, dy, dw, dh);
 
-      // idle 眨眼动画（闭合睁开的左眼）
-      if (spriteRef.current === "idle" && isBlinking(now)) {
+      // idle 眨眼动画（闭合睁开的左眼；庆祝期不眨眼）
+      if (sprite === "idle" && isBlinking(now)) {
         const scale = dw / FRAME_W;
         ctx.fillStyle = FUR_COLOR;
         ctx.fillRect(
@@ -219,8 +232,12 @@ export default function PetCanvas() {
         drawPlaceholder(now); // sheet 构建失败兜底
         return;
       }
-      // 9 状态映射（TC-SP-07）：raw → atlas 行；切帧时序由 SpriteAnimator 驱动
-      animator.setState(rawRef.current, now);
+      // 9 状态映射（TC-SP-07）：raw → atlas 行；切帧时序由 SpriteAnimator 驱动。
+      // M7：庆祝期覆盖为 success（atlas 行 3 = waving 挥手，TC-TD-04）
+      const effective: NormalizedState = celebrationActive(celebrationRef.current)
+        ? "success"
+        : rawRef.current;
+      animator.setState(effective, now);
       const { row, col } = animator.currentFrame(now);
       const { dx, dy, dw, dh } = computeFrameRect(canvasW, canvasH, size.fw, size.fh);
       ctx.drawImage(

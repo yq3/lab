@@ -43,7 +43,7 @@ describe("normalizeTab 面板 tab 白名单（PetMenu 设置入口 → panel 设
     expect(normalizeTab("settings")).toBe("settings");
     expect(normalizeTab("token")).toBe("token");
     expect(normalizeTab("reminders")).toBe("reminders");
-    expect(normalizeTab("todo")).toBeNull(); // M7 前不存在
+    expect(normalizeTab("todo")).toBe("todo"); // M7 起存在（TC-TD-01）
     expect(normalizeTab("about")).toBeNull();
     expect(normalizeTab(42 as unknown as string)).toBeNull();
     expect(normalizeTab(null as unknown as string)).toBeNull();

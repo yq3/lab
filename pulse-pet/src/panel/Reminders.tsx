@@ -12,6 +12,7 @@ import {
   isTauriRuntime,
   kindEmoji,
   kindLabel,
+  ruleToForm,
   setFireworksGlobal,
   triggerReminderNow,
   upsertReminder,
@@ -29,7 +30,10 @@ import {
  * - 全局烟花开关（app_state；TC-RM-11：全局关 + 单条勾选 → 该条仍放烟花）；
  * - 内置模板一键套用（喝水/休息/站立，文案可改，TC-RM-14 自定义文案）；
  * - "试一试"手动触发（受 3 分钟去重与全局暂停约束）；
- * - 历史统计（reminder_logs 按 kind 聚合今日/累计，TC-RM-13）。
+ * - 历史统计（reminder_logs 按 kind 聚合今日/累计，TC-RM-13）；
+ * - M4 P2 ②（M7 清偿）：todo 派生规则不再降级 custom——快捷开关/编辑保留
+ *   kind='todo' 与 interval=0（表单对 todo 只开放 文案/启用/烟花），不丢
+ *   source_todo_id（Rust update 不触碰该列）。
  */
 
 const KINDS: { id: ReminderKind; label: string }[] = [
@@ -47,18 +51,6 @@ const EMPTY_FORM: ReminderInput = {
   enabled: true,
   use_fireworks: false,
 };
-
-function ruleToForm(r: ReminderRule): ReminderInput {
-  return {
-    kind: (r.kind === "hydration" || r.kind === "rest" ? r.kind : "custom") as ReminderKind,
-    label: r.label,
-    interval_minutes: r.interval_minutes,
-    start_time: r.start_time,
-    end_time: r.end_time,
-    enabled: r.enabled,
-    use_fireworks: r.use_fireworks,
-  };
-}
 
 export default function Reminders() {
   const [rules, setRules] = useState<ReminderRule[] | null>(null);
@@ -232,7 +224,14 @@ export default function Reminders() {
                 {r.label}
               </span>
               <span className="reminder-meta">{formatInterval(r.interval_minutes)}</span>
-              <span className="reminder-meta">{formatWindow(r.start_time, r.end_time)}</span>
+              {/* M7：todo 派生规则展示截止时刻（start_time 为绝对时刻非窗口） */}
+              {r.kind === "todo" ? (
+                <span className="reminder-meta" title={r.start_time ?? undefined}>
+                  截止 {(r.todo_due_at ?? r.start_time ?? "").replace("T", " ") || "—"}
+                </span>
+              ) : (
+                <span className="reminder-meta">{formatWindow(r.start_time, r.end_time)}</span>
+              )}
               <span className="reminder-meta" title={r.last_triggered_at ?? "从未触发"}>
                 上次 {formatLogTime(r.last_triggered_at)}
               </span>
@@ -276,20 +275,33 @@ export default function Reminders() {
       <section className="token-section">
         <h3>{editing ? `编辑提醒 #${editing.id}` : "新建提醒"}</h3>
         <div className="reminder-form">
-          <div className="reminder-templates">
-            {REMINDER_TEMPLATES.map((t) => (
-              <button key={t.label} className="seg" onClick={() => applyTemplate(t)}>
-                {t.label}（{formatInterval(t.interval_minutes)}）
-              </button>
-            ))}
-          </div>
+          {/* M4 P2 ②（M7 清偿）：编辑 todo 派生规则时锁类型/间隔/窗口
+              （kind 不得被改写、interval=0 与绝对 start_time 原样保留） */}
+          {form.kind === "todo" && (
+            <p className="reminder-hint">
+              📋 Todo 派生提醒（单次，由 Todo 插件管理类型/间隔/时刻——在 Todo 页改任务的
+              截止或提前提醒即可）。此处仅可调整文案、启用与烟花；改动会随任务下次保存被
+              任务标题覆盖。
+            </p>
+          )}
+          {form.kind !== "todo" && (
+            <div className="reminder-templates">
+              {REMINDER_TEMPLATES.map((t) => (
+                <button key={t.label} className="seg" onClick={() => applyTemplate(t)}>
+                  {t.label}（{formatInterval(t.interval_minutes)}）
+                </button>
+              ))}
+            </div>
+          )}
           <div className="reminder-form-row">
             <label>
               类型
               <select
                 value={form.kind}
+                disabled={form.kind === "todo"}
                 onChange={(e) => setKind(e.target.value as ReminderKind)}
               >
+                {form.kind === "todo" && <option value="todo">待办（派生）</option>}
                 {KINDS.map((k) => (
                   <option key={k.id} value={k.id}>
                     {k.label}
@@ -315,6 +327,7 @@ export default function Reminders() {
                 type="number"
                 min={1}
                 max={1440}
+                disabled={form.kind === "todo"}
                 value={form.interval_minutes}
                 onChange={(e) =>
                   setForm((f) => ({ ...f, interval_minutes: Number(e.target.value) || 0 }))
@@ -325,6 +338,7 @@ export default function Reminders() {
               起始（留空 = 全天）
               <input
                 type="time"
+                disabled={form.kind === "todo"}
                 value={form.start_time ?? ""}
                 onChange={(e) => setForm((f) => ({ ...f, start_time: e.target.value || null }))}
               />
@@ -333,6 +347,7 @@ export default function Reminders() {
               结束（留空 = 全天）
               <input
                 type="time"
+                disabled={form.kind === "todo"}
                 value={form.end_time ?? ""}
                 onChange={(e) => setForm((f) => ({ ...f, end_time: e.target.value || null }))}
               />
@@ -354,11 +369,14 @@ export default function Reminders() {
               烟花模式
             </label>
           </div>
-          {form.start_time && form.end_time && form.start_time > form.end_time && (
-            <p className="reminder-hint">
-              跨午夜窗口：仅在 [{form.start_time}, 24:00) ∪ [00:00, {form.end_time}) 内触发（TC-RM-06）
-            </p>
-          )}
+          {form.kind !== "todo" &&
+            form.start_time &&
+            form.end_time &&
+            form.start_time > form.end_time && (
+              <p className="reminder-hint">
+                跨午夜窗口：仅在 [{form.start_time}, 24:00) ∪ [00:00, {form.end_time}) 内触发（TC-RM-06）
+              </p>
+            )}
           {formError && <p className="reminder-form-error">{formError}</p>}
           <div className="reminder-form-actions">
             <button className="seg primary" onClick={() => void save()}>

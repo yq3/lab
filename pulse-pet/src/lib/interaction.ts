@@ -35,12 +35,14 @@ export function describePassThrough(passThrough: boolean): string {
     : "穿透关：可交互（可拖拽/右键）";
 }
 
-/** Panel tab 白名单（PetMenu「设置…」→ panel 设置页；todo M7 前不存在）。 */
-export type PanelTab = "token" | "reminders" | "settings";
+/** Panel tab 白名单（PetMenu「设置…」→ panel 设置页；M7 起 todo 存在）。 */
+export type PanelTab = "token" | "reminders" | "settings" | "todo";
 
-/** 校验 tab 字符串；非法（含 M7 前不存在的 todo）→ null。 */
+/** 校验 tab 字符串；非法 → null。 */
 export function normalizeTab(tab: unknown): PanelTab | null {
-  if (tab === "token" || tab === "reminders" || tab === "settings") return tab;
+  if (tab === "token" || tab === "reminders" || tab === "settings" || tab === "todo") {
+    return tab;
+  }
   return null;
 }
 
