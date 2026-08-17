@@ -288,11 +288,14 @@ CREATE TABLE reminder_logs (
   acked_at TEXT,                        -- 用户点击确认时间，可空
   dismissed_via TEXT                    -- "bubble" | "fireworks" | "auto"
 );
+-- M7 定案（002 迁移）：reminder_logs 重建为无外键表（去 REFERENCES 级联），
+-- 所有 kind（含 hydration/rest/custom/todo）的历史 log 一律保留（ON DELETE CASCADE 不再作用于 logs）；
+-- reminder_id 悬空引用由代码层唯一写入路径 insert_log 保证，stats 聚合 INNER JOIN 下数字无影响。
 ```
 
 历史统计（喝水次数 / 休息次数）从 `reminder_logs` 聚合。
 
-**todo 派生提醒约定**：todo 写入/修改 `due_date` 且 `remind_before_minutes > 0` 时，Rust 侧 todo command 同步 upsert 一行 `kind='todo'`、`source_todo_id=<todo.id>`、`interval_minutes=0`、`start_time` 为 `due_date - remind_before_minutes` 的 reminder；`remind_before_minutes = 0` 时不派生（`reminders` 表不出现该行，完全无提醒）；todo 删除/完成时级联删该行。`kind='todo'` 的 reminder 仅触发一次（非周期），触发后由 `reminders` 调度器根据 `last_triggered_at` 与当前时间判断是否再发。**todo 派生提醒的防重以 `reminders.last_triggered_at` 为唯一来源**（与 §8.3"调度器单一数据源"一致）；`todos.remind_last_triggered_at` 字段保留但 v1 不写入不读取。
+**todo 派生提醒约定**：todo 写入/修改 `due_date` 且 `remind_before_minutes > 0` 时，Rust 侧 todo command 同步 upsert 一行 `kind='todo'`、`source_todo_id=<todo.id>`、`interval_minutes=0`、`start_time` 为 `due_date - remind_before_minutes` 的 reminder；`remind_before_minutes = 0` 时不派生（`reminders` 表不出现该行，完全无提醒）；todo 删除/完成时级联删该行。`kind='todo'` 的 reminder 仅触发一次（非周期），触发后由 `reminders` 调度器根据 `last_triggered_at` 与当前时间判断是否再发。**todo 派生提醒的防重以 `reminders.last_triggered_at` 为唯一来源**（与 §8.3"调度器单一数据源"一致）；`todos.remind_last_triggered_at` 字段保留但 v1 不写入不读取。**重武装（M7 定案）**：todo 修改导致派生行 `start_time` 变化时清 `last_triggered_at` 重发机会；若 due 变化但 start 分钟级未变（如 due 与 remind_before 同幅增减），视为同一提醒时刻已触发过、不重发。**暂停×todo（M7 定案）**：`kind='todo'` 为一次性提醒，暂停期间到期的 todo 派生提醒不补发错过场次，恢复后仅在下个 tick 触发一次（与 M4"暂停不补弹"定案的差异点仅在于 todo 无 interval 可顺延，触发窗口即恢复后首个 tick）。
 
 ---
 
@@ -457,7 +460,7 @@ v1 实现"机制 + 仅挂 todo 一个插件"，不留完整 SDK 但留 manifest 
   "name": "Todo",
   "version": "0.1.0",
   "manifestVersion": 1,
-  "permissions": ["schedule", "notify", "ui:panel-tab"],  // 声明需要的权限面
+  "permissions": ["schedule", "notify", "ui:panel-tab", "todo:*"],  // 声明需要的权限面（M7 定案：含 todo:*，与 TC-TD-01 一致）
   "configSchema": { ... },                                  // 控制面板自动渲染设置表单
   "panelTab": { "title": "Todo", "icon": "check-square" }   // 控制面板加一个 tab
 }
