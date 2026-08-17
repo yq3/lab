@@ -351,7 +351,7 @@ CREATE TABLE reminder_logs (
 
 - **拖拽**：v1 pet 窗口运行时默认非穿透（可交互），webview 可直接收 mousedown → 触发 Tauri `window.startDrag()`（或 Rust 侧监听 `WindowEvent::CursorMove` + `set_position`）。若用户在 M6 后切换到穿透态，则拖拽不可用——此时只能通过托盘/热键切回非穿透态再拖。文档此前"穿透时临时关闭穿透、释放恢复"的设想无法成立（穿透态下根本收不到 mousedown），故 v1 不做该路径。
 - **位置记忆**：宠物位置 + 所在显示器 id 写入 `pulsepet.db` 的 `app_state` 表，启动时还原。**坐标单位约定**：宠物位置存物理像素坐标（`PhysicalPosition` / `outer_position`），M6 跨显示器记忆/回退按此单位语义实现（不同 dpr 屏间换算、屏幕边界 clamp 等 M6 处理）。
-- **跨显示器拖拽**：Tauri `availableMonitors()` API 计算屏幕边界，跨屏拖拽实时更新窗口位置。
+- **跨显示器拖拽**：拖拽走 OS 原生拖拽循环（Tauri `window.startDrag()`，底层 tao `performWindowDragWithEvent`），跨屏移动由系统处理、不依赖应用侧边界计算；`availableMonitors()` 仅用于位置记忆（显示器 id 记录）与启动定位（§"位置记忆"/"启动定位"条目）。M6 实测：单屏拖拽跟随/落库一致；跨屏平滑/边缘钳制行为实机验证留 M8。
 - **启动定位**：上次所在显示器 + 上次坐标；若该显示器已不存在则回退主显示器。
 - **点击穿透可切换**：穿透态下右键菜单不可达，故切换通道为"全局热键 + 托盘菜单"双通道（热键 `⌘+Shift+Alt+P` Mac / `Ctrl+Shift+Alt+P` Win，与 §7.3 一致）；托盘右键菜单的"切换交互模式"项两条通道都可用（穿透态下托盘仍是系统级菜单不受影响）。穿透开 = 纯展示（鼠标穿透 + 不可拖拽），穿透关 = 可拖拽 / 右键。
 - **多显示器烟花**：v1 默认在主显示器播放；M6 后再评估是否跨屏烟花（Tauri 多窗口拼接或原生）。
