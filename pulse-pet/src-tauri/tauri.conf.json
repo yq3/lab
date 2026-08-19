@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "pulse-pet",
+  "productName": "PulsePet",
   "version": "0.1.0",
   "identifier": "com.pulsepet.app",
   "build": {
@@ -30,7 +30,7 @@
       {
         "label": "panel",
         "url": "index.html#/panel",
-        "title": "PulsePet 控制面板",
+        "title": "PulsePet",
         "width": 900,
         "height": 640,
         "visible": false

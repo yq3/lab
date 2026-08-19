@@ -1,6 +1,6 @@
 # PulsePet
 
-桌面宠物 App：监听 opencode agent 工作状态，用一只像素小猫实时呈现（idle / thinking / working / success / error），并规划 token 本地统计、喝水/休息提醒（气泡 + 烟花）、轻量 todo 插件。
+桌面宠物 App：监听 opencode agent 工作状态，用一只像素小猫实时呈现（idle / thinking / working / success / error 等 9 态 atlas 动画），配 token 本地统计、喝水/休息提醒（气泡 + 烟花）、轻量 todo 插件（派生提醒 / 完成联动庆祝）。
 
 > POC 阶段，效果验证通过后可能拆仓独立演进。设计与范围见 [DESIGN.md](./DESIGN.md)、[DECISIONS.md](./DECISIONS.md)，验收依据见 [TEST-CASES.md](./TEST-CASES.md)。
 
@@ -12,7 +12,8 @@
 | 前端 | React 19 + TypeScript + Vite |
 | 状态管理 | Zustand |
 | 本地存储 | SQLite（`rusqlite` 直连，`pulsepet.db`） |
-| 系统集成 | 托盘（TrayIcon）、单实例锁（tauri-plugin-single-instance） |
+| 系统集成 | 托盘（TrayIcon）、单实例锁、全局热键（tauri-plugin-single-instance / global-shortcut，均仅 Rust 侧使用） |
+| i18n | 自研轻量字典（`src/lib/i18n.ts`，zh/en 双语，无第三方依赖） |
 
 ## 如何运行
 
@@ -23,7 +24,7 @@ npm install
 # 开发模式（三窗口 + 托盘，每次启动加载最新代码）
 npm run tauri dev
 
-# 前端单测（纯逻辑：状态降级映射 / canvas 缩放）
+# 前端单测（纯逻辑：状态降级映射 / canvas 缩放 / i18n 字典等）
 npm test
 
 # 生产构建（.app / .dmg）
@@ -37,14 +38,34 @@ npm run tauri build
 `npm run tauri build` 每次都会把最新产物覆盖写入同一路径（无需复制到 /Applications）：
 
 ```
-src-tauri/target/release/bundle/macos/pulse-pet.app
-src-tauri/target/release/bundle/dmg/pulse-pet_<version>_aarch64.dmg
+src-tauri/target/release/bundle/macos/PulsePet.app
+src-tauri/target/release/bundle/dmg/PulsePet_<version>_aarch64.dmg
 ```
 
-- **推荐**：构建后直接 `open src-tauri/target/release/bundle/macos/pulse-pet.app` —— 始终是最新版。
-- **注意**：若你曾把旧版 `.app` 复制到 `/Applications`（或 `~/Applications`），Launchpad / Finder 里的入口指向那份**副本**，不会随重新构建自动更新；需重新复制覆盖，或直接改用上面的 target 路径。
+- **推荐**：构建后直接 `open src-tauri/target/release/bundle/macos/PulsePet.app` —— 始终是最新版。
+- **注意**：若你曾把旧版 `.app` 复制到 /Applications（或 ~/Applications），Launchpad / Finder 里的入口指向那份**副本**，不会随重新构建自动更新；需重新复制覆盖，或直接改用上面的 target 路径。
 - 开发热更新用 `npm run tauri dev`。
 - 确认是否最新：重新 `npm run tauri build` 后 `open` 一次 target 路径的 `.app` 即可。
+
+## 国际化（i18n，M8）
+
+- **双语**：中文（zh）/ English（en），v1 只此两种；默认语言跟随系统（`navigator.language` 以 `zh` 开头 → zh，其余含 zh/en 之外一律回退 en）。
+- **切换入口**：控制面板 → 设置 → 语言；选择持久化在 `pulsepet.db` 的 `app_state` 表（键 `ui.language`），重启保留。
+- **生效范围**：三窗口（pet/panel/fireworks）+ 托盘菜单 + panel 标题 + 气泡文案（token 会话汇报 / todo 到点提醒）+ Settings/Reminders/Todo 全部 UI 文案。切换即时生效：前端经 `ui://language` 事件同步三窗口，Rust 侧托盘菜单原地重建（`ui_set_language` 命令，无需重启）。
+- **不翻译项**：宠物状态名（idle/working 等技术词）、品牌名 PulsePet、用户数据（提醒 label / todo title 原样展示）。
+- **已知限制**：Rust 侧 CRUD 校验错误串（前端校验放过、Rust 拒绝的边缘路径）与 atlas 嵌入式 OS 错误 reason 仍为中文，v1 不做全量错误串双语。
+
+## Windows 支持（已知限制）
+
+- **Windows 仅 CI 构建验证，未实机测试**（无 Windows 实机；M8 范围定案 2026-08-19）。已验证：`windows-latest` 矩阵构建链路（见下"CI 发布流程"）；透明窗口/托盘/热键等运行时行为在实机上未验证，边缘行为可能存在 macOS 与 Windows 的差异（DESIGN §12 已记录回退预案，如烟花透明窗口异常时改不透明深色背景）。
+- token 文件位于 `%LOCALAPPDATA%\pulsepet\runtime\`（DESIGN §3.1 定案）；Windows 无 POSIX `mode 0600` 语义，依赖单用户登录 + 默认 ACL 仅本用户可见（v1 不实装 ACL 强化）。
+- atlas webp 解码（`image-webp` crate）在 CI `windows-latest` 上可编译；若未来 CI 因 nasm 类工具链问题失败，回退方案是 atlas 仅接受 png（DESIGN §12）。
+
+## CI 发布流程
+
+- 仓库根 `.github/workflows/build.yml`（与本目录 todo-lite 共用）：push tag 触发，pattern 同时匹配 `todo-lite-v*` 与 `pulse-pet-v*`，按 tag 前缀切换工作目录与产物命名。
+- **发布 PulsePet**：`git tag pulse-pet-v0.1.0 && git push origin pulse-pet-v0.1.0` → GitHub Actions 矩阵（windows-latest + macos-latest）构建，产物（`PulsePet_<version>_<os-target>` 风格，如 `PulsePet_0.1.0_aarch64.dmg` / Windows 安装包）挂到 draft Release，手动核对后发布。
+- todo-lite 既有 `todo-lite-v*` 触发不受影响（同 workflow，前缀分流）。
 
 ## 运行时视觉验证（供复验）
 
@@ -58,41 +79,50 @@ pet 是 macOS 透明合成窗口（`transparent` + `macOSPrivateApi` + `backgrou
 4. **前置自检**：确认 WebContent 进程 CPU > 0（rAF 60fps 在跑）；AX 树里 `AXWebArea` 有 `AXChildren`（含 canvas）。若两者为 0，说明渲染进程被挂起，该次测量无效，换真实 GUI 会话重测。
 5. 最终以**人工目验**为准（用户实测：宠物可见 + 周围透明）。
 
-## 目录结构（M1 子集）
+## 目录结构
 
 ```
 pulse-pet/
-├── src/                      # 前端 React
-│   ├── pet/                  # 宠物 webview
-│   │   ├── PetCanvas.tsx     # canvas 精灵渲染（占位 5 状态 + 眨眼 + 状态圆点，无文字）
-│   │   └── petStore.ts       # zustand：当前 raw/sprite 状态
-│   ├── panel/Panel.tsx       # 控制面板 webview（M1 占位）
-│   ├── fireworks/Fireworks.tsx # 烟花 webview（M1 占位）
+├── src/                      # 前端 React（三窗口按 hash 路由：#/pet #/panel #/fireworks）
+│   ├── pet/                  # 宠物 webview（PetCanvas 精灵渲染 / PetMenu 右键菜单 / Bubble 气泡）
+│   ├── panel/                # 控制面板 webview（TokenStats / Reminders / Settings / plugins/Todo）
+│   ├── fireworks/            # 烟花 webview（canvas 粒子引擎，无 UI 文案）
 │   ├── lib/
-│   │   ├── state.ts          # 归一化状态类型 + 8→5 降级映射
-│   │   └── scaling.ts        # canvas HiDPI 缩放策略
+│   │   ├── i18n.ts           # M8 国际化：zh/en 字典 + t() + 语言 store + 三窗口同步
+│   │   ├── state.ts          # 归一化状态类型 + 降级映射
+│   │   ├── reminders.ts / todos.ts   # 提醒 / todo 纯函数与 Rust 命令封装
+│   │   └── ...（bubble/scale/atlas/token-stats/interaction 等桥与纯函数）
 │   └── styles/global.css
 ├── src-tauri/
 │   ├── src/
-│   │   ├── main.rs / lib.rs
-│   │   ├── db.rs             # SQLite 迁移（幂等）+ app_state 读写
-│   │   ├── windows.rs        # pet/panel/fireworks 窗口管理 + 位置保存/恢复
-│   │   └── tray.rs           # 托盘（左键切换 / 右键菜单）
-│   ├── migrations/001-init.sql # 基础表 schema
-│   ├── capabilities/
+│   │   ├── main.rs / lib.rs  # 入口与 setup 接线（命令注册 / 事件链路 / 调度器）
+│   │   ├── db.rs             # SQLite 事务化迁移（幂等）+ app_state 读写
+│   │   ├── i18n.rs           # M8：Rust 侧语言位 + 托盘/标题/气泡文案 + ui_set_language
+│   │   ├── http_server.rs    # 本地事件 HTTP（127.0.0.1 + token + 限流）
+│   │   ├── reminder_scheduler.rs  # 提醒调度 + 烟花编排（A9 显示器 bounds 计算）
+│   │   ├── todos.rs / plugins.rs   # M7 todo 插件与派生提醒
+│   │   ├── atlas.rs          # M5 atlas 加载（内置/codex/petdex + 网格校验）
+│   │   └── windows.rs / tray.rs / hotkeys.rs / interaction.rs / token_stats.rs
+│   ├── migrations/           # 001-init.sql / 002-m7-todo.sql
+│   ├── capabilities/default.json  # M8 收敛：仅 core:event:default
 │   └── Cargo.toml
-├── public/placeholder-cat.png # 128×128 占位精灵（自绘 CC0）
-├── scripts/gen-assets.mjs    # 生成占位精灵 + 图标源
+├── opencode-plugin/          # opencode 插件（install.sh / install.ps1 + hook）
+├── scripts/gen-assets.mjs    # 生成内置精灵素材 + 图标源
 ├── DESIGN.md / TEST-CASES.md / DECISIONS.md
 └── README.md
 ```
 
-## M1 范围与后续
+## 里程碑进展（M1 → M8，v1 收尾）
 
-- **M1**：三窗口骨架、占位精灵 5 状态渲染、托盘 + 单实例锁、SQLite 迁移（6 表）、位置记忆。
-- **M2**：tiny_http 事件链路（token/endpoint/killswitch + 限流/鉴权）+ opencode 插件（归一化/节流/退避/净化）+ 多 session 状态机。
-- **M3（当前）**：token 统计——`token_stats.rs` 只读聚合查询（路径探测 / schema 白名单 / 旧版兜底）、panel Token 标签页（KPI / 自画 SVG 时序 / 项目饼图 / 会话明细）、当前会话气泡汇报（idle + 有用量 → "本期用了 Xk input / Yk output / $ Z"，并驱动 success 状态）。
-- **未实现**：提醒与烟花逻辑（M4）、atlas 加载（M5）、拖拽/穿透/热键/右键菜单（M6）、todo 插件机制（M7）。
+- **M1** ✅ 三窗口骨架、占位精灵渲染、托盘 + 单实例锁、SQLite 迁移、位置记忆。
+- **M2** ✅ tiny_http 事件链路（token/endpoint/killswitch + 限流/鉴权）+ opencode 插件（归一化/节流/退避/净化）+ 多 session 状态机。
+- **M3** ✅ token 统计——只读聚合查询、panel Token 页（KPI / 时序 / 项目饼图 / 会话明细）、当前会话气泡汇报。
+- **M4** ✅ 提醒（规则 CRUD / 调度器 / 气泡 + 烟花 / 历史统计 / 全局暂停）。
+- **M5** ✅ atlas 加载（codex/petdex 素材 / 网格校验 / 损坏回退 / 双内置宠物 / 热替换）。
+- **M6** ✅ 交互（拖拽 / 点击穿透 / 全局热键 / 右键菜单 / 位置记忆显示器维度）。
+- **M7** ✅ 插件机制骨架 + 内置 todo（CRUD / tags / 派生提醒 / 完成联动 / 今日全清）。
+- **M8** ✅ 收尾——i18n（zh/en）、Windows CI 级兼容（TC-CI-02）、capability 收敛 + TC-SEC 回溯、README/AGENTS 更新、遗留清偿（A1 迁移事务化 / A2 重武装边界 / A3 校验口径契约 / A4 静默吞错 / A5 pending 补发 watchdog / A6 install.ps1 BOM + permission.asked / A7 主屏兜底注释固化 / A8 不可达分支定案保留 / A9 烟花点位显示器 bounds 计算）。
+- **后移项**：多屏实机验证（TC-APP-10/11、跨屏烟花）、Windows 实机验证（TC-DONE-03 等）——具备硬件时；心跳 / `/health` 限流豁免——v2（心跳引入时）；TC-DONE-01~09 综合验收——v1 Done 验收任务。
 
 详见 [DESIGN.md §10](./DESIGN.md) 实施里程碑。
 

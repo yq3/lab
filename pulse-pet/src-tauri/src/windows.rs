@@ -22,8 +22,10 @@ const KEY_MON: &str = "pet.monitor";
 const MOVE_DEBOUNCE_MS: u64 = 150;
 
 /// 唤起控制面板窗口（托盘菜单 / 单实例锁第二实例触发）。
+/// M8 i18n：每次唤起同步标题（语言切换即时生效，无需重启）。
 pub fn show_panel(app: &tauri::AppHandle) {
     if let Some(win) = app.get_webview_window("panel") {
+        let _ = win.set_title(crate::i18n::current().panel_title());
         let _ = win.show();
         let _ = win.set_focus();
     }
@@ -56,7 +58,8 @@ pub fn toggle_pet(app: &tauri::AppHandle) {
 }
 
 /// 显示烟花窗口（M4，TC-RM-09：全屏透明置顶、无边框、无任务栏项；已可见时无害）。
-pub fn show_fireworks(app: &tauri::AppHandle) {
+/// 泛型 Runtime：命令层可在 tauri::test mock runtime 下直调（A5 单测）。
+pub fn show_fireworks<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     if let Some(win) = app.get_webview_window("fireworks") {
         let _ = win.show();
         eprintln!("[pulsepet] fireworks window show");
@@ -64,7 +67,7 @@ pub fn show_fireworks(app: &tauri::AppHandle) {
 }
 
 /// 隐藏烟花窗口（前端播完回报 / watchdog 兜底）。
-pub fn hide_fireworks(app: &tauri::AppHandle) {
+pub fn hide_fireworks<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     if let Some(win) = app.get_webview_window("fireworks") {
         let _ = win.hide();
         eprintln!("[pulsepet] fireworks window hide");
@@ -159,6 +162,14 @@ impl MonitorRect {
 ///   （TC-APP-10：不崩溃、不显示在屏幕外）；
 /// - 取不到任何显示器信息 → 原样返回保存坐标（M1 语义：不 clamp 不崩溃）；
 /// - 窗口大于显示器 → clamp 退化为贴该屏左上角。
+///
+/// A7（M6 P2③ 处理定案：保留 + 注释固化）：主屏兜底**优先取
+/// `primary_monitor()` 的名字**（实际平台几乎总可取到，列表顺序无关）；
+/// 仅当主屏 id 不可得（primary_monitor 失败 / 名字为 None / 名字不在当前
+/// 列表——如系统重排瞬间的陈旧名）时，才退 `monitors[0]` 作末位兜底。
+/// `available_monitors()` 顺序由 OS 决定（不保证主屏在前），但该分支只在
+/// "连主屏都识别不出"的罕见情形生效——任意一块可达屏都优于无兜底，
+/// monitors[0] 是有意为之的定案（行为由下方测试钉住）。
 pub fn resolve_restore_target(
     saved: Option<(i32, i32)>,
     saved_mon: Option<&str>,
@@ -427,6 +438,28 @@ mod tests {
         assert_eq!(
             resolve_restore_target(Some((2000, 300)), Some("gone"), &monitors(), None, 220, 220),
             Some((1700, 300))
+        );
+    }
+
+    #[test]
+    fn restore_stale_primary_name_degrades_to_monitors_zero_a7() {
+        // A7：主屏 id 存在但不在当前列表（陈旧名——如系统重排/重命名瞬间）→
+        // 与 primary 缺失同路径：monitors[0] 兜底。列表故意把次屏放首位
+        // （available_monitors 顺序由 OS 决定，不保证主屏在前），钉住
+        // "兜底取列表第一项（无论它是哪块屏）"的定案语义。
+        let mut ms = monitors();
+        ms.reverse(); // ["DELL U2720Q", "Color LCD"]
+        assert_eq!(
+            resolve_restore_target(
+                Some((100, 100)),
+                Some("gone"),
+                &ms,
+                Some("Built-in Retina Display"), // 不在列表中的陈旧名
+                220,
+                220
+            ),
+            // clamp 到 DELL（monitors[0]，x∈[1920, 4260]）→ 100 拉回 1920
+            Some((1920, 100))
         );
     }
 

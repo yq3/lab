@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   REMINDER_TEMPLATES,
   deleteReminder,
@@ -22,6 +22,7 @@ import {
   type ReminderRule,
   type ReminderStat,
 } from "../lib/reminders";
+import { t, useLangStore } from "../lib/i18n";
 
 /**
  * 提醒配置页（DESIGN §5.4 / §10.2 M4，TC-RM-07/11/13/14）：
@@ -34,23 +35,52 @@ import {
  * - M4 P2 ②（M7 清偿）：todo 派生规则不再降级 custom——快捷开关/编辑保留
  *   kind='todo' 与 interval=0（表单对 todo 只开放 文案/启用/烟花），不丢
  *   source_todo_id（Rust update 不触碰该列）。
+ * - M8 i18n：全部文案经 t()；A4（M4 P2⑥ 清偿）：全局烟花开关写失败不再
+ *   静默吞——console.error + toast 提示 + 回读真实值。
  */
 
-const KINDS: { id: ReminderKind; label: string }[] = [
-  { id: "hydration", label: "喝水" },
-  { id: "rest", label: "休息" },
-  { id: "custom", label: "自定义" },
+const KINDS: { id: ReminderKind; labelKey: string }[] = [
+  { id: "hydration", labelKey: "reminders.kind.hydration" },
+  { id: "rest", labelKey: "reminders.kind.rest" },
+  { id: "custom", labelKey: "reminders.kind.custom" },
 ];
 
-const EMPTY_FORM: ReminderInput = {
-  kind: "hydration",
-  label: "该喝水啦 💧",
-  interval_minutes: 30,
-  start_time: null,
-  end_time: null,
-  enabled: true,
-  use_fireworks: false,
-};
+/** 模板键（与 REMINDER_TEMPLATES 按序对应；label 经 t() 本地化）。 */
+const TEMPLATE_KEYS = ["reminders.tpl.hydration", "reminders.tpl.rest1", "reminders.tpl.rest2"];
+
+function emptyForm(): ReminderInput {
+  return {
+    kind: "hydration",
+    label: t(TEMPLATE_KEYS[0]),
+    interval_minutes: 30,
+    start_time: null,
+    end_time: null,
+    enabled: true,
+    use_fireworks: false,
+  };
+}
+
+/** 当前语言的模板列表（label 本地化；kind/interval 取 REMINDER_TEMPLATES 权威值）。 */
+function templatesHere() {
+  return REMINDER_TEMPLATES.map((tpl, i) => ({
+    ...tpl,
+    label: t(TEMPLATE_KEYS[i]),
+  }));
+}
+
+/**
+ * "文案仍是模板默认值"判定：跨语言收集 zh/en 两套模板文案——切换语言后
+ * 旧语言的默认文案也能被识别为"模板值"，kind 切换跟随逻辑不误判为用户改过。
+ */
+function allTemplateLabels(): Set<string> {
+  const labels = new Set<string>();
+  for (const tpl of REMINDER_TEMPLATES) labels.add(tpl.label);
+  for (const key of TEMPLATE_KEYS) {
+    labels.add(t(key, undefined, "zh"));
+    labels.add(t(key, undefined, "en"));
+  }
+  return labels;
+}
 
 export default function Reminders() {
   const [rules, setRules] = useState<ReminderRule[] | null>(null);
@@ -59,15 +89,16 @@ export default function Reminders() {
   const [paused, setPaused] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<ReminderRule | null>(null);
-  const [form, setForm] = useState<ReminderInput>(EMPTY_FORM);
+  const [form, setForm] = useState<ReminderInput>(emptyForm);
   const [formError, setFormError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   /** 两步删除确认：第一次点"删除"变为"确认删除？"，3s 内再点才执行。 */
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
+  const lang = useLangStore((s) => s.lang); // M8 i18n：语言变化时本页文案重渲染
 
   const load = useCallback(async () => {
     if (!isTauriRuntime()) {
-      setError("提醒配置需要在 PulsePet App（Tauri）内使用");
+      setError(t("reminders.needApp"));
       return;
     }
     try {
@@ -83,7 +114,7 @@ export default function Reminders() {
       setPaused(pa);
       setError(null);
     } catch (e) {
-      setError(`读取提醒配置失败：${e instanceof Error ? e.message : String(e)}`);
+      setError(t("reminders.loadFail", { msg: e instanceof Error ? e.message : String(e) }));
     }
   }, []);
 
@@ -109,7 +140,7 @@ export default function Reminders() {
     try {
       await upsertReminder(editing?.id ?? null, { ...form, label: form.label.trim() });
       setEditing(null);
-      setForm(EMPTY_FORM);
+      setForm(emptyForm());
       refresh();
     } catch (e) {
       setFormError(e instanceof Error ? e.message : String(e));
@@ -130,11 +161,11 @@ export default function Reminders() {
       await deleteReminder(r.id);
       if (editing?.id === r.id) {
         setEditing(null);
-        setForm(EMPTY_FORM);
+        setForm(emptyForm());
       }
       refresh();
     } catch (e) {
-      showToast(`删除失败：${e instanceof Error ? e.message : String(e)}`);
+      showToast(t("reminders.toast.deleteFail", { msg: e instanceof Error ? e.message : String(e) }));
     }
   };
 
@@ -143,23 +174,44 @@ export default function Reminders() {
       await upsertReminder(r.id, { ...ruleToForm(r), ...patch });
       refresh();
     } catch (e) {
-      showToast(`更新失败：${e instanceof Error ? e.message : String(e)}`);
+      showToast(t("reminders.toast.updateFail", { msg: e instanceof Error ? e.message : String(e) }));
     }
   };
 
   const test = async (r: ReminderRule) => {
     try {
       const status = await triggerReminderNow(r.id);
-      if (status === "fired") showToast(`已触发「${r.label}」`);
-      else if (status === "dedup") showToast("3 分钟内已触发过，去重拦截（TC-RM-05）");
-      else showToast("所有提醒已暂停（托盘「暂停所有提醒」），恢复后再试");
+      if (status === "fired") showToast(t("reminders.toast.fired", { label: r.label }));
+      else if (status === "dedup") showToast(t("reminders.toast.dedup"));
+      else showToast(t("reminders.toast.paused"));
     } catch (e) {
-      showToast(`触发失败：${e instanceof Error ? e.message : String(e)}`);
+      showToast(t("reminders.toast.triggerFail", { msg: e instanceof Error ? e.message : String(e) }));
     }
   };
 
-  const applyTemplate = (t: (typeof REMINDER_TEMPLATES)[number]) => {
-    setForm((f) => ({ ...f, kind: t.kind, label: t.label, interval_minutes: t.interval_minutes }));
+  /** A4（M4 P2⑥ 清偿）：全局烟花开关写失败不再静默——报错 + toast + 回读真实值。 */
+  const toggleFireworksGlobal = (enabled: boolean) => {
+    setFwGlobal(enabled);
+    void setFireworksGlobal(enabled)
+      .then(refresh)
+      .catch((e) => {
+        console.error("[pulsepet] set fireworks global failed:", e);
+        showToast(
+          t("reminders.toast.fwGlobalFail", { msg: e instanceof Error ? e.message : String(e) }),
+        );
+        refresh(); // 回读权威值，撤销本地乐观态
+      });
+  };
+
+  const templates = useMemo(templatesHere, [lang]);
+
+  const applyTemplate = (tpl: (typeof templates)[number]) => {
+    setForm((f) => ({
+      ...f,
+      kind: tpl.kind,
+      label: tpl.label,
+      interval_minutes: tpl.interval_minutes,
+    }));
     setFormError(null);
   };
 
@@ -172,8 +224,9 @@ export default function Reminders() {
   const setKind = (kind: ReminderKind) => {
     setForm((f) => {
       // 文案还是模板默认值时跟随 kind 换默认文案；用户改过则保留
-      const isTemplate = REMINDER_TEMPLATES.some((t) => t.label === f.label);
-      const tpl = REMINDER_TEMPLATES.find((t) => t.kind === kind);
+      //（模板默认值跨语言识别：见 allTemplateLabels）
+      const isTemplate = allTemplateLabels().has(f.label);
+      const tpl = templates.find((x) => x.kind === kind);
       return {
         ...f,
         kind,
@@ -187,7 +240,7 @@ export default function Reminders() {
     return <div className="token-error">{error}</div>;
   }
   if (!rules) {
-    return <p className="token-empty">读取提醒配置…</p>;
+    return <p className="token-empty">{t("reminders.loading")}</p>;
   }
 
   return (
@@ -198,22 +251,17 @@ export default function Reminders() {
           <input
             type="checkbox"
             checked={fireworksGlobal}
-            onChange={(e) => {
-              setFwGlobal(e.target.checked);
-              void setFireworksGlobal(e.target.checked).then(refresh).catch(() => {});
-            }}
+            onChange={(e) => toggleFireworksGlobal(e.target.checked)}
           />
-          全局烟花模式（未单独勾选的提醒也升级为烟花）
+          {t("reminders.fwGlobal")}
         </label>
-        {paused && <span className="reminder-paused-badge">已暂停所有提醒（托盘可恢复）</span>}
+        {paused && <span className="reminder-paused-badge">{t("reminders.pausedBadge")}</span>}
       </div>
 
       {/* 规则列表 */}
       <section className="token-section">
-        <h3>提醒规则（{rules.length}）</h3>
-        {rules.length === 0 && (
-          <p className="token-empty">还没有提醒规则，从下方模板或表单新建一条吧。</p>
-        )}
+        <h3>{t("reminders.rules.title", { n: rules.length })}</h3>
+        {rules.length === 0 && <p className="token-empty">{t("reminders.rules.empty")}</p>}
         <ul className="reminder-list">
           {rules.map((r) => (
             <li key={r.id} className={r.enabled ? "reminder-item" : "reminder-item disabled"}>
@@ -227,43 +275,50 @@ export default function Reminders() {
               {/* M7：todo 派生规则展示截止时刻（start_time 为绝对时刻非窗口） */}
               {r.kind === "todo" ? (
                 <span className="reminder-meta" title={r.start_time ?? undefined}>
-                  截止 {(r.todo_due_at ?? r.start_time ?? "").replace("T", " ") || "—"}
+                  {t("reminders.due", {
+                    ts: (r.todo_due_at ?? r.start_time ?? "").replace("T", " ") || t("reminders.dueNone"),
+                  })}
                 </span>
               ) : (
                 <span className="reminder-meta">{formatWindow(r.start_time, r.end_time)}</span>
               )}
-              <span className="reminder-meta" title={r.last_triggered_at ?? "从未触发"}>
-                上次 {formatLogTime(r.last_triggered_at)}
+              <span className="reminder-meta" title={r.last_triggered_at ?? t("reminders.lastNever")}>
+                {r.last_triggered_at
+                  ? t("reminders.last", { ts: formatLogTime(r.last_triggered_at) })
+                  : t("reminders.lastNever")}
               </span>
-              <label className="reminder-check compact" title={r.enabled ? "启用中" : "已停用"}>
+              <label
+                className="reminder-check compact"
+                title={r.enabled ? t("reminders.enabledOn") : t("reminders.enabledOff")}
+              >
                 <input
                   type="checkbox"
                   checked={r.enabled}
                   onChange={(e) => void quickToggle(r, { enabled: e.target.checked })}
                 />
-                启用
+                {t("reminders.enabled")}
               </label>
-              <label className="reminder-check compact" title="单条烟花覆盖（TC-RM-11）">
+              <label className="reminder-check compact" title={t("reminders.fireworksOverride")}>
                 <input
                   type="checkbox"
                   checked={r.use_fireworks}
                   onChange={(e) => void quickToggle(r, { use_fireworks: e.target.checked })}
                 />
-                烟花
+                {t("reminders.fireworks")}
               </label>
               <span className="reminder-actions">
                 <button className="seg" onClick={() => void test(r)}>
-                  试一试
+                  {t("reminders.test")}
                 </button>
                 <button className="seg" onClick={() => startEdit(r)}>
-                  编辑
+                  {t("reminders.edit")}
                 </button>
                 <button
                   className="seg danger"
                   onClick={() => void remove(r)}
-                  title={confirmDeleteId === r.id ? "再次点击确认删除" : "删除"}
+                  title={confirmDeleteId === r.id ? t("reminders.deleteHint") : t("reminders.delete")}
                 >
-                  {confirmDeleteId === r.id ? "确认删除？" : "删除"}
+                  {confirmDeleteId === r.id ? t("reminders.deleteConfirm") : t("reminders.delete")}
                 </button>
               </span>
             </li>
@@ -273,56 +328,58 @@ export default function Reminders() {
 
       {/* 新建 / 编辑表单 */}
       <section className="token-section">
-        <h3>{editing ? `编辑提醒 #${editing.id}` : "新建提醒"}</h3>
+        <h3>
+          {editing
+            ? t("reminders.form.editTitle", { n: editing.id })
+            : t("reminders.form.newTitle")}
+        </h3>
         <div className="reminder-form">
           {/* M4 P2 ②（M7 清偿）：编辑 todo 派生规则时锁类型/间隔/窗口
               （kind 不得被改写、interval=0 与绝对 start_time 原样保留） */}
           {form.kind === "todo" && (
-            <p className="reminder-hint">
-              📋 Todo 派生提醒（单次，由 Todo 插件管理类型/间隔/时刻——在 Todo 页改任务的
-              截止或提前提醒即可）。此处仅可调整文案、启用与烟花；改动会随任务下次保存被
-              任务标题覆盖。
-            </p>
+            <p className="reminder-hint">{t("reminders.form.todoHint")}</p>
           )}
           {form.kind !== "todo" && (
             <div className="reminder-templates">
-              {REMINDER_TEMPLATES.map((t) => (
-                <button key={t.label} className="seg" onClick={() => applyTemplate(t)}>
-                  {t.label}（{formatInterval(t.interval_minutes)}）
+              {templates.map((tpl) => (
+                <button key={tpl.label} className="seg" onClick={() => applyTemplate(tpl)}>
+                  {tpl.label}（{formatInterval(tpl.interval_minutes)}）
                 </button>
               ))}
             </div>
           )}
           <div className="reminder-form-row">
             <label>
-              类型
+              {t("reminders.form.type")}
               <select
                 value={form.kind}
                 disabled={form.kind === "todo"}
                 onChange={(e) => setKind(e.target.value as ReminderKind)}
               >
-                {form.kind === "todo" && <option value="todo">待办（派生）</option>}
+                {form.kind === "todo" && (
+                  <option value="todo">{t("reminders.kind.todoDerived")}</option>
+                )}
                 {KINDS.map((k) => (
                   <option key={k.id} value={k.id}>
-                    {k.label}
+                    {t(k.labelKey)}
                   </option>
                 ))}
               </select>
             </label>
             <label className="grow">
-              文案（气泡显示，纯文本 1-140 字符）
+              {t("reminders.form.label")}
               <input
                 type="text"
                 value={form.label}
                 maxLength={140}
-                placeholder="如：该喝水啦 💧"
+                placeholder={t("reminders.form.labelPlaceholder")}
                 onChange={(e) => setForm((f) => ({ ...f, label: e.target.value }))}
               />
             </label>
           </div>
           <div className="reminder-form-row">
             <label>
-              间隔（分钟，1-1440）
+              {t("reminders.form.interval")}
               <input
                 type="number"
                 min={1}
@@ -335,7 +392,7 @@ export default function Reminders() {
               />
             </label>
             <label>
-              起始（留空 = 全天）
+              {t("reminders.form.start")}
               <input
                 type="time"
                 disabled={form.kind === "todo"}
@@ -344,7 +401,7 @@ export default function Reminders() {
               />
             </label>
             <label>
-              结束（留空 = 全天）
+              {t("reminders.form.end")}
               <input
                 type="time"
                 disabled={form.kind === "todo"}
@@ -358,7 +415,7 @@ export default function Reminders() {
                 checked={form.enabled}
                 onChange={(e) => setForm((f) => ({ ...f, enabled: e.target.checked }))}
               />
-              启用
+              {t("reminders.enabled")}
             </label>
             <label className="reminder-check">
               <input
@@ -366,7 +423,7 @@ export default function Reminders() {
                 checked={form.use_fireworks}
                 onChange={(e) => setForm((f) => ({ ...f, use_fireworks: e.target.checked }))}
               />
-              烟花模式
+              {t("reminders.form.fireworksMode")}
             </label>
           </div>
           {form.kind !== "todo" &&
@@ -374,24 +431,24 @@ export default function Reminders() {
             form.end_time &&
             form.start_time > form.end_time && (
               <p className="reminder-hint">
-                跨午夜窗口：仅在 [{form.start_time}, 24:00) ∪ [00:00, {form.end_time}) 内触发（TC-RM-06）
+                {t("reminders.form.crossMidnight", { start: form.start_time, end: form.end_time })}
               </p>
             )}
           {formError && <p className="reminder-form-error">{formError}</p>}
           <div className="reminder-form-actions">
             <button className="seg primary" onClick={() => void save()}>
-              {editing ? "保存修改" : "新建"}
+              {editing ? t("reminders.form.save") : t("reminders.form.create")}
             </button>
             {editing && (
               <button
                 className="seg"
                 onClick={() => {
                   setEditing(null);
-                  setForm(EMPTY_FORM);
+                  setForm(emptyForm());
                   setFormError(null);
                 }}
               >
-                取消编辑
+                {t("reminders.form.cancel")}
               </button>
             )}
           </div>
@@ -400,16 +457,18 @@ export default function Reminders() {
 
       {/* 历史统计（TC-RM-13） */}
       <section className="token-section">
-        <h3>历史统计（reminder_logs）</h3>
-        {(!stats || stats.length === 0) && <p className="token-empty">暂无提醒记录。</p>}
+        <h3>{t("reminders.stats.title")}</h3>
+        {(!stats || stats.length === 0) && (
+          <p className="token-empty">{t("reminders.stats.empty")}</p>
+        )}
         <ul className="reminder-stats">
           {stats?.map((s) => (
             <li key={s.kind}>
               <span className="reminder-kind">
                 {kindEmoji(s.kind)} {kindLabel(s.kind)}
               </span>
-              <span className="reminder-meta">今日 {s.today} 次</span>
-              <span className="reminder-meta">累计 {s.total} 次</span>
+              <span className="reminder-meta">{t("reminders.stats.today", { n: s.today })}</span>
+              <span className="reminder-meta">{t("reminders.stats.total", { n: s.total })}</span>
             </li>
           ))}
         </ul>

@@ -8,6 +8,8 @@
  * - 纯函数（format / range / sumRows 族）可在 vitest(node) 下直接单测。
  */
 
+import { t } from "./i18n";
+
 export interface TokenRow {
   session_id: string | null;
   project_id: string | null;
@@ -79,7 +81,7 @@ export async function fetchTokenRows(
   groupBy: GroupBy,
 ): Promise<TokenRow[]> {
   if (!isTauriRuntime()) {
-    throw new StatsError("query", "Token 统计需要在 PulsePet App（Tauri）内查看");
+    throw new StatsError("query", t("token.needApp"));
   }
   const { invoke } = await import("@tauri-apps/api/core");
   try {

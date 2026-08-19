@@ -32,8 +32,15 @@ pub struct TrayItems {
     pub interaction: Mutex<Option<CheckMenuItem<tauri::Wry>>>,
 }
 
-pub fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
-    let toggle = MenuItem::with_id(app, "toggle", "显示/隐藏宠物", true, None::<&str>)?;
+/// 构建托盘菜单五项（文案取 `i18n::current()`；勾选态从各自权威状态读取）。
+/// `build_tray`（启动）与 `apply_language`（语言切换重建）共用——菜单项 id
+/// 恒定（"toggle"/"interaction"/"panel"/"pause_reminders"/"quit"），挂载在
+/// 托盘图标上的 `on_menu_event` 不随菜单对象替换而丢失。
+fn build_menu(
+    app: &tauri::AppHandle,
+) -> tauri::Result<(Menu<tauri::Wry>, CheckMenuItem<tauri::Wry>, CheckMenuItem<tauri::Wry>)> {
+    let lang = crate::i18n::current();
+    let toggle = MenuItem::with_id(app, "toggle", lang.tray_toggle(), true, None::<&str>)?;
     // M6：切换交互模式（穿透开/关）。初始勾选 = 持久化的穿透状态。
     let pass_through = app
         .try_state::<InteractionState>()
@@ -42,12 +49,12 @@ pub fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     let interaction_item = CheckMenuItem::with_id(
         app,
         "interaction",
-        "切换交互模式（穿透开/关）",
+        lang.tray_interaction(),
         true,
         pass_through,
         None::<&str>,
     )?;
-    let panel = MenuItem::with_id(app, "panel", "打开控制面板", true, None::<&str>)?;
+    let panel = MenuItem::with_id(app, "panel", lang.tray_panel(), true, None::<&str>)?;
     // TC-RM-08：初始勾选态从 app_state 恢复（重启保持勿扰状态）
     let paused = app
         .try_state::<Mutex<Connection>>()
@@ -59,17 +66,23 @@ pub fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
         })
         .unwrap_or(false);
     let pause_reminders =
-        CheckMenuItem::with_id(app, "pause_reminders", "暂停所有提醒", true, paused, None::<&str>)?;
-    let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
+        CheckMenuItem::with_id(app, "pause_reminders", lang.tray_pause(), true, paused, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", lang.tray_quit(), true, None::<&str>)?;
     // DESIGN §7.2 顺序：显示/隐藏宠物、切换交互模式、打开控制面板、暂停所有提醒、退出
     let menu = Menu::with_items(
         app,
         &[&toggle, &interaction_item, &panel, &pause_reminders, &quit],
     )?;
-    let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/32x32.png"))?;
+    Ok((menu, pause_reminders, interaction_item))
+}
 
-    // 句柄登记进 TrayItems（热键/设置通道切换后同步勾选态用）；
-    // poison 容忍：锁中毒时恢复数据（与库内 unwrap_or_else(|p| p.into_inner()) 惯例一致）
+/// 把 CheckMenuItem 句柄登记进 TrayItems（热键/设置/语言切换通道同步勾选态用）；
+/// poison 容忍：锁中毒时恢复数据（与库内 unwrap_or_else(|p| p.into_inner()) 惯例一致）
+fn register_items(
+    app: &tauri::AppHandle,
+    pause_reminders: &CheckMenuItem<tauri::Wry>,
+    interaction_item: &CheckMenuItem<tauri::Wry>,
+) {
     if let Some(items) = app.try_state::<TrayItems>() {
         *items
             .pause_reminders
@@ -80,6 +93,14 @@ pub fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
             .lock()
             .unwrap_or_else(|p| p.into_inner()) = Some(interaction_item.clone());
     }
+}
+
+pub fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
+    let (menu, pause_reminders, interaction_item) = build_menu(app)?;
+    let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/32x32.png"))?;
+
+    // 句柄登记进 TrayItems（热键/设置通道切换后同步勾选态用）
+    register_items(app, &pause_reminders, &interaction_item);
 
     TrayIconBuilder::with_id("pulsepet-tray")
         .icon(icon)
@@ -110,9 +131,36 @@ pub fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
         })
         .build(app)?;
 
+    let pass_through = app
+        .try_state::<InteractionState>()
+        .map(|s| s.get())
+        .unwrap_or(false);
+    let paused = app
+        .try_state::<Mutex<Connection>>()
+        .map(|db| {
+            db.lock()
+                .ok()
+                .map(|conn| reminder_scheduler::is_paused(&conn))
+                .unwrap_or(false)
+        })
+        .unwrap_or(false);
     eprintln!(
         "[pulsepet] tray built (pause_reminders checked={paused}, interaction checked={pass_through})"
     );
+    Ok(())
+}
+
+/// M8 i18n：语言切换后重建托盘菜单文案（`ui_set_language` 调用）。
+/// 既有托盘图标（id "pulsepet-tray"）只替换菜单对象：`on_menu_event` 挂在
+/// 图标上不受影响，菜单项 id 恒定故事件分发不变；CheckMenuItem 勾选态由
+/// 重建时从权威状态重读 + 句柄重新登记（热键/设置通道继续可同步）。
+pub fn apply_language(app: &tauri::AppHandle) -> tauri::Result<()> {
+    let (menu, pause_reminders, interaction_item) = build_menu(app)?;
+    register_items(app, &pause_reminders, &interaction_item);
+    if let Some(tray) = app.tray_by_id("pulsepet-tray") {
+        tray.set_menu(Some(menu))?;
+    }
+    eprintln!("[pulsepet] tray menu rebuilt for language switch");
     Ok(())
 }
 

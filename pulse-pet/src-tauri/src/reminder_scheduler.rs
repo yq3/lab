@@ -679,6 +679,12 @@ fn fire_and_notify(app: &tauri::AppHandle, fired: &[ReminderRule]) {
 /// - **绽放点 = pet 当前所处显示器（monitor）的水平中轴 + 屏高 × 0.3**
 ///   （多显示器取宠物所在屏；单显示器即当前屏）；
 /// - 坐标换算到 fireworks 窗口逻辑像素（payload 消费方 ×dpr 进 canvas）。
+///
+/// A9（M4 P2① 清偿）：多屏路径**不回读 fireworks 窗口位置**——
+/// cover_monitor 刚请求 set_position/set_size 后窗口 bounds 读数可能仍是
+/// 旧值（异步应用竞态），而"窗口 == 显示器"由 cover 语义保证，直接以
+/// 显示器 bounds 为坐标系即无竞态（`fireworks_points` 纯函数 + 单测钉住）。
+/// 窗口读数仅在取不到显示器信息（mon=None 兜底）时使用。
 fn compute_play_payload(app: &tauri::AppHandle, log_id: i64) -> PlayPayload {
     let fw = app.get_webview_window("fireworks");
     let pet = app.get_webview_window("pet");
@@ -697,7 +703,7 @@ fn compute_play_payload(app: &tauri::AppHandle, log_id: i64) -> PlayPayload {
     }
 
     let sf = fw.as_ref().and_then(|w| w.scale_factor().ok()).unwrap_or(1.0);
-    // 移动后重读 fireworks 窗口 bounds（物理像素）
+    // 窗口物理 bounds（A9 后仅兜底路径消费：mon=None 时的坐标系）
     let (fw_x, fw_y, fw_w, fw_h) = match (
         fw.as_ref().and_then(|w| w.outer_position().ok()),
         fw.as_ref().and_then(|w| w.outer_size().ok()),
@@ -706,33 +712,23 @@ fn compute_play_payload(app: &tauri::AppHandle, log_id: i64) -> PlayPayload {
         _ => (0.0, 0.0, 1280.0 * sf, 800.0 * sf),
     };
 
-    // 3) 发射点 = pet 中心（物理 → fireworks 窗口逻辑坐标；取不到退化为窗口底部中间）
-    let (ox, oy) = match (&pet, pet.as_ref().map(|w| (w.outer_position(), w.outer_size()))) {
-        (Some(_), Some((Ok(p), Ok(s)))) => (
-            (p.x as f64 + s.width as f64 / 2.0 - fw_x) / sf,
-            (p.y as f64 + s.height as f64 / 2.0 - fw_y) / sf,
-        ),
-        _ => (fw_w / 2.0 / sf, fw_h * 0.85 / sf),
-    };
-    let origin_x = ox.clamp(20.0, (fw_w / sf - 20.0).max(20.0));
-    let origin_y = oy.clamp(20.0, (fw_h / sf - 20.0).max(20.0));
+    // 3) 发射点素材：pet 中心（物理像素；取不到退化为 None，由纯函数给兜底点）
+    let pet_rect = pet.as_ref().map(|w| match (w.outer_position(), w.outer_size()) {
+        (Ok(p), Ok(s)) => Some((p.x as f64, p.y as f64, s.width as f64, s.height as f64)),
+        _ => None,
+    });
+    let mon_rect = mon.as_ref().map(|m| {
+        let p = m.position();
+        let s = m.size();
+        (p.x as f64, p.y as f64, s.width as f64, s.height as f64)
+    });
 
-    // 4) 绽放点 = 该显示器中轴线 + 屏高 0.3 处（物理 → fireworks 窗口逻辑坐标；
-    //    cover 后窗口 bounds == 显示器 bounds；clamp 仅作安全兜底）
-    let (tx, ty) = match mon.as_ref() {
-        Some(m) => monitor_burst_point_in_window(
-            m.position().x,
-            m.position().y,
-            m.size().width,
-            m.size().height,
-            fw_x as i32,
-            fw_y as i32,
-            sf,
-        ),
-        None => (fw_w / 2.0 / sf, fw_h * BURST_Y_RATIO / sf), // 兜底：窗口同比例点
-    };
-    let target_x = tx.clamp(20.0, (fw_w / sf - 20.0).max(20.0));
-    let target_y = ty.clamp(20.0, (fw_h / sf - 20.0).max(20.0));
+    let (origin_x, origin_y, target_x, target_y) = fireworks_points(
+        pet_rect.flatten(),
+        mon_rect,
+        (fw_x, fw_y, fw_w, fw_h),
+        sf,
+    );
     eprintln!(
         "[pulsepet] fireworks target = monitor axis x center + y*{BURST_Y_RATIO} ({target_x:.0}, {target_y:.0}) logical, origin ({origin_x:.0}, {origin_y:.0})"
     );
@@ -748,9 +744,58 @@ fn compute_play_payload(app: &tauri::AppHandle, log_id: i64) -> PlayPayload {
 /// 绽放点纵向比例（用户定案 2026-08-16：屏幕从上往下 0.3 倍处，中间偏上）。
 pub const BURST_Y_RATIO: f64 = 0.3;
 
+/// 发射/绽放边距（逻辑像素；clamp 安全兜底，防 pet 贴屏缘时点出画布）。
+const POINT_MARGIN: f64 = 20.0;
+
+/// 烟花发射点/绽放点纯函数（A9：单测主战场）。
+///
+/// - `pet`：pet 窗口物理 `(x, y, w, h)`（None → 发射点退化为该坐标系底部中央）；
+/// - `mon`：目标显示器物理 `(x, y, w, h)`——**主路径**（窗口已 cover 该屏，
+///   以显示器为窗口坐标系，直接由 bounds 计算，不依赖窗口位置回读）；
+/// - `win`：fireworks 窗口物理 `(x, y, w, h)`——仅 `mon=None` 兜底路径的坐标系；
+/// - `sf`：显示器缩放系数（物理 → 逻辑）。
+/// 返回 `(origin_x, origin_y, target_x, target_y)`（逻辑像素，已 clamp 在
+/// 坐标系内留 POINT_MARGIN 边距）。
+pub fn fireworks_points(
+    pet: Option<(f64, f64, f64, f64)>,
+    mon: Option<(f64, f64, f64, f64)>,
+    win: (f64, f64, f64, f64),
+    sf: f64,
+) -> (f64, f64, f64, f64) {
+    // 坐标系 = 窗口物理 origin + 尺寸（主路径：显示器；兜底：窗口自身读数）
+    let (base_x, base_y, base_w, base_h) = mon.unwrap_or(win);
+    let clamp = |v: f64, hi: f64| v.clamp(POINT_MARGIN, (hi - POINT_MARGIN).max(POINT_MARGIN));
+    // 发射点：pet 中心（物理 → 坐标系逻辑）；无 pet → 坐标系底部中央
+    let (ox, oy) = match pet {
+        Some((px, py, pw, ph)) => ((px + pw / 2.0 - base_x) / sf, (py + ph / 2.0 - base_y) / sf),
+        None => (base_w / 2.0 / sf, base_h * 0.85 / sf),
+    };
+    // 绽放点：坐标系水平中轴 + 高度 × 0.3（A9：由 bounds 直接算，不经窗口回读；
+    // 窗口 origin == 坐标系 origin——主路径 = cover 后窗口与显示器重合，
+    // 兜底路径 = 窗口自身当作"屏"）
+    let (tx, ty) = monitor_burst_point_in_window(
+        base_x as i32,
+        base_y as i32,
+        base_w as u32,
+        base_h as u32,
+        base_x as i32,
+        base_y as i32,
+        sf,
+    );
+    (
+        clamp(ox, base_w / sf),
+        clamp(oy, base_h / sf),
+        clamp(tx, base_w / sf),
+        clamp(ty, base_h / sf),
+    )
+}
+
 /// 绽放点 = 显示器水平中轴（x 居中）+ 屏高 × 0.3 → fireworks 窗口逻辑坐标
 /// （纯函数，可单测）。`(mon_x, mon_y, mon_w, mon_h)` 为显示器物理 bounds，
 /// `(win_x, win_y)` 为窗口物理左上角。
+///
+/// A9 后主路径由 `fireworks_points` 以"窗口 origin = 显示器 origin"直接计算，
+/// 本函数保留给"窗口尚未对齐显示器"的理论形态（mon=None 时窗口自身当屏）。
 pub fn monitor_burst_point_in_window(
     mon_x: i32,
     mon_y: i32,
@@ -1027,19 +1072,32 @@ fn dispatch_play(app: &tauri::AppHandle, state: &Arc<Mutex<RemindersState>>, log
         }
     }
     windows::show_fireworks(app);
-    // watchdog：6.5s 内前端未回报 finished 则强制 hide（防常驻窗口）。
-    // 前端正常 finished 已 hide 过时窗口不可见 → 跳过，避免冗余 hide（E2E 实测修正）。
-    // M4 P2 ④：超时同样对未结案 log 补 dismissed_via='fireworks'（前端崩溃时不再残留 NULL）。
-    let state_for_wd = state.clone();
-    let app_for_wd = app.clone();
+    spawn_fireworks_watchdog(app.clone(), state.clone(), log_id, gen);
+}
+
+/// 6.5s watchdog（A5 抽出为可复用段）：前端未回报 finished 则强制 hide
+/// （防常驻窗口）。前端正常 finished 已 hide 过时窗口不可见 → 跳过，避免
+/// 冗余 hide（E2E 实测修正）。M4 P2 ④：超时同样对未结案 log 补
+/// dismissed_via='fireworks'（前端崩溃时不再残留 NULL）。
+///
+/// A5（M4 P2⑦ 清偿）：pending 补发路径（ready 握手晚于 play 请求）会 bump
+/// `fw_gen` 后重起本 watchdog——否则 6.5s 计时仍从 play 时刻起算，ready 晚于
+/// ~2.7s 到达时补发场次的中段会被旧 watchdog 截断 hide（概率极低但行为可
+/// 预期化：每次实际下发 play 都有自己的完整 6.5s 窗口）。
+fn spawn_fireworks_watchdog<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: Arc<Mutex<RemindersState>>,
+    log_id: i64,
+    gen: u64,
+) {
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_millis(6500)).await;
-        let cur = state_for_wd
+        let cur = state
             .lock()
             .map(|st| st.fw_gen)
             .unwrap_or(u64::MAX);
         if cur == gen {
-            let still_active = state_for_wd
+            let still_active = state
                 .lock()
                 .map(|mut st| {
                     if st.fw_active_log == Some(log_id) {
@@ -1051,19 +1109,19 @@ fn dispatch_play(app: &tauri::AppHandle, state: &Arc<Mutex<RemindersState>>, log
                 })
                 .unwrap_or(false);
             if still_active && log_id >= 0 {
-                if let Some(db) = app_for_wd.try_state::<Mutex<Connection>>() {
+                if let Some(db) = app.try_state::<Mutex<Connection>>() {
                     if let Ok(conn) = db.lock() {
                         let _ = dismiss_log(&conn, log_id, "fireworks");
                         eprintln!("[pulsepet] fireworks watchdog: backfill log {log_id} via 'fireworks'");
                     }
                 }
             }
-            let visible = app_for_wd
+            let visible = app
                 .get_webview_window("fireworks")
                 .and_then(|w| w.is_visible().ok())
                 .unwrap_or(false);
             if visible {
-                windows::hide_fireworks(&app_for_wd);
+                windows::hide_fireworks(&app);
                 eprintln!("[pulsepet] fireworks watchdog hide (gen {gen})");
             }
         }
@@ -1071,9 +1129,12 @@ fn dispatch_play(app: &tauri::AppHandle, state: &Arc<Mutex<RemindersState>>, log
 }
 
 /// fireworks 窗口挂载完成（ready 握手）：补发 pending 的 play。
+/// A5：补发即"一次实际下发"——bump gen 作废旧 watchdog（其计时从 play 请求
+/// 时刻起算，对晚到的补发场次窗口不足），并重起新 watchdog。
+/// 泛型 Runtime：可在 tauri::test mock runtime 下直调（A5 单测）。
 #[tauri::command]
-pub fn fireworks_ready(
-    app: tauri::AppHandle,
+pub fn fireworks_ready<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     state: tauri::State<'_, Arc<Mutex<RemindersState>>>,
 ) -> Result<(), String> {
     let pending = {
@@ -1082,9 +1143,18 @@ pub fn fireworks_ready(
         st.fw_pending.take()
     };
     if let Some(p) = pending {
+        let gen = {
+            let mut st = state.lock().map_err(|e| format!("state lock: {e}"))?;
+            st.fw_gen += 1;
+            st.fw_gen
+        };
         let _ = app.emit_to("fireworks", "fireworks://play", p.clone());
         windows::show_fireworks(&app);
-        eprintln!("[pulsepet] fireworks ready → replay pending (log {})", p.log_id);
+        spawn_fireworks_watchdog(app.clone(), state.inner().clone(), p.log_id, gen);
+        eprintln!(
+            "[pulsepet] fireworks ready → replay pending (log {}, watchdog reset to gen {gen})",
+            p.log_id
+        );
     }
     Ok(())
 }
@@ -1583,6 +1653,115 @@ mod tests {
         let (tx, ty) = monitor_burst_point_in_window(2940, 0, 2940, 1912, 0, 0, 1.0);
         assert!((tx - 4410.0).abs() < 1e-9);
         assert!((ty - 573.6).abs() < 1e-9);
+    }
+
+    // ---- A9（M4 P2① 清偿）：烟花点位直接由 monitor bounds 计算，不回读窗口 ----
+
+    #[test]
+    fn fireworks_points_single_display_dpr2() {
+        // 主屏 2940×1912 物理（dpr=2），pet 中心 (1470, 956)：
+        // 发射点 = pet 中心逻辑 (735, 478)；绽放点 = (735, 286.8)。
+        // 关键语义：坐标只来自 monitor bounds + pet 位置——不依赖窗口回读，
+        // cover 后窗口 bounds 读数是否更新（竞态）不再影响结果。
+        let (ox, oy, tx, ty) =
+            fireworks_points(Some((1360.0, 846.0, 220.0, 220.0)), Some((0.0, 0.0, 2940.0, 1912.0)), (0.0, 0.0, 2940.0, 1912.0), 2.0);
+        assert!((ox - 735.0).abs() < 1e-9);
+        assert!((oy - 478.0).abs() < 1e-9);
+        assert!((tx - 735.0).abs() < 1e-9);
+        assert!((ty - 286.8).abs() < 1e-9);
+    }
+
+    #[test]
+    fn fireworks_points_secondary_display_offset_invariant() {
+        // 次屏从 x=2940 起，pet 在次屏 (2940+1360, 846)：
+        // 绽放点仍在**窗口（=次屏）坐标系**中轴 (735, 286.8)——与屏的原点偏移
+        // 无关（A9 钉住的"无竞态"语义：以显示器为坐标系，无需知道窗口位置）。
+        let (ox, oy, tx, ty) = fireworks_points(
+            Some((2940.0 + 1360.0, 846.0, 220.0, 220.0)),
+            Some((2940.0, 0.0, 2940.0, 1912.0)),
+            (0.0, 0.0, 2940.0, 1912.0), // 窗口读数故意给"未更新的旧值"（主屏）——结果不受影响
+            2.0,
+        );
+        assert!((ox - 735.0).abs() < 1e-9, "origin 用 mon 坐标系：{ox}");
+        assert!((oy - 478.0).abs() < 1e-9);
+        assert!((tx - 735.0).abs() < 1e-9, "target 用 mon 坐标系：{tx}");
+        assert!((ty - 286.8).abs() < 1e-9);
+    }
+
+    #[test]
+    fn fireworks_points_pet_missing_falls_to_bottom_center() {
+        // pet 读不到（窗口异常关闭等）→ 发射点退化为坐标系底部中央
+        let (ox, oy, tx, ty) =
+            fireworks_points(None, Some((0.0, 0.0, 2940.0, 1912.0)), (0.0, 0.0, 2940.0, 1912.0), 2.0);
+        assert!((ox - 735.0).abs() < 1e-9);
+        assert!((oy - 1912.0 * 0.85 / 2.0).abs() < 1e-9);
+        assert!((tx - 735.0).abs() < 1e-9);
+        assert!((ty - 286.8).abs() < 1e-9);
+    }
+
+    #[test]
+    fn fireworks_points_monitor_missing_falls_to_window_bounds() {
+        // mon 取不到（current_monitor 全失败）→ 用窗口读数当坐标系（兜底语义
+        // 与 M4 行为一致：窗口同比例点 + pet 相对窗口）
+        let (ox, oy, tx, ty) =
+            fireworks_points(Some((1360.0, 846.0, 220.0, 220.0)), None, (0.0, 0.0, 2940.0, 1912.0), 2.0);
+        assert!((ox - 735.0).abs() < 1e-9);
+        assert!((oy - 478.0).abs() < 1e-9);
+        assert!((tx - 735.0).abs() < 1e-9);
+        assert!((ty - 286.8).abs() < 1e-9);
+    }
+
+    #[test]
+    fn fireworks_points_clamps_tiny_display() {
+        // 极小坐标系：clamp 退化到 ≥20 逻辑像素，不产生负坐标/越界
+        let (ox, oy, tx, ty) =
+            fireworks_points(Some((0.0, 0.0, 4.0, 4.0)), Some((0.0, 0.0, 24.0, 24.0)), (0.0, 0.0, 24.0, 24.0), 1.0);
+        for v in [ox, oy, tx, ty] {
+            assert!(v >= 20.0 - 1e-9, "clamp 下界：{v}");
+        }
+    }
+
+    // ---- A5（M4 P2⑦ 清偿）：pending 补发重置 watchdog ----
+
+    #[test]
+    fn fireworks_ready_replay_bumps_gen_and_clears_pending() {
+        // ready 握手晚于 play 请求：pending 补发时 bump fw_gen → 旧 watchdog
+        // （从 play 时刻起算的 6.5s）因 gen 不匹配自动作废，补发场次获得由
+        // spawn_fireworks_watchdog 重起的完整窗口。此处钉住状态机语义。
+        let app = tauri::test::mock_app();
+        let handle = app.handle();
+        let st = std::sync::Arc::new(std::sync::Mutex::new(RemindersState {
+            fw_ready: false,
+            fw_pending: Some(PlayPayload {
+                log_id: 7,
+                origin_x: 10.0,
+                origin_y: 10.0,
+                target_x: 100.0,
+                target_y: 100.0,
+            }),
+            fw_gen: 3, // dispatch_play 已 bump 过的旧 gen
+            ..Default::default()
+        }));
+        handle.manage(st.clone());
+        fireworks_ready(handle.clone(), handle.state::<Arc<Mutex<RemindersState>>>()).unwrap();
+        let s = st.lock().unwrap();
+        assert!(s.fw_ready, "ready 置位");
+        assert!(s.fw_pending.is_none(), "pending 已消费");
+        assert_eq!(s.fw_gen, 4, "补发必须 bump gen（作废旧 watchdog）");
+    }
+
+    #[test]
+    fn fireworks_ready_without_pending_keeps_gen() {
+        // 无 pending 的普通 ready（正常启动路径）：不 bump gen、不重起 watchdog
+        let app = tauri::test::mock_app();
+        let handle = app.handle();
+        let st = std::sync::Arc::new(std::sync::Mutex::new(RemindersState::default()));
+        handle.manage(st.clone());
+        fireworks_ready(handle.clone(), handle.state::<Arc<Mutex<RemindersState>>>()).unwrap();
+        let s = st.lock().unwrap();
+        assert!(s.fw_ready);
+        assert!(s.fw_pending.is_none());
+        assert_eq!(s.fw_gen, 0, "无补发不动 gen");
     }
 
     // ---- M7：todo 派生一次性提醒（TC-TD-03/06/08；M4 P2 ③ validate 收紧） ----

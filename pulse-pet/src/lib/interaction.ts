@@ -12,6 +12,7 @@
 
 import { isTauriRuntime } from "./token-stats";
 import { usePetStore } from "../pet/petStore";
+import { t, type Lang } from "./i18n";
 
 /** Rust 广播穿透状态变化的 Tauri event 名。 */
 export const PASS_THROUGH_EVENT = "pulsepet://pass-through";
@@ -28,11 +29,9 @@ export function parsePassThroughEnabled(payload: unknown): boolean | null {
   return null;
 }
 
-/** 穿透状态人读描述（设置页提示/测试断言用）。 */
-export function describePassThrough(passThrough: boolean): string {
-  return passThrough
-    ? "穿透开：纯展示（鼠标穿透，不可拖拽/右键）"
-    : "穿透关：可交互（可拖拽/右键）";
+/** 穿透状态人读描述（设置页提示/测试断言用；M8 i18n 随当前语言）。 */
+export function describePassThrough(passThrough: boolean, lang?: Lang): string {
+  return t(passThrough ? "pass.on" : "pass.off", undefined, lang);
 }
 
 /** Panel tab 白名单（PetMenu「设置…」→ panel 设置页；M7 起 todo 存在）。 */

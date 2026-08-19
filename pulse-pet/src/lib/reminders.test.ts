@@ -218,3 +218,19 @@ describe("M7：todo 派生规则的表单保真（M4 P2 ② 清偿，TC-TD 章�
     });
   });
 });
+
+describe("M8 i18n：展示辅助随语言", () => {
+  it("kindLabel / formatInterval / formatWindow en 变体", () => {
+    expect(kindLabel("hydration", "en")).toBe("Hydration");
+    expect(kindLabel("todo", "en")).toBe("Todo");
+    expect(kindLabel("unknown-kind", "en")).toBe("unknown-kind");
+    expect(formatInterval(0, "en")).toBe("Once");
+    expect(formatInterval(60, "en")).toBe("Every 1 h");
+    expect(formatInterval(90, "en")).toBe("Every 90 min");
+    expect(formatWindow(null, null, "en")).toBe("All day");
+    expect(formatWindow("09:00", "18:00", "en")).toBe("09:00-18:00");
+    expect(formatWindow("22:00", "06:00", "en")).toBe("22:00-06:00 (cross-midnight)");
+    expect(formatWindow("09:00", null, "en")).toBe("From 09:00");
+    expect(formatWindow(null, "18:00", "en")).toBe("Until 18:00");
+  });
+});

@@ -18,6 +18,7 @@ import {
   type TodoInput,
   type TodoItem,
 } from "../../lib/todos";
+import { t, useLangStore } from "../../lib/i18n";
 
 /**
  * Todo 插件页（内置 built-in-todo，DESIGN §8，TC-TD-01/02/04/05）：
@@ -28,6 +29,7 @@ import {
  * - 头部展示插件 manifest 信息（TC-TD-01：manifest 与 plugins 表核对入口）；
  * - 派生提醒说明：due 带时间且提前提醒>0 → reminders 表 kind='todo' 单次行
  *   （TC-TD-03/08；remind_before=0 → 完全无提醒）。
+ * - M8 i18n：全部文案经 t() 随当前语言。
  */
 
 interface FormState {
@@ -79,6 +81,7 @@ function formToInput(f: FormState, sortOrder: number): TodoInput {
 }
 
 export default function Todo() {
+  useLangStore((s) => s.lang); // M8 i18n：语言变化时本页文案重渲染
   const [items, setItems] = useState<TodoItem[] | null>(null);
   const [plugins, setPlugins] = useState<PluginInfo[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -91,7 +94,7 @@ export default function Todo() {
 
   const load = useCallback(async () => {
     if (!isTauriRuntime()) {
-      setError("Todo 需要在 PulsePet App（Tauri）内使用");
+      setError(t("todo.needApp"));
       return;
     }
     try {
@@ -100,7 +103,7 @@ export default function Todo() {
       setPlugins(pls);
       setError(null);
     } catch (e) {
-      setError(`读取 Todo 失败：${e instanceof Error ? e.message : String(e)}`);
+      setError(t("todo.loadFail", { msg: e instanceof Error ? e.message : String(e) }));
     }
   }, []);
 
@@ -133,40 +136,40 @@ export default function Todo() {
     }
   };
 
-  const remove = async (t: TodoItem) => {
-    if (confirmDeleteId !== t.id) {
-      setConfirmDeleteId(t.id);
+  const remove = async (item: TodoItem) => {
+    if (confirmDeleteId !== item.id) {
+      setConfirmDeleteId(item.id);
       setTimeout(() => {
-        setConfirmDeleteId((cur) => (cur === t.id ? null : cur));
+        setConfirmDeleteId((cur) => (cur === item.id ? null : cur));
       }, 3000);
       return;
     }
     setConfirmDeleteId(null);
     try {
-      await deleteTodo(t.id);
-      if (editing?.id === t.id) {
+      await deleteTodo(item.id);
+      if (editing?.id === item.id) {
         setEditing(null);
         setForm(EMPTY_FORM);
       }
       refresh();
     } catch (e) {
-      showToast(`删除失败：${e instanceof Error ? e.message : String(e)}`);
+      showToast(t("todo.toast.deleteFail", { msg: e instanceof Error ? e.message : String(e) }));
     }
   };
 
   /** 完成/取消完成：完成时派生提醒级联删 + 宠物 waving（Rust 事件广播）。 */
-  const toggleComplete = async (t: TodoItem) => {
+  const toggleComplete = async (item: TodoItem) => {
     try {
-      await completeTodo(t.id, t.completed_at === null);
+      await completeTodo(item.id, item.completed_at === null);
       refresh();
     } catch (e) {
-      showToast(`更新失败：${e instanceof Error ? e.message : String(e)}`);
+      showToast(t("todo.toast.updateFail", { msg: e instanceof Error ? e.message : String(e) }));
     }
   };
 
-  const move = async (t: TodoItem, dir: -1 | 1) => {
+  const move = async (item: TodoItem, dir: -1 | 1) => {
     if (!items) return;
-    const i = items.findIndex((x) => x.id === t.id);
+    const i = items.findIndex((x) => x.id === item.id);
     const j = i + dir;
     if (i < 0 || j < 0 || j >= items.length) return;
     const next = [...items];
@@ -174,13 +177,13 @@ export default function Todo() {
     try {
       setItems(await reorderTodos(next.map((x) => x.id)));
     } catch (e) {
-      showToast(`重排失败：${e instanceof Error ? e.message : String(e)}`);
+      showToast(t("todo.toast.reorderFail", { msg: e instanceof Error ? e.message : String(e) }));
     }
   };
 
-  const startEdit = (t: TodoItem) => {
-    setEditing(t);
-    setForm(itemToForm(t));
+  const startEdit = (item: TodoItem) => {
+    setEditing(item);
+    setForm(itemToForm(item));
     setFormError(null);
   };
 
@@ -205,7 +208,7 @@ export default function Todo() {
     return <div className="token-error">{error}</div>;
   }
   if (!items) {
-    return <p className="token-empty">读取 Todo…</p>;
+    return <p className="token-empty">{t("todo.loading")}</p>;
   }
 
   const openCount = items.filter((t) => t.completed_at === null).length;
@@ -216,89 +219,99 @@ export default function Todo() {
       <div className="todo-plugin-meta">
         {todoPlugin ? (
           <span>
-            插件 <strong>{todoPlugin.name}</strong>（{todoPlugin.id} v{todoPlugin.version}
+            {t("todo.plugin.prefix")} <strong>{todoPlugin.name}</strong>（{todoPlugin.id} v{todoPlugin.version}
             ，manifest v{todoPlugin.manifest_version}）
-            {todoPlugin.enabled ? " · 已启用" : " · 已停用"} · 权限：{" "}
+            {todoPlugin.enabled
+              ? ` · ${t("todo.plugin.enabled")}`
+              : ` · ${t("todo.plugin.disabled")}`}
+            {" "}&middot; {t("todo.plugin.permissions")}:{" "}
             {todoPlugin.permissions.join(", ")}
           </span>
         ) : (
-          <span>内置 Todo 插件（manifest 读取中…）</span>
+          <span>{t("todo.plugin.loading")}</span>
         )}
       </div>
 
       <section className="token-section">
-        <h3>
-          任务（未完成 {openCount} · 今日已完成 {doneToday}）
-        </h3>
+        <h3>{t("todo.tasks.title", { open: openCount, done: doneToday })}</h3>
         {items.length === 0 && (
-          <p className="token-empty">还没有任务，从下方表单新建一个吧。</p>
+          <p className="token-empty">{t("todo.tasks.empty")}</p>
         )}
         <ul className="todo-list">
-          {items.map((t, idx) => (
+          {items.map((item, idx) => (
             <li
-              key={t.id}
-              className={t.completed_at ? "todo-item done" : "todo-item"}
+              key={item.id}
+              className={item.completed_at ? "todo-item done" : "todo-item"}
             >
-              <label className="todo-check" title={t.completed_at ? "取消完成" : "完成"}>
+              <label
+                className="todo-check"
+                title={item.completed_at ? t("todo.uncomplete") : t("todo.complete")}
+              >
                 <input
                   type="checkbox"
-                  checked={t.completed_at !== null}
-                  onChange={() => void toggleComplete(t)}
+                  checked={item.completed_at !== null}
+                  onChange={() => void toggleComplete(item)}
                 />
               </label>
               <span className="todo-main">
-                <span className="todo-title" title={t.title}>
-                  {t.title}
+                <span className="todo-title" title={item.title}>
+                  {item.title}
                 </span>
-                {t.notes && <span className="todo-notes">{t.notes}</span>}
+                {item.notes && <span className="todo-notes">{item.notes}</span>}
                 <span className="todo-meta">
-                  <span className={`todo-priority p${t.priority}`}>
-                    {priorityLabel(t.priority)}
+                  <span className={`todo-priority p${item.priority}`}>
+                    {priorityLabel(item.priority)}
                   </span>
-                  <span title={dueHasTime(t.due_date) ? "截止（带时间，可派生提醒）" : "截止"}>
-                    🕒 {formatDue(t.due_date)}
+                  <span
+                    title={
+                      dueHasTime(item.due_date)
+                        ? t("todo.form.dueTimeTitle")
+                        : t("todo.form.dueTitle")
+                    }
+                  >
+                    🕒 {formatDue(item.due_date)}
                   </span>
-                  {t.completed_at === null && t.remind_before_minutes > 0 && dueHasTime(t.due_date) && (
-                    <span title="到点前 N 分钟宠物气泡提醒（reminders kind='todo' 单次）">
-                      🔔 提前 {t.remind_before_minutes} 分钟
+                  {item.completed_at === null && item.remind_before_minutes > 0 && dueHasTime(item.due_date) && (
+                    <span title={t("todo.form.remindBeforeTitle")}>
+                      🔔 {t("todo.form.remindBeforeNote", { n: item.remind_before_minutes })}
                     </span>
                   )}
-                  {t.tags.length > 0 && (
+                  {item.tags.length > 0 && (
                     <span className="todo-tags">
-                      {t.tags.map((g) => (
+                      {item.tags.map((g) => (
                         <code key={g}>{g}</code>
                       ))}
                     </span>
                   )}
-                  {t.completed_at && <span>✅ {formatTodoTime(t.completed_at)}</span>}
+                  {item.completed_at && <span>✅ {formatTodoTime(item.completed_at)}</span>}
                 </span>
               </span>
               <span className="todo-actions">
                 <button
                   className="seg"
                   disabled={idx === 0}
-                  onClick={() => void move(t, -1)}
-                  title="上移（sort_order 重排立即生效）"
+                  onClick={() => void move(item, -1)}
+                  title={t("todo.moveUp")}
                 >
                   ↑
                 </button>
                 <button
                   className="seg"
                   disabled={idx === items.length - 1}
-                  onClick={() => void move(t, 1)}
-                  title="下移"
+                  onClick={() => void move(item, 1)}
+                  title={t("todo.moveDown")}
                 >
                   ↓
                 </button>
-                <button className="seg" onClick={() => startEdit(t)}>
-                  编辑
+                <button className="seg" onClick={() => startEdit(item)}>
+                  {t("todo.edit")}
                 </button>
                 <button
                   className="seg danger"
-                  onClick={() => void remove(t)}
-                  title={confirmDeleteId === t.id ? "再次点击确认删除" : "删除"}
+                  onClick={() => void remove(item)}
+                  title={confirmDeleteId === item.id ? t("todo.deleteHint") : t("todo.delete")}
                 >
-                  {confirmDeleteId === t.id ? "确认删除？" : "删除"}
+                  {confirmDeleteId === item.id ? t("todo.deleteConfirm") : t("todo.delete")}
                 </button>
               </span>
             </li>
@@ -308,35 +321,37 @@ export default function Todo() {
 
       {/* 新建 / 编辑表单 */}
       <section className="token-section">
-        <h3>{editing ? `编辑任务 #${editing.id}` : "新建任务"}</h3>
+        <h3>
+          {editing ? t("todo.form.editTitle", { n: editing.id }) : t("todo.form.newTitle")}
+        </h3>
         <div className="todo-form">
           <div className="reminder-form-row">
             <label className="grow">
-              标题（必填，1-140 字符）
+              {t("todo.form.title")}
               <input
                 type="text"
                 value={form.title}
                 maxLength={140}
-                placeholder="如：交周报"
+                placeholder={t("todo.form.titlePlaceholder")}
                 onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
               />
             </label>
             <label>
-              优先级
+              {t("todo.form.priority")}
               <select
                 value={form.priority}
                 onChange={(e) => setForm((f) => ({ ...f, priority: Number(e.target.value) }))}
               >
-                <option value={0}>无</option>
-                <option value={1}>低</option>
-                <option value={2}>中</option>
-                <option value={3}>高</option>
+                <option value={0}>{t("todo.priority.0")}</option>
+                <option value={1}>{t("todo.priority.1")}</option>
+                <option value={2}>{t("todo.priority.2")}</option>
+                <option value={3}>{t("todo.priority.3")}</option>
               </select>
             </label>
           </div>
           <div className="reminder-form-row">
             <label>
-              截止日期
+              {t("todo.form.dueDate")}
               <input
                 type="date"
                 value={form.dueDate}
@@ -344,7 +359,7 @@ export default function Todo() {
               />
             </label>
             <label>
-              截止时间（可选；带时间才派生提醒）
+              {t("todo.form.dueTime")}
               <input
                 type="time"
                 value={form.dueTime}
@@ -352,7 +367,7 @@ export default function Todo() {
               />
             </label>
             <label>
-              提前提醒（分钟，0 = 完全无提醒）
+              {t("todo.form.remindBefore")}
               <input
                 type="number"
                 min={0}
@@ -364,34 +379,32 @@ export default function Todo() {
               />
             </label>
             <label className="grow">
-              标签（逗号分隔）
+              {t("todo.form.tags")}
               <input
                 type="text"
                 value={form.tags}
-                placeholder="如：work, 紧急"
+                placeholder={t("todo.form.tagsPlaceholder")}
                 onChange={(e) => setForm((f) => ({ ...f, tags: e.target.value }))}
               />
             </label>
           </div>
           <div className="reminder-form-row">
             <label className="grow">
-              备注
+              {t("todo.form.notes")}
               <input
                 type="text"
                 value={form.notes}
-                placeholder="可选"
+                maxLength={2000}
+                placeholder={t("todo.form.notesPlaceholder")}
                 onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
               />
             </label>
           </div>
-          <p className="reminder-hint">
-            带时间的截止 + 提前提醒 &gt; 0 → 到点前宠物气泡「还有 X 分钟要完成「任务名」」
-            （reminders 派生单次行，TC-TD-03）；提前提醒 = 0 → 完全无提醒（TC-TD-08）。
-          </p>
+          <p className="reminder-hint">{t("todo.form.hint")}</p>
           {formError && <p className="reminder-form-error">{formError}</p>}
           <div className="reminder-form-actions">
             <button className="seg primary" onClick={() => void save()}>
-              {editing ? "保存修改" : "新建"}
+              {editing ? t("todo.form.save") : t("todo.form.create")}
             </button>
             {editing && (
               <button
@@ -402,7 +415,7 @@ export default function Todo() {
                   setFormError(null);
                 }}
               >
-                取消编辑
+                {t("todo.form.cancel")}
               </button>
             )}
           </div>

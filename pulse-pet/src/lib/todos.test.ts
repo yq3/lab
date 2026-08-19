@@ -131,3 +131,53 @@ describe("展示辅助", () => {
     expect(formatDue(null)).toBe("无");
   });
 });
+
+describe("A3（M7 P2④ 清偿）：TS/Rust 校验口径差契约", () => {
+  it("notes 长度 TS 不查（宽松）——≤2000 上限由 Rust validate_todo_input 拒绝", () => {
+    // 契约固定：TS 放过 2001 字符（todos.rs 对称测试断言 Rust 拒绝）
+    const input = {
+      title: "任务",
+      notes: "x".repeat(2001),
+      priority: 0,
+      due_date: null,
+      remind_before_minutes: 5,
+      sort_order: 0,
+      tags: [],
+    };
+    expect(validateTodoInput(input)).toBeNull();
+  });
+
+  it("非法日期 2026-02-31 形状合法 TS 放过——由 Rust chrono 拒绝", () => {
+    // 契约固定：形状正则匹配（31 ∈ 3[01]），"日期不存在"由 Rust NaiveDate 校验拒绝
+    const input = {
+      title: "任务",
+      notes: null,
+      priority: 0,
+      due_date: "2026-02-31",
+      remind_before_minutes: 5,
+      sort_order: 0,
+      tags: [],
+    };
+    expect(validateTodoInput(input)).toBeNull();
+  });
+});
+
+describe("M8 i18n：文案纯函数随语言", () => {
+  it("todoReminderText / celebrationText / priorityLabel en 变体", () => {
+    const now = 1_000_000;
+    expect(todoReminderText("交报告", now + 5 * 60_000, now, "zh")).toBe(
+      "还有 5 分钟要完成「交报告」",
+    );
+    expect(todoReminderText("report", now + 5 * 60_000, now, "en")).toBe(
+      "5 min left to finish “report”",
+    );
+    expect(
+      celebrationText({ title: "A", completed_today: 3, all_today_done: true }, "en"),
+    ).toBe("3 tasks done today");
+    expect(
+      celebrationText({ title: "A", completed_today: 1, all_today_done: false }, "en"),
+    ).toBe("Well done 🎉");
+    expect(priorityLabel(3, "en")).toBe("High");
+    expect(formatDue(null, "en")).toBe("None");
+  });
+});

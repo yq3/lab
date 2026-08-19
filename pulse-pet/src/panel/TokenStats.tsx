@@ -13,6 +13,7 @@ import {
   type TokenRow,
 } from "../lib/token-stats";
 import { computeBars, pieSlices } from "../lib/token-chart";
+import { t, useLangStore } from "../lib/i18n";
 
 /** 时间跨度预设（TC-TK-08：7d / 30d / 自定义；边界含当天）。 */
 type Preset = "7d" | "30d" | "custom";
@@ -31,22 +32,23 @@ const PROJECT_COLORS = [
   "#84cc16",
 ];
 
-/** 错误码 → 用户提示（TC-TK-03/04/13）。 */
+/** 错误码 → 用户提示（TC-TK-03/04/13；M8 i18n 随当前语言）。 */
 function errorHint(err: StatsError): string {
   switch (err.code) {
     case "no-database":
-      return "数据库未运行/未初始化：未检测到 opencode 数据库（opencode.db / opencode-canary.db）。";
+      return t("token.error.noDatabase");
     case "legacy-storage":
-      return "检测到旧版 opencode 存储格式（storage/session/*.json）：请升级 opencode 后使用。";
+      return t("token.error.legacyStorage");
     case "schema-mismatch":
       // 错误 message 自 Rust 带出（已含"请升级 pulse-pet"提示），前端不重复拼接（M3 P3-⑤）
-      return `opencode.db schema 不兼容（${err.message}）`;
+      return t("token.error.schemaMismatch", { msg: err.message });
     default:
-      return `查询失败：${err.message}`;
+      return t("token.error.query", { msg: err.message });
   }
 }
 
 export default function TokenStats() {
+  useLangStore((s) => s.lang); // M8 i18n：语言变化时本页文案重渲染
   const [preset, setPreset] = useState<Preset>("7d");
   const [fromStr, setFromStr] = useState(() => localDateStr());
   const [toStr, setToStr] = useState(() => localDateStr());
@@ -111,7 +113,7 @@ export default function TokenStats() {
     if (!rows) return [] as { label: string; cost: number; tokens: number }[];
     const map = new Map<string, { cost: number; tokens: number }>();
     for (const r of rows) {
-      const k = r.project_id ?? "（未知项目）";
+      const k = r.project_id ?? t("token.project.unknown");
       const cur = map.get(k) ?? { cost: 0, tokens: 0 };
       cur.cost += r.cost;
       cur.tokens += r.tokens_input + r.tokens_output + r.tokens_cache_read;
@@ -135,14 +137,14 @@ export default function TokenStats() {
     <div className="token-stats">
       {/* 控制条：跨度 + 维度 + 刷新 */}
       <div className="token-controls">
-        <div className="token-seg" role="tablist" aria-label="时间跨度">
+        <div className="token-seg" role="tablist" aria-label={t("token.aria.range")}>
           {(["7d", "30d", "custom"] as Preset[]).map((p) => (
             <button
               key={p}
               className={preset === p ? "seg active" : "seg"}
               onClick={() => setPreset(p)}
             >
-              {p === "custom" ? "自定义" : p === "7d" ? "近 7 天" : "近 30 天"}
+              {t(`token.preset.${p}`)}
             </button>
           ))}
         </div>
@@ -153,7 +155,7 @@ export default function TokenStats() {
               value={fromStr}
               max={toStr}
               onChange={(e) => setFromStr(e.target.value)}
-              aria-label="起始日期"
+              aria-label={t("token.aria.from")}
             />
             ～
             <input
@@ -161,23 +163,23 @@ export default function TokenStats() {
               value={toStr}
               min={fromStr}
               onChange={(e) => setToStr(e.target.value)}
-              aria-label="结束日期"
+              aria-label={t("token.aria.to")}
             />
           </span>
         )}
-        <div className="token-seg" role="tablist" aria-label="统计维度">
+        <div className="token-seg" role="tablist" aria-label={t("token.aria.dim")}>
           {(["day", "week", "range"] as Dimension[]).map((d) => (
             <button
               key={d}
               className={dimension === d ? "seg active" : "seg"}
               onClick={() => setDimension(d)}
             >
-              {d === "day" ? "按天" : d === "week" ? "按周" : "整段"}
+              {t(`token.dim.${d}`)}
             </button>
           ))}
         </div>
         <button className="seg" onClick={() => void load()} disabled={loading}>
-          {loading ? "查询中…" : "刷新"}
+          {loading ? t("token.loading") : t("token.refresh")}
         </button>
       </div>
 
@@ -209,7 +211,7 @@ export default function TokenStats() {
       {/* ② 时序图：自画 SVG 柱状图（TC-TK-09：不引入重依赖库） */}
       {rows && dimension !== "range" && buckets.length > 0 && (
         <section className="token-section">
-          <h3>Token 时序（{dimension === "day" ? "按天" : "按周"}）</h3>
+
           <TimeBarChart
             data={buckets}
             color="#6366f1"
@@ -221,7 +223,7 @@ export default function TokenStats() {
         {/* ③ 项目分布：饼图 + 列表 */}
         {rows && projects.length > 0 && (
           <section className="token-section">
-            <h3>项目分布</h3>
+            <h3>{t("token.pie.title")}</h3>
             <ProjectPie projects={projects} />
           </section>
         )}
@@ -229,9 +231,9 @@ export default function TokenStats() {
         {/* ④ 会话列表：按 token 降序，可展开详情（TC-TK-09） */}
         {sessions && (
           <section className="token-section">
-            <h3>会话（{sortedSessions.length}）</h3>
+            <h3>{t("token.sessions.title", { n: sortedSessions.length })}</h3>
             {sortedSessions.length === 0 && (
-              <p className="token-empty">跨度内无会话记录。</p>
+              <p className="token-empty">{t("token.sessions.empty")}</p>
             )}
             <ul className="token-sessions">
               {sortedSessions.map((s) => {
@@ -278,7 +280,7 @@ export default function TokenStats() {
                           <dd>{formatCost(s.cost)}</dd>
                         </div>
                         <div className="detail-wide">
-                          <dt>更新时间</dt>
+                          <dt>{t("token.sessions.updated")}</dt>
                           <dd>{formatTime(s.time_updated)}</dd>
                         </div>
                       </dl>
@@ -315,7 +317,7 @@ function TimeBarChart({
       className="token-chart"
       viewBox={`0 0 ${W} ${H}`}
       role="img"
-      aria-label="token 时序柱状图"
+      aria-label={t("token.chart.aria")}
     >
       <line
         x1={PAD}
@@ -335,7 +337,7 @@ function TimeBarChart({
           fill={color}
           rx="2"
         >
-          <title>{`${data[i].label}：${data[i].tokens.toLocaleString()} tokens`}</title>
+          <title>{t("token.chart.bar", { label: data[i].label, n: data[i].tokens.toLocaleString() })}</title>
         </rect>
       ))}
       {/* 首尾标签（中间条 hover title 提供详情） */}
@@ -382,11 +384,11 @@ function ProjectPie({
         height={R * 2}
         viewBox={`0 0 ${R * 2} ${R * 2}`}
         role="img"
-        aria-label="项目 cost 占比"
+        aria-label={t("token.pie.aria")}
       >
         {slices.map((s, i) => (
           <path key={s.label} d={s.path} fill={PROJECT_COLORS[i % PROJECT_COLORS.length]}>
-            <title>{`${s.label}：${s.percent.toFixed(1)}%`}</title>
+            <title>{t("token.pie.slice", { label: s.label, pct: s.percent.toFixed(1) })}</title>
           </path>
         ))}
       </svg>

@@ -8,6 +8,7 @@ import {
 import { isTauriRuntime } from "../lib/token-stats";
 import { setPassThrough } from "../lib/interaction";
 import { usePetStore } from "../pet/petStore";
+import { changeLanguage, t, useLangStore, type Lang } from "../lib/i18n";
 
 /**
  * 设置页（M5 落地"选择宠物"，DESIGN §6.2 / §10.2，TC-SP-11/12 + TC-APP-12）：
@@ -21,13 +22,18 @@ import { usePetStore } from "../pet/petStore";
  * （app_state `pet.pass_through`），热键/托盘切换经 `pulsepet://pass-through`
  * 事件同步到本开关。「自动」= 清除配置（atlas_select(null)），默认加载内置
  * 小猫 blinking-kitty。
+ *
+ * M8 落地语言切换（DESIGN §10 "国际化 en/zh"）：入口在本页；选择持久化
+ * app_state `ui.language`（Rust ui_set_language：全局位 + 托盘菜单重建 +
+ * panel 标题 + `ui://language` 三窗口广播）；默认语言跟随系统（无持久化时）。
  */
 
-const SOURCE_LABELS: Record<string, string> = {
-  builtin: "内置",
-  codex: "~/.codex/pets",
-  petdex: "~/.petdex/pets",
-};
+function sourceLabel(source: string): string {
+  if (source === "builtin") return t("settings.source.builtin");
+  if (source === "codex") return "~/.codex/pets";
+  if (source === "petdex") return "~/.petdex/pets";
+  return source;
+}
 
 export default function Settings() {
   const [options, setOptions] = useState<PetOption[] | null>(null);
@@ -37,11 +43,13 @@ export default function Settings() {
   const [passThroughBusy, setPassThroughBusy] = useState(false);
   /** M6 P2 ②（M7 清偿）：穿透失败单独持有——成功时只清它，不动 atlas 错误横幅。 */
   const [passThroughError, setPassThroughError] = useState<string | null>(null);
+  const [langBusy, setLangBusy] = useState(false);
   const passThrough = usePetStore((s) => s.passThrough);
+  const lang = useLangStore((s) => s.lang); // M8 i18n：语言变化时本页文案重渲染
 
   const load = useCallback(async () => {
     if (!isTauriRuntime()) {
-      setError("设置需要在 PulsePet App（Tauri）内使用");
+      setError(t("settings.needApp"));
       return;
     }
     try {
@@ -53,7 +61,7 @@ export default function Settings() {
     } catch (e) {
       // P2-④（M5 移交，M6 清偿）：读取失败也要渲染错误（此前仅 options 为空时
       // 提前 return，列表加载失败时错误横幅被吞）；已加载的列表保持展示。
-      setError(`读取宠物列表失败：${e instanceof Error ? e.message : String(e)}`);
+      setError(t("settings.loadFail", { msg: e instanceof Error ? e.message : String(e) }));
     }
   }, []);
 
@@ -69,7 +77,7 @@ export default function Settings() {
       setError(null);
       await load();
     } catch (e) {
-      setError(`切换宠物失败：${e instanceof Error ? e.message : String(e)}`);
+      setError(t("settings.switchFail", { msg: e instanceof Error ? e.message : String(e) }));
     } finally {
       setSwitching(false);
     }
@@ -82,9 +90,24 @@ export default function Settings() {
       // M6 P2 ②（M7 清偿）：只清穿透相关错误；atlas 横幅（error）保持原样
       setPassThroughError(null);
     } catch (e) {
-      setPassThroughError(`切换穿透失败：${e instanceof Error ? e.message : String(e)}`);
+      setPassThroughError(
+        t("settings.passFail", { msg: e instanceof Error ? e.message : String(e) }),
+      );
     } finally {
       setPassThroughBusy(false);
+    }
+  };
+
+  /** M8：语言切换（本地立即生效 + Rust 持久化 + 托盘/标题/三窗口同步）。 */
+  const onLanguage = async (next: Lang) => {
+    if (next === lang) return;
+    setLangBusy(true);
+    try {
+      await changeLanguage(next);
+    } catch (e) {
+      console.error("[pulsepet] change language failed:", e);
+    } finally {
+      setLangBusy(false);
     }
   };
 
@@ -99,9 +122,9 @@ export default function Settings() {
   return (
     <section className="panel-settings">
       {error && <p className="settings-error">⚠️ {error}</p>}
-      <h2>宠物</h2>
+      <h2>{t("settings.pet")}</h2>
       <label className="settings-pet-label" htmlFor="pet-select">
-        选择宠物（切换立即生效；重启保留）
+        {t("settings.petLabel")}
       </label>
       <select
         id="pet-select"
@@ -109,16 +132,16 @@ export default function Settings() {
         disabled={switching || !options}
         onChange={(e) => void onSwitch(e.target.value)}
       >
-        <option value="">自动（默认 blinking-kitty）</option>
+        <option value="">{t("settings.autoOption")}</option>
         {requestedMissing && (
           <option value={selectedValue} disabled>
-            {selectedValue} — 素材损坏或不存在，已回退
+            {t("settings.missingOption", { id: selectedValue })}
           </option>
         )}
         {options?.map((o) => (
           <option key={`${o.source}:${o.id}`} value={o.id} disabled={!o.ok}>
-            {o.displayName}（{SOURCE_LABELS[o.source] ?? o.source}）
-            {o.ok ? "" : " — 素材损坏/非标准，不可选"}
+            {o.displayName}（{sourceLabel(o.source)}）
+            {o.ok ? "" : t("settings.brokenOption")}
           </option>
         ))}
       </select>
@@ -127,10 +150,16 @@ export default function Settings() {
       {current?.notice && <p className="settings-notice">⚠️ {current.notice}</p>}
       {current && (
         <p className="settings-current">
-          当前渲染：{current.currentId}（来源 {SOURCE_LABELS[current.currentSource] ?? current.currentSource}，
-          {current.cols}×{current.rows} 网格，单帧 {current.frameW}×{current.frameH}）
+          {t("settings.current", {
+            id: current.currentId,
+            source: sourceLabel(current.currentSource),
+            cols: current.cols,
+            rows: current.rows,
+            fw: current.frameW,
+            fh: current.frameH,
+          })}
           {current.requested && current.requested !== current.currentId && (
-            <>，已从「{current.requested}」回退</>
+            <>{t("settings.fellBack", { id: current.requested })}</>
           )}
         </p>
       )}
@@ -146,7 +175,7 @@ export default function Settings() {
         </ul>
       )}
 
-      <h2>交互</h2>
+      <h2>{t("settings.interaction")}</h2>
       {/* M6 P2 ②：穿透错误独立展示（不再借用全局 error 位，避免连带清 atlas 横幅） */}
       {passThroughError && <p className="settings-error">⚠️ {passThroughError}</p>}
       <label className="settings-check">
@@ -156,15 +185,27 @@ export default function Settings() {
           disabled={passThroughBusy || !isTauriRuntime()}
           onChange={(e) => void onPassThrough(e.target.checked)}
         />
-        <span>
-          点击穿透（纯展示模式）：开启后鼠标事件透出——宠物不可拖拽、右键菜单不可达，
-          动画照常播放；可经全局热键 ⌘/Ctrl+Shift+Alt+P 或托盘菜单「切换交互模式」切回。
-        </span>
+        <span>{t("settings.passThrough")}</span>
       </label>
       <p className="settings-hotkey-hint">
-        全局热键：⌘/Ctrl+Shift+P 唤起/隐藏面板；⌘/Ctrl+Shift+Alt+P 切换穿透；
-        {import.meta.env.DEV ? " ⌘/Ctrl+Shift+Alt+F 调试烟花（仅开发构建）。" : ""}
+        {t("settings.hotkeys")}
+        {import.meta.env.DEV ? t("settings.hotkeys.debug") : ""}
       </p>
+
+      {/* M8：语言切换（v1 双语 zh/en） */}
+      <h2>{t("settings.language")}</h2>
+      <label className="settings-pet-label" htmlFor="lang-select">
+        {t("settings.languageHint")}
+      </label>
+      <select
+        id="lang-select"
+        value={lang}
+        disabled={langBusy}
+        onChange={(e) => void onLanguage(e.target.value as Lang)}
+      >
+        <option value="zh">{t("settings.languageZh")}</option>
+        <option value="en">{t("settings.languageEn")}</option>
+      </select>
     </section>
   );
 }

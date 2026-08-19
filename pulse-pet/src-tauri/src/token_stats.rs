@@ -423,12 +423,12 @@ pub fn format_cost_usd(c: f64) -> String {
 
 /// 气泡文案（白名单模板：仅由数字格式化生成，不含任何原始 prompt/路径/URL；
 /// 长度恒 <140、单行，前端 `sanitizeBubbleText` 再兜底一次）。
+/// M8 i18n：文案模板随全局语言位切换（zh 与 M3 定案逐字一致）。
 pub fn format_session_report(row: &TokenRow) -> String {
-    format!(
-        "本期用了 {} input / {} output / {}",
-        format_tokens_k(row.tokens_input),
-        format_tokens_k(row.tokens_output),
-        format_cost_usd(row.cost)
+    crate::i18n::current().token_report(
+        &format_tokens_k(row.tokens_input),
+        &format_tokens_k(row.tokens_output),
+        &format_cost_usd(row.cost),
     )
 }
 

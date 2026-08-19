@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { usePetStore } from "./petStore";
 import { buildPetMenuItems, clampMenuPosition } from "../lib/pet-menu";
 import { openPanel, setPassThrough, togglePetVisible } from "../lib/interaction";
+import { useLangStore } from "../lib/i18n";
 
 /**
  * M6 宠物右键菜单（TC-WIN-03）：非穿透态右键宠物弹出。
@@ -9,12 +10,14 @@ import { openPanel, setPassThrough, togglePetVisible } from "../lib/interaction"
  * - 菜单项见 `lib/pet-menu.ts`（设置… / 切换交互模式（穿透：开/关）/ 隐藏宠物）；
  * - 窗口仅 220×220 → 菜单 clamp 在窗口内（挂载后按实际尺寸重算）；
  * - 点击菜单项执行动作并关闭；点击外部 / 窗口失焦 / Escape 关闭；
- * - 穿透态下 contextmenu 事件透出，本组件根本不会被打开（TC-WIN-04）。
+ * - 穿透态下 contextmenu 事件透出，本组件根本不会被打开（TC-WIN-04）；
+ * - M8 i18n：菜单项文案随语言（订阅 useLangStore）。
  */
 export default function PetMenu() {
   const pos = usePetStore((s) => s.contextMenu);
   const passThrough = usePetStore((s) => s.passThrough);
   const close = usePetStore((s) => s.closeContextMenu);
+  useLangStore((s) => s.lang); // M8 i18n：语言变化时菜单项文案重渲染
 
   const ref = useRef<HTMLDivElement>(null);
   // 首帧用估算尺寸 clamp，挂载测量后按实际尺寸重算

@@ -9,6 +9,7 @@
  */
 
 import { isTauriRuntime } from "./token-stats";
+import { t } from "./i18n";
 
 export type AtlasSource = "builtin" | "codex" | "petdex";
 
@@ -112,7 +113,7 @@ export function parsePetOptions(p: unknown): PetOption[] | null {
 
 /** 当前 atlas 元数据（含回退 notice）。 */
 export async function fetchAtlasMeta(): Promise<AtlasMeta> {
-  if (!isTauriRuntime()) throw new Error("atlas 需要在 PulsePet App（Tauri）内使用");
+  if (!isTauriRuntime()) throw new Error(t("atlas.needApp"));
   const { invoke } = await import("@tauri-apps/api/core");
   const raw = await invoke<unknown>("atlas_meta");
   const meta = parseAtlasMeta(raw);
@@ -122,7 +123,7 @@ export async function fetchAtlasMeta(): Promise<AtlasMeta> {
 
 /** 当前 atlas RGBA 整块（raw bytes → ArrayBuffer）。 */
 export async function fetchAtlasPixels(meta: AtlasMeta): Promise<AtlasPixels> {
-  if (!isTauriRuntime()) throw new Error("atlas 需要在 PulsePet App（Tauri）内使用");
+  if (!isTauriRuntime()) throw new Error(t("atlas.needApp"));
   const { invoke } = await import("@tauri-apps/api/core");
   const raw = await invoke<ArrayBuffer>("atlas_pixels");
   const pixels = makeAtlasPixels(meta, raw);
@@ -132,7 +133,7 @@ export async function fetchAtlasPixels(meta: AtlasMeta): Promise<AtlasPixels> {
 
 /** 面板"选择宠物"下拉数据。 */
 export async function fetchPetOptions(): Promise<PetOption[]> {
-  if (!isTauriRuntime()) throw new Error("atlas 需要在 PulsePet App（Tauri）内使用");
+  if (!isTauriRuntime()) throw new Error(t("atlas.needApp"));
   const { invoke } = await import("@tauri-apps/api/core");
   const raw = await invoke<unknown>("atlas_list_pets");
   const list = parsePetOptions(raw);
@@ -142,7 +143,7 @@ export async function fetchPetOptions(): Promise<PetOption[]> {
 
 /** 选择宠物（null = 恢复自动，默认 blinking-kitty）；返回加载结果 meta（失败时已回退内置占位）。 */
 export async function selectPet(id: string | null): Promise<AtlasMeta> {
-  if (!isTauriRuntime()) throw new Error("atlas 需要在 PulsePet App（Tauri）内使用");
+  if (!isTauriRuntime()) throw new Error(t("atlas.needApp"));
   const { invoke } = await import("@tauri-apps/api/core");
   const raw = await invoke<unknown>("atlas_select", { id });
   const meta = parseAtlasMeta(raw);

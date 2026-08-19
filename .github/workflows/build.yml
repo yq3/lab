@@ -4,7 +4,10 @@ on:
   workflow_dispatch:
   push:
     tags:
+      # TC-CI-02（M8）：todo-lite 既有触发保持不变 + 新增 pulse-pet；
+      # 工作目录/产物命名按 tag 前缀切换（见 job env PROJECT/PRODUCT）。
       - "todo-lite-v*"
+      - "pulse-pet-v*"
 
 permissions:
   contents: write
@@ -16,6 +19,12 @@ jobs:
       matrix:
         platform: [windows-latest, macos-latest]
     runs-on: ${{ matrix.platform }}
+    env:
+      # tag 前缀 → 工作目录（todo-lite / pulse-pet）与品牌名（release 名 /
+      # bundle 前缀）。非 tag 触发（workflow_dispatch）回落 todo-lite，
+      # 与既有行为一致（表达式对分支名不命中 pulse-pet-v* 前缀）。
+      PROJECT: ${{ startsWith(github.ref_name, 'pulse-pet-v') && 'pulse-pet' || 'todo-lite' }}
+      PRODUCT: ${{ startsWith(github.ref_name, 'pulse-pet-v') && 'PulsePet' || 'todo-lite' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -30,10 +39,10 @@ jobs:
       - name: Rust cache
         uses: swatinem/rust-cache@v2
         with:
-          workspaces: todo-lite/src-tauri
+          workspaces: ${{ env.PROJECT }}/src-tauri
 
       - name: Install dependencies
-        working-directory: todo-lite
+        working-directory: ${{ env.PROJECT }}
         run: npm ci
 
       - name: Build and bundle with Tauri
@@ -41,9 +50,12 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          projectPath: todo-lite
-          tagName: todo-lite-v__VERSION__
-          releaseName: "todo-lite v__VERSION__"
+          projectPath: ${{ env.PROJECT }}
+          # tagName 沿用各自既有 tag 约定（todo-lite-v* / pulse-pet-v*）；
+          # bundle 产物名取各自 tauri.conf.json 的 productName
+          #（pulse-pet = PulsePet → PulsePet_<version>_<os-target>，TC-CI-02）。
+          tagName: ${{ env.PROJECT }}-v__VERSION__
+          releaseName: "${{ env.PRODUCT }} v__VERSION__"
           releaseBody: "See the assets to download this version and install."
           releaseDraft: true
           prerelease: false
