@@ -98,14 +98,20 @@ export default function Settings() {
     }
   };
 
-  /** M8：语言切换（本地立即生效 + Rust 持久化 + 托盘/标题/三窗口同步）。 */
+  /** M8：语言切换（本地立即生效 + Rust 持久化 + 托盘/标题/三窗口同步）。
+   * P3-1（R1 审查）：invoke 失败回滚本地 store（与 A4"写失败不静默"一致）——
+   * 失败时 Rust 侧未持久化/未广播，panel 若保持新语言会与 pet/fireworks
+   * 及重启后的旧语言不一致。 */
   const onLanguage = async (next: Lang) => {
     if (next === lang) return;
     setLangBusy(true);
+    const prev = lang;
     try {
       await changeLanguage(next);
     } catch (e) {
       console.error("[pulsepet] change language failed:", e);
+      useLangStore.getState().setLang(prev); // 回滚
+      setError(t("settings.passFail", { msg: e instanceof Error ? e.message : String(e) }));
     } finally {
       setLangBusy(false);
     }

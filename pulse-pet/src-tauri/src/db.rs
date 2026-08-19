@@ -15,8 +15,9 @@ const SCHEMA_VERSION: i64 = 2;
 
 /// 迁移表：(目标版本, SQL)。新增迁移 = 追加文件 + 此表加一行 + bump SCHEMA_VERSION。
 const MIGRATIONS: &[(i64, &str)] = &[(1, INIT_SQL), (2, M7_SQL)];
-/// SCHEMA_VERSION 必须与迁移表末位一致（编译期防线，防只改一处）。
-const _: () = assert!(SCHEMA_VERSION == 2);
+/// SCHEMA_VERSION 必须与迁移表末位一致（编译期防线，防只改一处：
+/// 追加 MIGRATIONS 行而忘 bump SCHEMA_VERSION 时 const 求值失败，编译报错）。
+const _: () = assert!(MIGRATIONS[MIGRATIONS.len() - 1].0 == SCHEMA_VERSION);
 
 /// 打开（必要时创建）并迁移本地数据库。
 pub fn init(app: &tauri::AppHandle) -> Result<Connection, String> {

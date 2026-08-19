@@ -103,7 +103,7 @@ cd pulse-pet/opencode-plugin
 - PulsePet 启动时在**本机回环** `127.0.0.1:47811` 起 HTTP 服务；端口被占用时自动换随机端口。
 - 同时生成一次性随机 token，与当前端口一起写入 `~/.pulsepet/runtime/`（`update-token` + `endpoint` 两个文件；Windows 在 `%LOCALAPPDATA%\pulsepet\runtime\`）。token 文件权限 0600（POSIX）。
 - 插件每次发请求前**读最新文件**（端口回退后无需重装插件）；无 token 的请求一律 401。事件内容只在内存中传递，**不落盘**。
-- App 退出时清除 token/endpoint 文件。
+- App 退出时清除 token/endpoint 文件；被强杀（如 SIGKILL）残留的文件会在下次启动时重新生成覆盖（死 token / 死端口不会造成持久影响）。
 
 ### App 未启动时插件的行为
 
@@ -181,7 +181,21 @@ cp -r <下载解压出的宠物目录> ~/.codex/pets/<宠物id>
 - 单帧宽高比必须 192:208（= 12:13），帧宽须为 12 的倍数——即标准图块 1536×1872（8×9）或 1536×2288（8×11），**干净缩放**（如 768×936、3072×3744）也可；
 - 不满足（如 8×10、16×9、任意裁剪尺寸）→ **整只拒载**，不做按帧强行裁剪。
 
-9 行姿态从上到下依次对应：idle / editing / testing / success / error / working / thinking / waiting-permission / 备用行（社区素材按此排列即可，帧时长表 v1 未读取，按等帧播放）。
+9 行姿态采用 **petdex 官方行序**（与 `src/lib/sprite.ts` 的 `PETDEX_ROWS` 一致）：
+
+| 行号 | petdex 姿态名 | 对应 PulsePet 状态 |
+|---|---|---|
+| 0 | idle | idle |
+| 1 | running-right | editing（向前推进） |
+| 2 | running-left | testing（反向跑动） |
+| 3 | waving | success（庆祝挥手） |
+| 4 | jumping | **预留备用行，v1 不驱动**（无状态映射到此行） |
+| 5 | failed | error |
+| 6 | waiting | thinking（张望） |
+| 7 | running | working（原地跑动） |
+| 8 | review | waiting-permission（申请审批） |
+
+做社区素材时按 petdex 行序排列即可（`running-right`/`running-left`/`waving` 等姿态语义与 petdex 社区通用）；v1 不读取帧时长表，按等帧播放。
 
 ### 损坏 / 非标准素材的行为
 
@@ -228,7 +242,7 @@ cp -r <下载解压出的宠物目录> ~/.codex/pets/<宠物id>
 
 - **规则类型**：喝水 / 休息 / 自定义（含 1-140 字符自定义文案）；内置模板一键套用（喝水 30min / 休息 60min / 站立 90min）；
 - **间隔与时间窗**：间隔 1-1440 分钟；可选起始/结束时间（HH:MM），支持跨午夜窗口（如 22:00-06:00）；
-- **烟花模式**：单条勾选 = 该条到点放烟花（约 3.8s 全屏粒子）替代气泡；「全局烟花模式」开 = 未单独勾选的提醒也升级为烟花；
+- **烟花模式**：单条勾选 = 该条到点放烟花（约 3-5s 全屏粒子）替代气泡；「全局烟花模式」开 = 未单独勾选的提醒也升级为烟花；
 - **触发行为**：气泡 8 秒自动消失，或点宠物确认；历史（reminder_logs）按类型统计今日/累计；
 - **去重**：同规则 3 分钟内不重复；系统睡眠错过的不补发；
 - **暂停**：托盘「暂停所有提醒」（见上）；面板「试一试」可手动触发一次（同样受暂停与去重约束）；

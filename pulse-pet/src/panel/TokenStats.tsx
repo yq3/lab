@@ -48,7 +48,7 @@ function errorHint(err: StatsError): string {
 }
 
 export default function TokenStats() {
-  useLangStore((s) => s.lang); // M8 i18n：语言变化时本页文案重渲染
+  const lang = useLangStore((s) => s.lang); // M8 i18n：语言变化时本页文案重渲染（projects useMemo 也依赖）
   const [preset, setPreset] = useState<Preset>("7d");
   const [fromStr, setFromStr] = useState(() => localDateStr());
   const [toStr, setToStr] = useState(() => localDateStr());
@@ -108,7 +108,8 @@ export default function TokenStats() {
       .sort((a, b) => a.label.localeCompare(b.label));
   }, [rows, dimension]);
 
-  /** 项目分布（TC-TK-09 ③）：跨维度行按 project 聚合 cost。 */
+  /** 项目分布（TC-TK-09 ③）：跨维度行按 project 聚合 cost。
+   * P3-2（R1 审查）：依赖补 lang——"（未知项目）"标签随语言切换即时刷新。 */
   const projects = useMemo(() => {
     if (!rows) return [] as { label: string; cost: number; tokens: number }[];
     const map = new Map<string, { cost: number; tokens: number }>();
@@ -122,7 +123,8 @@ export default function TokenStats() {
     return [...map.entries()]
       .map(([label, v]) => ({ label, ...v }))
       .sort((a, b) => b.cost - a.cost || b.tokens - a.tokens);
-  }, [rows]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- t 依赖 lang（store 订阅触发组件重渲染）
+  }, [rows, lang]);
 
   const sortedSessions = useMemo(() => {
     if (!sessions) return [] as TokenRow[];
@@ -211,7 +213,12 @@ export default function TokenStats() {
       {/* ② 时序图：自画 SVG 柱状图（TC-TK-09：不引入重依赖库） */}
       {rows && dimension !== "range" && buckets.length > 0 && (
         <section className="token-section">
-
+          {/* P2-1（R1 审查）：i18n 化时误删的标题补回——token.chart.title 双语 */}
+          <h3>
+            {t("token.chart.title", {
+              dim: dimension === "day" ? t("token.dim.day") : t("token.dim.week"),
+            })}
+          </h3>
           <TimeBarChart
             data={buckets}
             color="#6366f1"

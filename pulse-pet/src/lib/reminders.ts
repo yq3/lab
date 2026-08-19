@@ -151,6 +151,9 @@ export function validateReminderInput(input: ReminderInput, lang?: Lang): string
   // M4 P2 ③（M7 清偿）：todo kind 恒 interval=0（一次性）；非 todo 至少 1 分钟。
   // 新建表单只提供 hydration/rest/custom（todo 由 Todo 插件派生），此处放行
   // 仅为编辑/快捷开关已有 todo 规则时不再破坏其 kind 与 interval。
+  // P2-2（R1 审查）：字段名（起始/结束）随语言本地化，en 不再中英混搭。
+  const whatStart = () => t("reminders.field.start", undefined, lang);
+  const whatEnd = () => t("reminders.field.end", undefined, lang);
   if (input.kind === "todo") {
     if (input.interval_minutes !== 0) {
       return t("reminders.validation.todoInterval", undefined, lang);
@@ -161,7 +164,7 @@ export function validateReminderInput(input: ReminderInput, lang?: Lang): string
         ? null
         : t("reminders.validation.absFormat", { what }, lang);
     };
-    return checkAbs(input.start_time, "起始") ?? checkAbs(input.end_time, "结束");
+    return checkAbs(input.start_time, whatStart()) ?? checkAbs(input.end_time, whatEnd());
   }
   if (input.interval_minutes < 1 || input.interval_minutes > MAX_INTERVAL_MINUTES) {
     return t("reminders.validation.intervalBad", { max: MAX_INTERVAL_MINUTES }, lang);
@@ -175,9 +178,9 @@ export function validateReminderInput(input: ReminderInput, lang?: Lang): string
     if (h > 23 || min > 59) return t("reminders.validation.timeRange", { what }, lang);
     return null;
   };
-  const startErr = checkHhmm(input.start_time, "起始");
+  const startErr = checkHhmm(input.start_time, whatStart());
   if (startErr) return startErr;
-  const endErr = checkHhmm(input.end_time, "结束");
+  const endErr = checkHhmm(input.end_time, whatEnd());
   if (endErr) return endErr;
   return null;
 }
