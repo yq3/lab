@@ -255,6 +255,14 @@ describe("插件 classifyEvent / classifyToolBefore：归一化（TC-EV-04）", 
     expect(classifyEvent({ type: "message.updated" })).toBeNull();
   });
 
+  it("总线 permission.asked → waiting-permission（A6，M2 P3-⑤ 清偿）", () => {
+    // 与 permission.ask hook 通道一致（DESIGN §3.1 归一化表）；同一次询问
+    // 双通道到达时 permission 桶 3s 冷却去重，无双发。
+    expect(
+      classifyEvent({ type: "permission.asked", properties: { sessionID: "s" } }),
+    ).toBe("waiting-permission");
+  });
+
   it("工具分类 + 测试命令检测", () => {
     expect(classifyToolBefore("edit")).toBe("editing");
     expect(classifyToolBefore("apply_patch")).toBe("editing");

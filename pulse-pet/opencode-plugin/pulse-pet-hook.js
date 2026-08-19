@@ -63,6 +63,12 @@ export function classifyEvent(event) {
       return "idle";
     case "session.error":
       return "error";
+    case "permission.asked":
+      // A6（M2 P3-⑤ 清偿，DESIGN §3.1 归一化表）：总线 permission.asked →
+      // waiting-permission。此前仅 permission.ask hook 处理该信号（前端兜底
+      // 双处理）；补总线分支后两条通道一致——同一次询问若 hook 与总线都发，
+      // permission 桶 3s 冷却天然去重，无双发。
+      return "waiting-permission";
     default:
       return null;
   }

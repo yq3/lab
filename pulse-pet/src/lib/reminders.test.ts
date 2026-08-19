@@ -98,6 +98,27 @@ describe("validateReminderInput：表单校验（与 Rust 同口径）", () => {
     expect(validateReminderInput(input({ end_time: "09:60" }))).toMatch(/结束/);
     expect(validateReminderInput(input({ start_time: "09:00", end_time: "18:00" }))).toBeNull();
   });
+
+  it("P2-2（R1 审查）：en 模式校验串纯英文——字段名本地化不混搭", () => {
+    // 越界（timeRange）与格式（timeFormat）两分支的字段名 start/end 均本地化
+    expect(validateReminderInput(input({ start_time: "25:00" }), "en")).toBe(
+      "start time out of range (00:00-23:59)",
+    );
+    expect(validateReminderInput(input({ end_time: "9点" }), "en")).toBe(
+      "end time should be HH:MM",
+    );
+    const todoBadAbs = input({
+      kind: "todo",
+      label: "x",
+      interval_minutes: 0,
+      start_time: "15:25",
+    });
+    expect(validateReminderInput(todoBadAbs, "en")).toBe(
+      "start should be YYYY-MM-DDTHH:MM (derived todo)",
+    );
+    // zh 侧字段名保持中文（既有行为不回归）
+    expect(validateReminderInput(input({ end_time: "9点" }))).toMatch(/结束/);
+  });
 });
 
 describe("parseReminderTrigger / usesFireworks（TC-RM-11 OR 语义）", () => {
@@ -216,5 +237,21 @@ describe("M7：todo 派生规则的表单保真（M4 P2 ② 清偿，TC-TD 章�
       ...valid,
       todo_due_ms: null,
     });
+  });
+});
+
+describe("M8 i18n：展示辅助随语言", () => {
+  it("kindLabel / formatInterval / formatWindow en 变体", () => {
+    expect(kindLabel("hydration", "en")).toBe("Hydration");
+    expect(kindLabel("todo", "en")).toBe("Todo");
+    expect(kindLabel("unknown-kind", "en")).toBe("unknown-kind");
+    expect(formatInterval(0, "en")).toBe("Once");
+    expect(formatInterval(60, "en")).toBe("Every 1 h");
+    expect(formatInterval(90, "en")).toBe("Every 90 min");
+    expect(formatWindow(null, null, "en")).toBe("All day");
+    expect(formatWindow("09:00", "18:00", "en")).toBe("09:00-18:00");
+    expect(formatWindow("22:00", "06:00", "en")).toBe("22:00-06:00 (cross-midnight)");
+    expect(formatWindow("09:00", null, "en")).toBe("From 09:00");
+    expect(formatWindow(null, "18:00", "en")).toBe("Until 18:00");
   });
 });

@@ -47,10 +47,19 @@ if ($Uninstall) {
 
   $cfg = Find-Config
   if (-not (Test-Path $cfg)) {
-    '{
+    # A6（M2 P3-④ 清偿）：无 BOM UTF-8 写入——Windows PowerShell 5.1 的
+    # `Out-File -Encoding utf8` 会带 BOM（M2 时 tokenizer 已兼容 BOM，
+    # 此处仍改为 [System.IO.File]::WriteAllText + UTF8Encoding($false)
+    # 消除之，新装/旧装产物字节一致）。
+    $EmptyConfig = '{
   "plugin": []
 }
-' | Out-File -FilePath $cfg -Encoding utf8
+'
+    [System.IO.File]::WriteAllText(
+      $cfg,
+      $EmptyConfig,
+      (New-Object System.Text.UTF8Encoding($false))
+    )
   }
   node $ConfigTool install $cfg
 

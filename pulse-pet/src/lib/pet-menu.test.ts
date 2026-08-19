@@ -54,3 +54,15 @@ describe("clampMenuPosition 菜单定位（220×220 窗口内，M6）", () => {
     expect(p.y).toBe(2);
   });
 });
+
+describe("M8 i18n：右键菜单文案随语言", () => {
+  it("en 菜单项 + 穿透开关态", () => {
+    const items = buildPetMenuItems(false, "en");
+    const labels = items.map((i) => i.label).join("\n");
+    expect(labels).toContain("Settings…");
+    expect(labels).toContain("Hide pet");
+    expect(labels).toContain("pass-through: off");
+    const on = buildPetMenuItems(true, "en").find((i) => i.id === "toggle-pass-through");
+    expect(on?.label).toContain("pass-through: on");
+  });
+});

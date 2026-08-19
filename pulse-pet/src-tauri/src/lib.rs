@@ -2,6 +2,7 @@ mod atlas;
 mod db;
 mod hotkeys;
 mod http_server;
+mod i18n;
 mod interaction;
 mod plugins;
 mod reminder_scheduler;
@@ -100,6 +101,17 @@ pub fn run() {
                 let conn = db.lock().map_err(|e| format!("db lock: {e}"))?;
                 plugins::ensure_builtin_plugins(&conn)
                     .map_err(|e| format!("ensure builtin plugins: {e}"))?;
+            }
+
+            // ---- M8 i18n：恢复持久化语言（托盘菜单/气泡文案在构建前就绪）----
+            {
+                let db = app.state::<Mutex<Connection>>();
+                let conn = db.lock().map_err(|e| format!("db lock: {e}"))?;
+                i18n::restore_from_db(&conn);
+            }
+            // panel 初始标题按恢复的语言设置（tauri.conf.json 里是中性 "PulsePet"）
+            if let Some(win) = app.get_webview_window("panel") {
+                let _ = win.set_title(i18n::current().panel_title());
             }
 
             // ---- M5 atlas：按加载顺序解析当前宠物（pet.selected → 内置 → codex → petdex）----
@@ -223,6 +235,8 @@ pub fn run() {
             reminder_scheduler::fireworks_ready,
             reminder_scheduler::fireworks_finished,
             plugins::plugins_list,
+            i18n::ui_get_language,
+            i18n::ui_set_language,
             todos::todo_list,
             todos::todo_upsert,
             todos::todo_delete,

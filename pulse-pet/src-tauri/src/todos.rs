@@ -735,6 +735,92 @@ mod tests {
         assert!(last.is_none());
     }
 
+    // ---- A2（M7 P2② 清偿）：重武装边界钉住 ----
+
+    #[test]
+    fn rearmed_only_when_derived_start_minute_changes_a2() {
+        // 钉住语义：重武装的键是**派生 start_time（分钟粒度字符串）**，不是
+        // due / remind_before 本身——两者同时变化但派生 start 分钟值不变
+        //（due 15:30/before 5 → start 15:25；due 15:31/before 6 → start 15:25）
+        //时 last_triggered_at 保留（已触发过的一次性不重发）。
+        // spec 措辞"due 变化重武装"的精确边界 = "due 变化**且派生 start 分钟值
+        // 变化**才重武装"（建议 DESIGN §8.3 备注此口径，报告已列）。
+        let c = conn();
+        let mut i = input("交报告");
+        i.due_date = Some("2026-08-18T15:30".into());
+        i.remind_before_minutes = 5;
+        let t = insert_todo(&c, &i).unwrap();
+        // 模拟已触发
+        c.execute(
+            "UPDATE reminders SET last_triggered_at = '2026-08-18T15:25:00.000+08:00' \
+             WHERE source_todo_id = ?1",
+            [t.id],
+        )
+        .unwrap();
+        // due 与 before 都变、start 分钟值不变（15:25 == 15:25）→ 不重武装
+        i.due_date = Some("2026-08-18T15:31".into());
+        i.remind_before_minutes = 6;
+        update_todo(&c, t.id, &i).unwrap();
+        let (start, due, last): (String, String, Option<String>) = c
+            .query_row(
+                "SELECT start_time, todo_due_at, last_triggered_at FROM reminders \
+                 WHERE source_todo_id = ?1",
+                [t.id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(start, "2026-08-18T15:25");
+        assert_eq!(due, "2026-08-18T15:31", "due 本身照常更新");
+        assert!(last.is_some(), "start 分钟值未变 → 不清 last_triggered_at（不重发）");
+        // 同一次 due 变化下再单独把 start 推 1 分钟（before 7 → 15:24）→ 重武装
+        i.remind_before_minutes = 7;
+        update_todo(&c, t.id, &i).unwrap();
+        let (start, last): (String, Option<String>) = c
+            .query_row(
+                "SELECT start_time, last_triggered_at FROM reminders WHERE source_todo_id = ?1",
+                [t.id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(start, "2026-08-18T15:24");
+        assert!(last.is_none(), "start 分钟值变化 → 清 last_triggered_at（重新武装）");
+    }
+
+    // ---- A3（M7 P2④ 清偿）：TS/Rust 校验口径差契约 ----
+
+    #[test]
+    fn rust_rejects_notes_over_2000_chars_contract_a3() {
+        // 契约：TS validateTodoInput 不查 notes 长度（宽松），2001 字符由 Rust
+        // validate_todo_input 拒绝（权威端；TS 侧对称测试见 todos.test.ts）。
+        let mut i = input("任务");
+        i.notes = Some("x".repeat(2000));
+        assert!(validate_todo_input(&i).is_ok(), "恰好 2000 应放行");
+        i.notes = Some("x".repeat(2001));
+        let err = validate_todo_input(&i).unwrap_err();
+        assert!(err.contains("notes"), "错误应指向 notes：{err}");
+    }
+
+    #[test]
+    fn rust_chrono_rejects_impossible_dates_contract_a3() {
+        // 契约：TS 形状正则放过 2026-02-31（31 匹配 3[01]），由 Rust chrono
+        // （NaiveDate 解析校验月/日）拒绝——"由 Rust 拒绝"的分工用测试固定。
+        let mut i = input("任务");
+        i.due_date = Some("2026-02-31".into());
+        let err = validate_todo_input(&i).unwrap_err();
+        assert!(err.contains("due_date"), "错误应指向 due_date：{err}");
+        // 同族：带时间的非法日期、4 月 31 日
+        i.due_date = Some("2026-02-30T09:00".into());
+        assert!(validate_todo_input(&i).is_err());
+        i.due_date = Some("2026-04-31".into());
+        assert!(validate_todo_input(&i).is_err());
+        // 对照组合法闰日（2028 是闰年）放行
+        i.due_date = Some("2028-02-29".into());
+        assert!(validate_todo_input(&i).is_ok());
+        // 非闰年 2 月 29 拒绝
+        i.due_date = Some("2026-02-29".into());
+        assert!(validate_todo_input(&i).is_err());
+    }
+
     // ---- 完成联动（TC-TD-04/05） ----
 
     #[test]

@@ -6,8 +6,11 @@ import { initReminderBridge } from "./lib/reminder-bridge";
 import { initAtlasBridge } from "./lib/atlas-bridge";
 import { initInteractionBridge } from "./lib/interaction";
 import { initTodoBridge } from "./lib/todo-bridge";
+import { initI18n } from "./lib/i18n";
 import "./styles/global.css";
 
+// M8：i18n 初始化（读持久化语言 → 无则跟随系统；订阅 ui://language 三窗口同步）。
+void initI18n();
 // M2：启动时接入 Rust 事件链路（监听 pulsepet://state → petStore）。
 void initHttpBridge();
 // M4：提醒事件链路（监听 reminder://trigger → 气泡 / 烟花；仅 pet 路由生效）。

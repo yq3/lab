@@ -19,8 +19,9 @@ PulsePet 是一个桌面宠物 App（Tauri 2 + React + TS + Vite），监听 ope
 - **三窗口 label**：`pet`（透明 220×220 置顶无边框）、`panel`（900×640 默认隐藏）、`fireworks`（透明全屏置顶隐藏）。前端按 hash 路由：`#/pet`、`#/panel`、`#/fireworks`。
 - **托盘左键**：切换 pet 可见性；`TrayIconEvent::Click` Down/Up 各触发一次，必须判断 `button_state`（只处理 `MouseButtonState::Down`），否则一次单击连切两次。
 - **状态降级**：占位阶段只有 5 张画面（idle/thinking/working/success/error），8 种归一化状态按 `src/lib/state.ts` 的映射降级（waiting-permission→thinking、testing→working、editing→working）。M5 切 atlas 后改用完整 9 行映射。
-- **迁移幂等**：`PRAGMA user_version` 控制，`src-tauri/migrations/001-init.sql` 用 `CREATE TABLE IF NOT EXISTS`。新增表需 bump `db.rs` 里的 `SCHEMA_VERSION` 并追加 migration 文件。
+- **迁移幂等**：`PRAGMA user_version` 控制，每步迁移（SQL + 版本提升）包在同一事务内（M8 A1：半途失败/崩溃自动回滚，重启可整步重跑）；新增表需在 `db.rs` 的 `MIGRATIONS` 表追加文件并 bump `SCHEMA_VERSION`（编译期断言校验 `MIGRATIONS` 末位版本 == `SCHEMA_VERSION`，只改一处即编译报错）。
 - **位置记忆**：`app_state` 表 `pet.position.x` / `pet.position.y`；`Moved` 事件持续保存、退出时兜底保存、启动时恢复。
+- **i18n（M8）**：zh/en 双语，自研轻量字典（`src/lib/i18n.ts` 的 `t(key, params)`，无第三方依赖）；语言持久化在 `app_state` 键 `ui.language`（Rust `i18n.rs` 持有全局语言位 + `ui_set_language` 命令：持久化 + 托盘菜单重建 + panel 标题 + `ui://language` 三窗口广播）。**文案 key 约定**：扁平键点分命名空间（`panel.*` / `reminders.*` / `todo.*` / `settings.*` / `menu.*` / `token.*`），en 与 zh 键集合必须一致（有字典完备性测试防漏译）；不翻译宠物状态名（idle/working…）与品牌名 PulsePet；纯函数文案接口带可选 `lang` 参数（缺省读当前 store，vitest 默认 zh 保证旧断言稳定）。Rust 侧托盘/标题/token 气泡/atlas 回退提示文案统一走 `i18n::current()`（zh 与既有 spec 钉住措辞逐字一致）。
 
 ## 与仓库其它项目的边界
 
@@ -32,4 +33,4 @@ PulsePet 是一个桌面宠物 App（Tauri 2 + React + TS + Vite），监听 ope
 
 ## 里程碑速览（DESIGN §10）
 
-M1 骨架（当前）→ M2 事件链路（HTTP server + opencode 插件 + 状态机）→ M3 token 统计 → M4 提醒/烟花 → M5 atlas 加载 → M6 拖拽/穿透/热键/右键菜单 → M7 todo 插件 → M8 收尾。
+M1 骨架 ✅ → M2 事件链路 ✅ → M3 token 统计 ✅ → M4 提醒/烟花 ✅ → M5 atlas 加载 ✅ → M6 拖拽/穿透/热键/右键菜单 ✅ → M7 todo 插件 ✅ → M8 收尾（i18n / Windows CI 级兼容 / capability 收敛 + TC-SEC 回溯 / README+AGENTS / 遗留 A1~A9 清偿）✅。后移：多屏与 Windows 实机验证（具备硬件时）、心跳与 /health 豁免（v2）、TC-DONE-01~09（v1 Done 验收任务）。

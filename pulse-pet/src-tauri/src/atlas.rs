@@ -66,20 +66,15 @@ impl std::fmt::Display for AtlasError {
 
 impl AtlasError {
     /// 面板提示文案（TC-SP-05/09 措辞；回退落点 = 默认内置小猫 blinking-kitty）。
+    /// M8 i18n：模板随全局语言位切换（zh 与 M5 定案措辞逐字一致）；
+    /// 嵌入的 reason 串（OS io 错误等）保持原文，不保证整体单语言。
     pub fn notice_text(&self, id: &str) -> String {
+        let lang = crate::i18n::current();
         match self {
-            AtlasError::NonStandardGrid { width, height } => format!(
-                "「{id}」该素材网格尺寸非标准（如 8×9 / 8×11 之外）：spritesheet 为 {width}×{height}，已回退内置占位 blinking-kitty"
-            ),
-            AtlasError::BrokenMeta(reason) => format!(
-                "「{id}」素材加载失败（pet.json 损坏：{reason}），已回退内置占位 blinking-kitty"
-            ),
-            AtlasError::BrokenSheet(reason) => format!(
-                "「{id}」素材加载失败（spritesheet 缺失或无法解码：{reason}），已回退内置占位 blinking-kitty"
-            ),
-            AtlasError::Io(reason) => {
-                format!("「{id}」素材读取失败（{reason}），已回退内置占位 blinking-kitty")
-            }
+            AtlasError::NonStandardGrid { width, height } => lang.atlas_notice_grid(id, *width, *height),
+            AtlasError::BrokenMeta(reason) => lang.atlas_notice_meta(id, reason),
+            AtlasError::BrokenSheet(reason) => lang.atlas_notice_sheet(id, reason),
+            AtlasError::Io(reason) => lang.atlas_notice_io(id, reason),
         }
     }
 }
@@ -278,7 +273,9 @@ pub fn load_pet_dir(dir: &Path) -> Result<(PetMeta, AtlasData), AtlasError> {
         .unwrap_or("pet");
     let meta_path = dir.join("pet.json");
     if !meta_path.is_file() {
-        return Err(AtlasError::BrokenMeta("pet.json 缺失".to_string()));
+        return Err(AtlasError::BrokenMeta(
+            crate::i18n::current().atlas_meta_missing().to_string(),
+        ));
     }
     let meta_bytes = read_capped(&meta_path, MAX_META_BYTES)
         .map_err(|e| AtlasError::BrokenMeta(format!("{e}")))?;
@@ -295,7 +292,7 @@ pub fn load_pet_dir(dir: &Path) -> Result<(PetMeta, AtlasData), AtlasError> {
         return load_from_pair(&meta_bytes, &sheet, fallback_id);
     }
     Err(AtlasError::BrokenSheet(
-        "spritesheet.webp / .png 均缺失".to_string(),
+        crate::i18n::current().atlas_sheet_missing().to_string(),
     ))
 }
 
@@ -310,7 +307,9 @@ pub fn probe_pet_dir(dir: &Path) -> Result<(PetMeta, u32, u32), AtlasError> {
         .unwrap_or("pet");
     let meta_path = dir.join("pet.json");
     if !meta_path.is_file() {
-        return Err(AtlasError::BrokenMeta("pet.json 缺失".to_string()));
+        return Err(AtlasError::BrokenMeta(
+            crate::i18n::current().atlas_meta_missing().to_string(),
+        ));
     }
     let meta_bytes = read_capped(&meta_path, MAX_META_BYTES)
         .map_err(|e| AtlasError::BrokenMeta(format!("{e}")))?;
@@ -330,7 +329,7 @@ pub fn probe_pet_dir(dir: &Path) -> Result<(PetMeta, u32, u32), AtlasError> {
         return Ok((meta, w, h));
     }
     Err(AtlasError::BrokenSheet(
-        "spritesheet.webp / .png 均缺失".to_string(),
+        crate::i18n::current().atlas_sheet_missing().to_string(),
     ))
 }
 
@@ -487,7 +486,7 @@ pub fn resolve_requested(requested: Option<&str>, home: &Path) -> Selection {
             }
         }
         if notice.is_none() {
-            notice = Some(format!("「{id}」未找到宠物素材，已回退内置占位 blinking-kitty"));
+            notice = Some(crate::i18n::current().atlas_notice_not_found(id));
         }
     } else {
         // 2. 无配置：内置占位（显式第二级；成功即用）
@@ -501,6 +500,11 @@ pub fn resolve_requested(requested: Option<&str>, home: &Path) -> Selection {
             };
         }
         // 3. codex 首个 → petdex 首个
+        // A8（M5 P2⑦ 处理定案：保留 + 注释固化）：本扫描段仅在 load_builtin()
+        // 失败（内置素材为编译期内嵌、测试期已校验，正常运行不可达）时作为
+        // 防御层生效——与 TC-SP-06 文档"内置 → codex → petdex"顺序语义一致
+        // （codex/petdex 扫描在"配置了非内置 id"分支真正生效）。删除会让
+        // "内嵌资源意外损坏"场景直接落入空数据兜底，防御性保留无害，不删。
         for scanned in scan_pets_in(home) {
             if let Ok((_, data)) = load_pet_dir(&scanned.path) {
                 return Selection {

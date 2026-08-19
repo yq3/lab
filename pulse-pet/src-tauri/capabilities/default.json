@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Default capability for all PulsePet windows",
+  "description": "Minimal capability for all PulsePet windows (M8 收敛): 前端 JS 仅使用 core:event（listen/unlisten，各窗口事件桥）；全部窗口操作（拖拽/显隐/托盘/穿透/烟花编排）与业务读写走 Rust 侧自定义 command（app 自有 command 不经 ACL）或 Rust 内部调用，故裁剪 core:default 其余默认权限（window/menu/tray/path/webview/image/app/resources 的 JS 面）。single-instance / global-shortcut 插件仅 Rust 侧使用，无 JS 权限面；未接入 tauri-plugin-sql。",
   "windows": ["pet", "panel", "fireworks"],
-  "permissions": ["core:default"]
+  "permissions": ["core:event:default"]
 }
