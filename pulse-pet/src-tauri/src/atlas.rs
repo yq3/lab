@@ -181,10 +181,43 @@ pub struct AtlasData {
     pub rgba: Vec<u8>,
 }
 
+/// 解码/探测上限（M5 P2 ⑥，M7 清偿：解压炸弹防护）：头里声明的尺寸或
+/// 需分配的像素缓冲超限即拒，不进入像素分配。16384×16384 / 512MB 覆盖所有
+/// 合法干净缩放（6× = 9216×11232 ≈ 414MB），gigapixel 级炸弹在头部阶段拦截。
+pub const MAX_SHEET_DIM: u32 = 16384;
+pub const MAX_SHEET_ALLOC: u64 = 512 * 1024 * 1024;
+
+fn sheet_limits() -> image::Limits {
+    let mut l = image::Limits::default();
+    l.max_image_width = Some(MAX_SHEET_DIM);
+    l.max_image_height = Some(MAX_SHEET_DIM);
+    l.max_alloc = Some(MAX_SHEET_ALLOC);
+    l
+}
+
+/// image Reader（格式猜测 + limits 加固；M5 P2 ⑥）。
+fn sheet_reader(bytes: &[u8]) -> Result<image::ImageReader<std::io::Cursor<&[u8]>>, AtlasError> {
+    let reader = image::ImageReader::new(std::io::Cursor::new(bytes))
+        .with_guessed_format()
+        .map_err(|e| AtlasError::BrokenSheet(format!("格式探测失败: {e}")))?;
+    let mut reader = reader;
+    reader.limits(sheet_limits());
+    Ok(reader)
+}
+
 pub fn decode_sheet(bytes: &[u8]) -> Result<image::RgbaImage, AtlasError> {
-    image::load_from_memory(bytes)
+    sheet_reader(bytes)?
+        .decode()
         .map(|d| d.to_rgba8())
         .map_err(|e| AtlasError::BrokenSheet(format!("解码失败: {e}")))
+}
+
+/// 只读图像头部的宽高（不解码像素；M5 P2 ⑤，M7 清偿：下拉逐项校验用）。
+/// 同样吃 sheet_limits（声明超限尺寸的炸弹在头部阶段即拒）。
+pub fn sheet_dimensions(bytes: &[u8]) -> Result<(u32, u32), AtlasError> {
+    sheet_reader(bytes)?
+        .into_dimensions()
+        .map_err(|e| AtlasError::BrokenSheet(format!("读头部尺寸失败: {e}")))
 }
 
 /// pet.json + spritesheet 字节 → 校验后的 AtlasData。
@@ -260,6 +293,41 @@ pub fn load_pet_dir(dir: &Path) -> Result<(PetMeta, AtlasData), AtlasError> {
             Err(e) => return Err(AtlasError::BrokenSheet(format!("{e}"))),
         };
         return load_from_pair(&meta_bytes, &sheet, fallback_id);
+    }
+    Err(AtlasError::BrokenSheet(
+        "spritesheet.webp / .png 均缺失".to_string(),
+    ))
+}
+
+/// 轻量校验（M5 P2 ⑤，M7 清偿）：pet.json + spritesheet **头部尺寸** + 网格/
+/// 声明校验，**不做像素解码**——大素材集下拉（list_pets_in）不再逐项全量
+/// 解码。代价：IDAT 损坏等像素级问题在校验阶段不可见（选中加载时才暴露，
+/// 届时回退 + notice，语义不变）。
+pub fn probe_pet_dir(dir: &Path) -> Result<(PetMeta, u32, u32), AtlasError> {
+    let fallback_id = dir
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("pet");
+    let meta_path = dir.join("pet.json");
+    if !meta_path.is_file() {
+        return Err(AtlasError::BrokenMeta("pet.json 缺失".to_string()));
+    }
+    let meta_bytes = read_capped(&meta_path, MAX_META_BYTES)
+        .map_err(|e| AtlasError::BrokenMeta(format!("{e}")))?;
+    let meta = parse_pet_json(&meta_bytes, fallback_id)?;
+    for name in sheet_candidates(&meta) {
+        let p = dir.join(&name);
+        if !p.is_file() {
+            continue;
+        }
+        let sheet = match read_capped(&p, MAX_SHEET_BYTES) {
+            Ok(s) => s,
+            Err(e) => return Err(AtlasError::BrokenSheet(format!("{e}"))),
+        };
+        let (w, h) = sheet_dimensions(&sheet)?;
+        let (cols, rows, _, _) = grid_from_dimensions(w, h)?;
+        validate_declared(&meta, cols, rows, w, h)?;
+        return Ok((meta, w, h));
     }
     Err(AtlasError::BrokenSheet(
         "spritesheet.webp / .png 均缺失".to_string(),
@@ -485,13 +553,17 @@ pub struct PetOption {
 /// 面板"选择宠物"下拉数据：内置分组（blinking-kitty / wagging-doggy）+
 /// codex 扫描 + petdex 扫描（顺序一致）。每项做轻量加载校验（损坏 / 非标准
 /// 网格 → ok=false + problem，TC-SP-11③④；TC-SP-12 内置两只并列）。
+/// M5 P2 ⑤（M7 清偿）：逐项校验改 **头部尺寸探测**（probe_pet_dir），不再
+/// 全量解码——大素材集下拉不再卡顿；内置宠物只解析 pet.json（编译期内嵌
+/// 素材已在测试中校验过网格）。
 pub fn list_pets_in(home: &Path) -> Vec<PetOption> {
     let mut v = Vec::new();
-    for (bid, _, _) in BUILTIN_PETS {
-        match load_builtin_pet(bid) {
-            Ok((meta, _)) => v.push(PetOption {
+    for (bid, meta_bytes, _) in BUILTIN_PETS {
+        let meta = parse_pet_json(meta_bytes, bid);
+        match meta {
+            Ok(m) => v.push(PetOption {
                 id: bid.to_string(),
-                display_name: meta.display_name,
+                display_name: m.display_name,
                 source: SOURCE_BUILTIN,
                 ok: true,
                 problem: None,
@@ -506,8 +578,8 @@ pub fn list_pets_in(home: &Path) -> Vec<PetOption> {
         }
     }
     for scanned in scan_pets_in(home) {
-        let (display_name, ok, problem) = match load_pet_dir(&scanned.path) {
-            Ok((meta, _)) => (meta.display_name, true, None),
+        let (display_name, ok, problem) = match probe_pet_dir(&scanned.path) {
+            Ok((meta, _, _)) => (meta.display_name, true, None),
             Err(e) => (scanned.id.clone(), false, Some(e.notice_text(&scanned.id))),
         };
         v.push(PetOption {
@@ -822,6 +894,97 @@ mod tests {
             decode_sheet(b"garbage bytes"),
             Err(AtlasError::BrokenSheet(_))
         ));
+    }
+
+    // ---- M5 P2 ⑤⑥（M7 清偿）：头部探测 + 解压炸弹防护 ----
+
+    /// 手工拼一个 PNG：签名 + IHDR + 一个极小 IDAT（png read_info 需扫到
+    /// IDAT 才返回头部信息）+ IEND。像素数据本身是垃圾（不被头部读取触及）。
+    fn png_header_only(width: u32, height: u32) -> Vec<u8> {
+        // PNG CRC-32（位运算实现，测试内自包含）
+        fn crc32(data: &[u8]) -> u32 {
+            let mut crc: u32 = 0xFFFF_FFFF;
+            for &b in data {
+                crc ^= b as u32;
+                for _ in 0..8 {
+                    crc = if crc & 1 != 0 {
+                        (crc >> 1) ^ 0xEDB8_8320
+                    } else {
+                        crc >> 1
+                    };
+                }
+            }
+            !crc
+        }
+        fn chunk(out: &mut Vec<u8>, kind: &[u8; 4], data: &[u8]) {
+            out.extend_from_slice(&(data.len() as u32).to_be_bytes());
+            let mut body = Vec::new();
+            body.extend_from_slice(kind);
+            body.extend_from_slice(data);
+            out.extend_from_slice(&body);
+            out.extend_from_slice(&crc32(&body).to_be_bytes());
+        }
+        let mut out = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+        let mut ihdr = Vec::new();
+        ihdr.extend_from_slice(&width.to_be_bytes());
+        ihdr.extend_from_slice(&height.to_be_bytes());
+        ihdr.extend_from_slice(&[8, 0, 0, 0, 0]); // 8bit 灰度/deflate/adaptive/无隔行
+        chunk(&mut out, b"IHDR", &ihdr);
+        chunk(&mut out, b"IDAT", b"\x00"); // 1 字节垃圾：足够让头部读取推进
+        chunk(&mut out, b"IEND", b"");
+        out
+    }
+
+    #[test]
+    fn sheet_dimensions_reads_header_without_pixels() {
+        // 只有头部、没有像素数据 → 头部探测仍成功（P2 ⑤：下拉不靠解码）
+        let bytes = png_header_only(1536, 1872);
+        assert_eq!(sheet_dimensions(&bytes).unwrap(), (1536, 1872));
+        // 同结构的全量解码则失败（无 IDAT）——两者差异正是"头部 vs 解码"
+        assert!(decode_sheet(&bytes).is_err());
+    }
+
+    #[test]
+    fn limits_reject_decompression_bomb_at_header_stage() {
+        // 同样只有头部的两张图：小尺寸过、声明 30000×30000 的炸弹在头部
+        // 阶段被 limits 拦截（未进入像素分配——否则此处已 OOM/极慢）
+        assert!(sheet_dimensions(&png_header_only(30000, 30000)).is_err());
+        assert!(decode_sheet(&png_header_only(30000, 30000)).is_err());
+        assert_eq!(
+            sheet_dimensions(&png_header_only(1536, 1872)).unwrap(),
+            (1536, 1872)
+        );
+    }
+
+    #[test]
+    fn list_pets_probe_is_header_only_no_full_decode() {
+        // 头部合法但 IDAT 是垃圾：probe（下拉校验）判 ok；真正加载才失败。
+        // 这是 P2 ⑤ 的语义代价：像素级问题延迟到选中加载时暴露（回退 + notice）。
+        let home = tempdir("probe");
+        let mut bytes = png_header_only(1536, 1872);
+        bytes.extend_from_slice(b"garbage idat bytes");
+
+        let d = home.join(".codex/pets/pixelrot");
+        write_pet(&d, OK_META, &bytes, "spritesheet.png");
+        let pets = list_pets_in(&home);
+        assert_eq!(pets.len(), 3, "{pets:?}");
+        assert_eq!(&pets[2].id, "pixelrot");
+        assert!(pets[2].ok, "头部探测通过（不解码像素）");
+        // 选中加载：解码失败 → 回退 + notice（TC-SP-09 语义不变）
+        let s = resolve_requested(Some("pixelrot"), &home);
+        assert_eq!(s.current_source, SOURCE_BUILTIN);
+        assert!(s.notice.is_some());
+
+        // 头部就非标准（1536×2080）→ probe 直接判 !ok（与原全量解码口径一致）
+        let bad = png_header_only(1536, 2080);
+        let d2 = home.join(".codex/pets/badgrid");
+        write_pet(&d2, OK_META, &bad, "spritesheet.png");
+        let pets2 = list_pets_in(&home);
+        let bg = pets2.iter().find(|p| p.id == "badgrid").unwrap();
+        assert!(!bg.ok);
+        assert!(bg.problem.as_deref().unwrap_or("").contains("网格尺寸非标准"));
+
+        fs::remove_dir_all(&home).ok();
     }
 
     #[test]

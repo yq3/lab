@@ -14,7 +14,12 @@
  */
 
 import { setReminderReporter, usePetStore } from "../pet/petStore";
-import { parseReminderTrigger, sanitizeReminderText, usesFireworks } from "./reminders";
+import {
+  parseReminderTrigger,
+  sanitizeReminderText,
+  usesFireworks,
+} from "./reminders";
+import { todoReminderText } from "./todos";
 
 export function initReminderBridge(): void {
   if (typeof window === "undefined") return;
@@ -58,8 +63,14 @@ export function initReminderBridge(): void {
           }
         })();
       } else {
-        // 气泡路径：文案净化（TC-RM-15）后展示；store 内部再走基础净化兜底
-        usePetStore.getState().showReminderBubble(sanitizeReminderText(t.label), t.log_id);
+        // 气泡路径：文案净化（TC-RM-15）后展示；store 内部再走基础净化兜底。
+        // M7（TC-TD-03）：todo 派生提醒 → "还有 X 分钟要完成「任务名」"
+        //（X 按触发时刻距 due 剩余分钟计；due 缺失回退纯 label = 任务名）
+        const raw =
+          t.kind === "todo"
+            ? (todoReminderText(t.label, t.todo_due_ms, Date.now()) ?? t.label)
+            : t.label;
+        usePetStore.getState().showReminderBubble(sanitizeReminderText(raw), t.log_id);
       }
     });
     console.log("[pulsepet] reminder bridge ready (pet)");

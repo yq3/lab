@@ -35,6 +35,8 @@ export default function Settings() {
   const [error, setError] = useState<string | null>(null);
   const [switching, setSwitching] = useState(false);
   const [passThroughBusy, setPassThroughBusy] = useState(false);
+  /** M6 P2 ②（M7 清偿）：穿透失败单独持有——成功时只清它，不动 atlas 错误横幅。 */
+  const [passThroughError, setPassThroughError] = useState<string | null>(null);
   const passThrough = usePetStore((s) => s.passThrough);
 
   const load = useCallback(async () => {
@@ -77,9 +79,10 @@ export default function Settings() {
     setPassThroughBusy(true);
     try {
       await setPassThrough(enabled); // Rust 应用窗口 + 持久化 + 广播事件同步本开关
-      setError(null);
+      // M6 P2 ②（M7 清偿）：只清穿透相关错误；atlas 横幅（error）保持原样
+      setPassThroughError(null);
     } catch (e) {
-      setError(`切换穿透失败：${e instanceof Error ? e.message : String(e)}`);
+      setPassThroughError(`切换穿透失败：${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setPassThroughBusy(false);
     }
@@ -144,6 +147,8 @@ export default function Settings() {
       )}
 
       <h2>交互</h2>
+      {/* M6 P2 ②：穿透错误独立展示（不再借用全局 error 位，避免连带清 atlas 横幅） */}
+      {passThroughError && <p className="settings-error">⚠️ {passThroughError}</p>}
       <label className="settings-check">
         <input
           type="checkbox"

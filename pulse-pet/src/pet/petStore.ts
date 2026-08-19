@@ -18,6 +18,19 @@ export interface BubbleState {
 }
 
 /**
+ * M7 完成庆祝（TC-TD-04/05）：{ id, until }——PetCanvas rAF 循环按
+ * `Date.now() < until` 判定生效期（到期自动失效，无需 React 重渲染），
+ * 生效期间 atlas 用 waving 行（= success 行）/占位用 success 画面。
+ */
+export interface CelebrationState {
+  id: number;
+  until: number;
+}
+
+/** 庆祝动画默认时长（waving 挥手约 3s，与气泡 8s 独立）。 */
+export const CELEBRATION_DEFAULT_MS = 3000;
+
+/**
  * 提醒气泡的消失方式回报（TC-RM-04/03）：
  * - "bubble"：用户点击宠物确认 → Rust `reminders_ack`（acked_at + dismissed_via）；
  * - "auto"：8s 自动消失（含被新气泡顶替）→ Rust `reminders_dismiss(via='auto')`。
@@ -40,6 +53,8 @@ interface PetState {
   passThrough: boolean;
   /** M6：右键菜单坐标（null = 关闭；穿透态恒 null，TC-WIN-04）。 */
   contextMenu: { x: number; y: number } | null;
+  /** M7：完成庆祝（waving 挥手覆盖期；null = 无）。 */
+  celebration: CelebrationState | null;
   setRaw: (raw: NormalizedState) => void;
   next: () => void;
   /** M5：atlas 加载/热替换（atlas-bridge 调用；对象身份变化驱动 canvas 重建）。 */
@@ -50,6 +65,8 @@ interface PetState {
   openContextMenu: (x: number, y: number) => void;
   /** M6：关闭右键菜单（菜单项动作 / 点击外部 / 窗口失焦）。 */
   closeContextMenu: () => void;
+  /** M7：开始完成庆祝（todo 完成 → waving + 气泡，TC-TD-04/05）。 */
+  startCelebration: (durationMs?: number) => void;
   /** 展示气泡（净化约束：单行 1-140；非法输入丢弃；8s 自动消失，DESIGN §5.2）。 */
   showBubble: (text: string) => void;
   hideBubble: () => void;
@@ -62,6 +79,7 @@ interface PetState {
 /** 气泡自动隐藏定时器（store 外置，避免进入响应式状态）。 */
 let bubbleTimer: ReturnType<typeof setTimeout> | null = null;
 let bubbleSeq = 0;
+let celebrationSeq = 0;
 /** 提醒回报回调（reminder-bridge 注册；null = 无人在意，如 vitest/纯前端 dev）。 */
 let reminderReporter: ReminderReporter | null = null;
 
@@ -112,12 +130,17 @@ export const usePetStore = create<PetState>((set, get) => ({
   atlasMeta: null,
   passThrough: false,
   contextMenu: null,
+  celebration: null,
   setAtlas: (meta, pixels) => set({ atlasMeta: meta, atlas: pixels }),
   setPassThrough: (enabled) =>
     // 切到穿透时已打开的右键菜单一并关闭（穿透态菜单不可达，TC-WIN-04）
     set((s) => ({ passThrough: enabled, contextMenu: enabled ? null : s.contextMenu })),
   openContextMenu: (x, y) => set({ contextMenu: { x, y } }),
   closeContextMenu: () => set({ contextMenu: null }),
+  startCelebration: (durationMs = CELEBRATION_DEFAULT_MS) => {
+    celebrationSeq += 1;
+    set({ celebration: { id: celebrationSeq, until: Date.now() + durationMs } });
+  },
   setRaw: (raw) => set({ raw, sprite: degradeState(raw) }),
   next: () =>
     set((s) => {

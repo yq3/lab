@@ -146,6 +146,46 @@ describe("petStore 气泡状态（M3 token 汇报，TC-TK-10/12）", () => {
   });
 });
 
+describe("petStore M7 完成庆祝（TC-TD-04/05 waving 覆盖）", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-17T12:00:00"));
+    usePetStore.setState({ celebration: null });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("startCelebration：写入 { id, until }，默认约 3s 生效期", () => {
+    usePetStore.getState().startCelebration();
+    const c = usePetStore.getState().celebration;
+    expect(c).not.toBeNull();
+    expect(c?.id).toBeGreaterThan(0);
+    expect(c?.until).toBe(Date.now() + 3000);
+  });
+
+  it("startCelebration：可自定义时长；再次调用刷新 until（新 id）", () => {
+    usePetStore.getState().startCelebration(8000);
+    const first = usePetStore.getState().celebration;
+    expect(first?.until).toBe(Date.now() + 8000);
+    vi.advanceTimersByTime(1000);
+    usePetStore.getState().startCelebration(3000);
+    const second = usePetStore.getState().celebration;
+    expect(second?.id).not.toBe(first?.id);
+    expect(second?.until).toBe(Date.now() + 3000);
+  });
+
+  it("庆祝与气泡/精灵状态互不影响（渲染层按 until 覆盖行，不改 raw）", () => {
+    usePetStore.getState().setRaw("working");
+    usePetStore.getState().showBubble("干得漂亮 🎉");
+    usePetStore.getState().startCelebration();
+    expect(usePetStore.getState().raw).toBe("working");
+    expect(usePetStore.getState().bubble?.text).toBe("干得漂亮 🎉");
+    expect(usePetStore.getState().celebration).not.toBeNull();
+  });
+});
+
 describe("petStore 提醒气泡（M4，TC-RM-03/04/05）", () => {
   let reporter: ReturnType<typeof vi.fn>;
 

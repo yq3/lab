@@ -32,7 +32,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use chrono::{DateTime, Local, SecondsFormat, Timelike};
+use chrono::{DateTime, Local, NaiveDate, NaiveDateTime, SecondsFormat, TimeZone, Timelike};
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager};
@@ -59,6 +59,9 @@ pub struct TriggerPayload {
     pub use_fireworks: bool,
     pub fireworks_global: bool,
     pub log_id: i64,
+    /// M7（TC-TD-03）：kind='todo' 时携带截止时刻 epoch ms，前端按触发时刻
+    /// 计算"还有 X 分钟要完成「任务名」"；非 todo 为 None。
+    pub todo_due_ms: Option<i64>,
 }
 
 /// 烟花播放指令 payload（物理→逻辑像素换算后的 CSS 坐标，前端 ×dpr 进 canvas）。
@@ -85,6 +88,8 @@ pub struct ReminderRule {
     pub use_fireworks: bool,
     pub last_triggered_at: Option<String>,
     pub source_todo_id: Option<i64>,
+    /// M7：todo 派生提醒的截止时刻（"YYYY-MM-DDTHH:MM"，= todos.due_date）。
+    pub todo_due_at: Option<String>,
     pub created_at: String,
 }
 
@@ -151,6 +156,38 @@ pub fn parse_rfc3339_ms(s: &str) -> Option<i64> {
         .map(|d| d.timestamp_millis())
 }
 
+/// M7：todo 侧绝对时间解析——"YYYY-MM-DDTHH:MM"（todos.due_date / 派生
+/// start_time 同格式）按**用户本地时区**折算 epoch 毫秒；"YYYY-MM-DD" 按
+/// 当日 00:00 本地。解析失败 → None。
+pub fn parse_due_like_ms(s: &str) -> Option<i64> {
+    let s = s.trim();
+    // 形状预检（chrono 对 %m/%d 等填充宽容，这里强制零填充规范形；
+    // 与 TS 侧 validateTodoInput 同口径）
+    let b = s.as_bytes();
+    let shape_ok = (s.len() == 16
+        && b[4] == b'-'
+        && b[7] == b'-'
+        && b[10] == b'T'
+        && b[13] == b':')
+        || (s.len() == 10 && b[4] == b'-' && b[7] == b'-');
+    if !shape_ok || !b.iter().all(|c| c.is_ascii_digit() || *c == b'-' || *c == b'T' || *c == b':')
+    {
+        return None;
+    }
+    let local = if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M") {
+        Local.from_local_datetime(&dt)
+    } else if let Ok(d) = NaiveDate::parse_from_str(s, "%Y-%m-%d") {
+        Local.from_local_datetime(&d.and_hms_opt(0, 0, 0)?)
+    } else {
+        return None;
+    };
+    // DST 间隙/歧义时取首个可行解释（提醒场景可接受）
+    local
+        .single()
+        .or_else(|| local.earliest())
+        .map(|d| d.timestamp_millis())
+}
+
 /// 当前本地时间戳（RFC3339 毫秒精度）。
 pub fn now_rfc3339() -> String {
     Local::now().to_rfc3339_opts(SecondsFormat::Millis, true)
@@ -171,23 +208,29 @@ pub fn now_ms() -> i64 {
 }
 
 /// 计算规则的 next_due（加载/reload 后）：
-/// - `interval <= 0`（todo 一次性）：从未触发 → 立即到期；已触发 → `i64::MAX`
-///   （永不再触发，跨重启/reload 均以 last_triggered_at 为准，§5.4）；
+/// - `interval <= 0`（todo 一次性，M7/TC-TD-03/06）：
+///     从未触发 → `start_time`（绝对时刻，"YYYY-MM-DDTHH:MM"；已过期则下一 tick
+///   补触发一次）；已触发 → `i64::MAX`（永不再触发，跨重启/reload 均以
+///   `last_triggered_at` 为唯一防重来源，§5.4）；
 /// - 周期规则：anchor = last_triggered_at（缺省 created_at）+ interval；错过不补发
 ///   （cand 已过期则顺延到 now + interval，避免重启/停机后瞬间补弹，TC-RM-02 精神）。
 pub fn compute_next_due(rule: &ReminderRule, now_ms: i64) -> i64 {
     let interval = rule.interval_minutes;
     if interval <= 0 {
-        return if rule
+        if rule
             .last_triggered_at
             .as_deref()
             .and_then(parse_rfc3339_ms)
             .is_some()
         {
-            i64::MAX
-        } else {
-            now_ms
-        };
+            return i64::MAX;
+        }
+        // start_time 缺失（手工建的 todo 规则）→ 立即到期一次兜底
+        return rule
+            .start_time
+            .as_deref()
+            .and_then(parse_due_like_ms)
+            .unwrap_or(now_ms);
     }
     let anchor = rule
         .last_triggered_at
@@ -233,6 +276,9 @@ pub struct RemindersState {
     pub fw_pending: Option<PlayPayload>,
     /// 播放代次（watchdog 防误 hide 后一场）。
     pub fw_gen: u64,
+    /// M4 P2 ④（M7 清偿）：当前播放中的 log id——新一场顶替/超时时对未回报
+    /// finished 的旧 log 补 dismissed_via='fireworks'，消除残留 NULL。
+    pub fw_active_log: Option<i64>,
 }
 
 impl RemindersState {
@@ -275,10 +321,14 @@ impl RemindersState {
             if !rs.rule.enabled || now_ms < rs.next_due_ms {
                 continue;
             }
-            let start = rs.rule.start_time.as_deref().and_then(parse_hhmm);
-            let end = rs.rule.end_time.as_deref().and_then(parse_hhmm);
-            if !in_window(minute_of_day, start, end) {
-                continue;
+            // M7：todo 派生规则的 start_time 是绝对时刻（非 HH:MM 窗口），
+            // 到期即触发，不走活跃窗口判定。
+            if rs.rule.kind != "todo" {
+                let start = rs.rule.start_time.as_deref().and_then(parse_hhmm);
+                let end = rs.rule.end_time.as_deref().and_then(parse_hhmm);
+                if !in_window(minute_of_day, start, end) {
+                    continue;
+                }
             }
             let last = rs.rule.last_triggered_at.as_deref().and_then(parse_rfc3339_ms);
             if !dedup_ok(last, now_ms) {
@@ -341,6 +391,7 @@ fn row_to_rule(row: &rusqlite::Row<'_>) -> rusqlite::Result<ReminderRule> {
         use_fireworks: row.get::<_, i64>("use_fireworks")? != 0,
         last_triggered_at: row.get("last_triggered_at")?,
         source_todo_id: row.get("source_todo_id")?,
+        todo_due_at: row.get("todo_due_at")?,
         created_at: row.get("created_at")?,
     })
 }
@@ -349,7 +400,7 @@ pub fn load_rules(conn: &Connection) -> Result<Vec<ReminderRule>, String> {
     let mut stmt = conn
         .prepare(
             "SELECT id, kind, label, interval_minutes, start_time, end_time, enabled, \
-             use_fireworks, last_triggered_at, source_todo_id, created_at \
+             use_fireworks, last_triggered_at, source_todo_id, todo_due_at, created_at \
              FROM reminders ORDER BY id",
         )
         .map_err(|e| format!("load reminders: {e}"))?;
@@ -362,7 +413,7 @@ pub fn load_rules(conn: &Connection) -> Result<Vec<ReminderRule>, String> {
 fn rule_by_id(conn: &Connection, id: i64) -> Result<ReminderRule, String> {
     conn.query_row(
         "SELECT id, kind, label, interval_minutes, start_time, end_time, enabled, \
-         use_fireworks, last_triggered_at, source_todo_id, created_at \
+         use_fireworks, last_triggered_at, source_todo_id, todo_due_at, created_at \
          FROM reminders WHERE id = ?1",
         [id],
         row_to_rule,
@@ -371,6 +422,9 @@ fn rule_by_id(conn: &Connection, id: i64) -> Result<ReminderRule, String> {
 }
 
 /// upsert 校验（与前端 validateReminderInput 同口径）。
+/// M4 P2 ③（M7 清偿）：todo kind 恒 interval=0（一次性，spec §5.4），
+/// start/end 为绝对时刻 "YYYY-MM-DDTHH:MM"（派生规则）；非 todo kind 间隔
+/// 1-1440、start/end 为 HH:MM 窗口。
 pub fn validate_input(input: &ReminderInput) -> Result<String, String> {
     const KINDS: &[&str] = &["hydration", "rest", "custom", "todo"];
     if !KINDS.contains(&input.kind.as_str()) {
@@ -384,14 +438,32 @@ pub fn validate_input(input: &ReminderInput) -> Result<String, String> {
     if label.chars().count() > 140 {
         return Err("label 超长（≤140 字符）".into());
     }
-    let max = if input.kind == "todo" { 0 } else { 1 };
-    if !(max..=MAX_INTERVAL_MINUTES).contains(&input.interval_minutes) {
+    if input.kind == "todo" {
+        // M4 P2 ③：todo 恒 0（唯一例外区间，>0 一律拒绝）
+        if input.interval_minutes != 0 {
+            return Err(format!(
+                "interval_minutes 非法：{}（todo kind 恒为 0，一次性提醒）",
+                input.interval_minutes
+            ));
+        }
+        let check_abs = |what: &str, s: &Option<String>| -> Result<(), String> {
+            if let Some(s) = s.as_deref().filter(|s| !s.is_empty()) {
+                if parse_due_like_ms(s).is_none() {
+                    return Err(format!(
+                        "{what} 非法：{s}（todo kind 应为 YYYY-MM-DDTHH:MM 绝对时刻）"
+                    ));
+                }
+            }
+            Ok(())
+        };
+        check_abs("start_time", &input.start_time)?;
+        check_abs("end_time", &input.end_time)?;
+        return Ok(label);
+    }
+    if !(1..=MAX_INTERVAL_MINUTES).contains(&input.interval_minutes) {
         return Err(format!(
-            "interval_minutes 非法：{}（{} kind 应为 {}-{}）",
-            input.interval_minutes,
-            input.kind,
-            max,
-            MAX_INTERVAL_MINUTES
+            "interval_minutes 非法：{}（{} kind 应为 1-{}）",
+            input.interval_minutes, input.kind, MAX_INTERVAL_MINUTES
         ));
     }
     if let Some(s) = &input.start_time {
@@ -587,6 +659,12 @@ fn fire_and_notify(app: &tauri::AppHandle, fired: &[ReminderRule]) {
             use_fireworks: rule.use_fireworks,
             fireworks_global: fw_global,
             log_id,
+            // M7（TC-TD-03）：todo 派生携带截止时刻，前端算"还有 X 分钟"
+            todo_due_ms: if rule.kind == "todo" {
+                rule.todo_due_at.as_deref().and_then(parse_due_like_ms)
+            } else {
+                None
+            },
         };
         let _ = app.emit("reminder://trigger", payload);
         eprintln!(
@@ -765,7 +843,7 @@ fn run_tick(app: &tauri::AppHandle, state: &Arc<Mutex<RemindersState>>) {
 // Tauri 命令（在 lib.rs 注册）
 // ---------------------------------------------------------------------------
 
-fn reload_state(app: &tauri::AppHandle) -> Result<(), String> {
+fn reload_state<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<(), String> {
     let state = app
         .state::<Arc<Mutex<RemindersState>>>()
         .inner()
@@ -774,6 +852,11 @@ fn reload_state(app: &tauri::AppHandle) -> Result<(), String> {
     let conn = db.lock().map_err(|e| format!("db lock: {e}"))?;
     let mut st = state.lock().map_err(|e| format!("state lock: {e}"))?;
     st.reload(&conn)
+}
+
+/// M7：todo CRUD 改动派生提醒后由 todos 命令调用（与 reminders CRUD 同口径）。
+pub fn reload_from_app<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<(), String> {
+    reload_state(app)
 }
 
 /// 规则列表（panel 提醒页）。
@@ -916,10 +999,16 @@ pub fn play_debug_fireworks(app: &tauri::AppHandle) {
 fn dispatch_play(app: &tauri::AppHandle, state: &Arc<Mutex<RemindersState>>, log_id: i64) {
     let payload = compute_play_payload(app, log_id);
     let gen;
+    let superseded;
     {
         let mut st = state.lock().unwrap_or_else(|p| p.into_inner());
         st.fw_gen += 1;
         gen = st.fw_gen;
+        // M4 P2 ④（M7 清偿）：新一场顶替未回报 finished 的旧场 → 旧 log 的
+        // dismissed_via 残留 NULL，这里补报 'fireworks'（dismiss 只动 NULL 行，
+        // 已结案的不覆盖）。
+        superseded = st.fw_active_log.filter(|old| *old != log_id);
+        st.fw_active_log = (log_id >= 0).then_some(log_id);
         if st.fw_ready {
             let _ = app.emit_to("fireworks", "fireworks://play", payload);
         } else {
@@ -929,9 +1018,18 @@ fn dispatch_play(app: &tauri::AppHandle, state: &Arc<Mutex<RemindersState>>, log
             st.fw_pending = Some(payload);
         }
     }
+    if let Some(old) = superseded {
+        if let Some(db) = app.try_state::<Mutex<Connection>>() {
+            if let Ok(conn) = db.lock() {
+                let _ = dismiss_log(&conn, old, "fireworks");
+                eprintln!("[pulsepet] fireworks superseded: backfill log {old} via 'fireworks'");
+            }
+        }
+    }
     windows::show_fireworks(app);
     // watchdog：6.5s 内前端未回报 finished 则强制 hide（防常驻窗口）。
     // 前端正常 finished 已 hide 过时窗口不可见 → 跳过，避免冗余 hide（E2E 实测修正）。
+    // M4 P2 ④：超时同样对未结案 log 补 dismissed_via='fireworks'（前端崩溃时不再残留 NULL）。
     let state_for_wd = state.clone();
     let app_for_wd = app.clone();
     tauri::async_runtime::spawn(async move {
@@ -941,6 +1039,25 @@ fn dispatch_play(app: &tauri::AppHandle, state: &Arc<Mutex<RemindersState>>, log
             .map(|st| st.fw_gen)
             .unwrap_or(u64::MAX);
         if cur == gen {
+            let still_active = state_for_wd
+                .lock()
+                .map(|mut st| {
+                    if st.fw_active_log == Some(log_id) {
+                        st.fw_active_log = None;
+                        true
+                    } else {
+                        false
+                    }
+                })
+                .unwrap_or(false);
+            if still_active && log_id >= 0 {
+                if let Some(db) = app_for_wd.try_state::<Mutex<Connection>>() {
+                    if let Ok(conn) = db.lock() {
+                        let _ = dismiss_log(&conn, log_id, "fireworks");
+                        eprintln!("[pulsepet] fireworks watchdog: backfill log {log_id} via 'fireworks'");
+                    }
+                }
+            }
             let visible = app_for_wd
                 .get_webview_window("fireworks")
                 .and_then(|w| w.is_visible().ok())
@@ -976,6 +1093,16 @@ pub fn fireworks_ready(
 #[tauri::command]
 pub fn fireworks_finished(app: tauri::AppHandle, log_id: i64) -> Result<(), String> {
     windows::hide_fireworks(&app);
+    {
+        // M4 P2 ④：正常回报即清掉 active 标记（后续顶替补报不再误伤本 log）
+        if let Some(state) = app.try_state::<Arc<Mutex<RemindersState>>>() {
+            if let Ok(mut st) = state.lock() {
+                if st.fw_active_log == Some(log_id) {
+                    st.fw_active_log = None;
+                }
+            }
+        }
+    }
     let db = app.state::<Mutex<Connection>>();
     if let Ok(conn) = db.lock() {
         let _ = dismiss_log(&conn, log_id, "fireworks");
@@ -1079,6 +1206,7 @@ mod tests {
             use_fireworks: false,
             last_triggered_at: None,
             source_todo_id: None,
+            todo_due_at: None,
             created_at: rfc(1000),
         };
         // created + 30min 在未来 → 保留；now=0 时 created(1000)+1800000 > 0
@@ -1100,6 +1228,7 @@ mod tests {
             use_fireworks: false,
             last_triggered_at: Some(rfc(1_000_000)),
             source_todo_id: None,
+            todo_due_at: None,
             created_at: rfc(0),
         };
         // reload 于 last+10min：next_due = last+30min（不被 reload 重置，TC-RM-07）
@@ -1130,6 +1259,7 @@ mod tests {
             use_fireworks: false,
             last_triggered_at: None,
             source_todo_id: Some(42),
+            todo_due_at: None,
             created_at: rfc(0),
         };
         // 从未触发 → 立即到期（进入窗口即触发一次）
@@ -1158,6 +1288,7 @@ mod tests {
             fw_ready: false,
             fw_pending: None,
             fw_gen: 0,
+            fw_active_log: None,
         }
     }
 
@@ -1173,6 +1304,7 @@ mod tests {
             use_fireworks: false,
             last_triggered_at: None,
             source_todo_id: None,
+            todo_due_at: None,
             created_at: rfc(0),
         }
     }
@@ -1451,5 +1583,114 @@ mod tests {
         let (tx, ty) = monitor_burst_point_in_window(2940, 0, 2940, 1912, 0, 0, 1.0);
         assert!((tx - 4410.0).abs() < 1e-9);
         assert!((ty - 573.6).abs() < 1e-9);
+    }
+
+    // ---- M7：todo 派生一次性提醒（TC-TD-03/06/08；M4 P2 ③ validate 收紧） ----
+
+    /// 本地时区基准："2026-08-18T15:30" → 当日本地 15:30 的 epoch ms。
+    fn due_ms(y: i32, mo: u32, d: u32, h: u32, mi: u32) -> i64 {
+        use chrono::TimeZone;
+        Local
+            .with_ymd_and_hms(y, mo, d, h, mi, 0)
+            .unwrap()
+            .timestamp_millis()
+    }
+
+    #[test]
+    fn parse_due_like_ms_formats() {
+        let expected = due_ms(2026, 8, 18, 15, 30);
+        assert_eq!(parse_due_like_ms("2026-08-18T15:30"), Some(expected));
+        // 纯日期 → 当日 00:00 本地
+        assert_eq!(parse_due_like_ms("2026-08-18"), Some(due_ms(2026, 8, 18, 0, 0)));
+        assert_eq!(parse_due_like_ms("  2026-08-18T15:30  "), Some(expected));
+        assert_eq!(parse_due_like_ms("not a date"), None);
+        assert_eq!(parse_due_like_ms("2026-8-18T15:30"), None); // 非零填充拒绝
+        assert_eq!(parse_due_like_ms("2026-08-18T15:30:00"), None); // 带秒拒绝（格式恒 %H:%M）
+    }
+
+    #[test]
+    fn todo_rule_next_due_follows_absolute_start_time() {
+        // TC-TD-03：next_due = start_time（due_date - remind_before），不是"立即"
+        let start_ms = due_ms(2026, 8, 18, 15, 25); // due 15:30 - before 5min
+        let rule = ReminderRule {
+            id: 11,
+            kind: "todo".into(),
+            label: "交报告".into(),
+            interval_minutes: 0,
+            start_time: Some("2026-08-18T15:25".into()),
+            end_time: None,
+            enabled: true,
+            use_fireworks: false,
+            last_triggered_at: None,
+            source_todo_id: Some(3),
+            todo_due_at: Some("2026-08-18T15:30".into()),
+            created_at: rfc(0),
+        };
+        assert_eq!(compute_next_due(&rule, 0), start_ms);
+        // start 已过（停机错过）→ 下一 tick 补触发一次（仍只一次）
+        assert_eq!(compute_next_due(&rule, start_ms + 60_000), start_ms);
+        // 触发后 → 永不再触发（TC-TD-06：last_triggered_at 唯一防重来源）
+        let mut fired = rule.clone();
+        fired.last_triggered_at = Some(rfc(start_ms));
+        assert_eq!(compute_next_due(&fired, start_ms + 60_000), i64::MAX);
+    }
+
+    #[test]
+    fn todo_rule_fires_once_at_start_time_in_collect_due() {
+        let start_ms = due_ms(2026, 8, 18, 15, 25);
+        let rule = ReminderRule {
+            id: 12,
+            kind: "todo".into(),
+            label: "交报告".into(),
+            interval_minutes: 0,
+            start_time: Some("2026-08-18T15:25".into()),
+            end_time: None,
+            enabled: true,
+            use_fireworks: false,
+            last_triggered_at: None,
+            source_todo_id: Some(4),
+            todo_due_at: Some("2026-08-18T15:30".into()),
+            created_at: rfc(0),
+        };
+        let mut st = state_with(rule, 0);
+        // 未到点（含 start_time 是绝对时刻而非 HH:MM 窗口的判定）→ 不触发
+        assert!(st.collect_due(start_ms - 1, &rfc(start_ms - 1), 0).is_empty());
+        // 到点 → 触发一次；之后（即便再过很久）不再触发（TC-TD-06）
+        let fired = st.collect_due(start_ms, &rfc(start_ms), 0);
+        assert_eq!(fired.len(), 1);
+        assert_eq!(fired[0].kind, "todo");
+        assert_eq!(fired[0].todo_due_at.as_deref(), Some("2026-08-18T15:30"));
+        assert_eq!(st.rules[0].next_due_ms, i64::MAX);
+        assert!(st.collect_due(start_ms + 3_600_000, &rfc(start_ms + 3_600_000), 0).is_empty());
+    }
+
+    #[test]
+    fn todo_rule_single_fire_survives_reload_from_db_tc_td_06() {
+        // 触发落库（mark_triggered）后 reload → 不重复触发（跨重启同理由此保证）
+        let c = conn();
+        let mut input = input("todo", "交报告", 0);
+        input.start_time = Some("2030-01-01T09:00".into());
+        let r = insert_rule(&c, &input).unwrap();
+        mark_triggered(&c, r.id, &rfc(now_ms() - 60_000)).unwrap();
+        let st = RemindersState::load(&c).unwrap();
+        assert_eq!(st.rules[0].next_due_ms, i64::MAX);
+    }
+
+    #[test]
+    fn validate_input_todo_kind_forces_interval_zero_tc() {
+        // M4 P2 ③（M7 清偿）：todo kind 恒 interval=0，>0 一律拒绝
+        assert!(validate_input(&input("todo", "交报告", 0)).is_ok());
+        assert!(validate_input(&input("todo", "交报告", 1)).is_err());
+        assert!(validate_input(&input("todo", "交报告", 30)).is_err());
+        // 派生规则的 start_time 是绝对时刻（非 HH:MM），必须被 upsert 入口接受
+        let mut abs = input("todo", "交报告", 0);
+        abs.start_time = Some("2026-08-18T15:25".into());
+        assert!(validate_input(&abs).is_ok());
+        let mut bad = input("todo", "交报告", 0);
+        bad.start_time = Some("15:25".into()); // todo kind 不接受 HH:MM（语义为绝对时刻）
+        assert!(validate_input(&bad).is_err());
+        // 非 todo kind 间隔下限仍为 1（interval=0 拒绝）
+        assert!(validate_input(&input("custom", "x", 0)).is_err());
+        assert!(validate_input(&input("hydration", "x", 1)).is_ok());
     }
 }

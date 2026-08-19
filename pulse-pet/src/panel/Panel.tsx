@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import TokenStats from "./TokenStats";
 import Reminders from "./Reminders";
 import Settings from "./Settings";
+import Todo from "./plugins/Todo";
 import { PANEL_TAB_EVENT, normalizeTab } from "../lib/interaction";
 import { isTauriRuntime } from "../lib/token-stats";
 
@@ -13,19 +14,16 @@ import { isTauriRuntime } from "../lib/token-stats";
  * M5：设置标签页落地"选择宠物"下拉（TC-SP-11 + TC-APP-12）。
  * M6：设置标签页接通"点击穿透"开关；监听 `panel://tab`（宠物右键菜单
  *      「设置…」/ Rust panel_open(tab)）直达指定 tab。
+ * M7：Todo 插件标签页落地（内置 built-in-todo，TC-TD-01/02）。
  */
 type TabId = "token" | "reminders" | "settings" | "todo";
 
 const TABS: { id: TabId; label: string; milestone?: string }[] = [
   { id: "token", label: "Token" },
   { id: "reminders", label: "提醒" },
-  { id: "settings", label: "设置" },
   { id: "todo", label: "Todo", milestone: "M7" },
+  { id: "settings", label: "设置" },
 ];
-
-const PLACEHOLDERS: Partial<Record<TabId, string>> = {
-  todo: "Todo 插件 — M7",
-};
 
 export default function Panel() {
   const [tab, setTab] = useState<TabId>("token");
@@ -69,8 +67,8 @@ export default function Panel() {
       </nav>
       {tab === "token" && <TokenStats />}
       {tab === "reminders" && <Reminders />}
+      {tab === "todo" && <Todo />}
       {tab === "settings" && <Settings />}
-      {PLACEHOLDERS[tab] && <p className="panel-placeholder">{PLACEHOLDERS[tab]}</p>}
     </div>
   );
 }
