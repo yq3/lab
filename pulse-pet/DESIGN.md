@@ -410,6 +410,8 @@ CREATE TABLE reminder_logs (
 
 > **macOS 透明窗口两个必要项（实测踩坑）**：① app 级 `macOSPrivateApi: true`（启用 `macos-private-api` feature，`transparent` 在 macOS 依赖它）；② 透明窗口（pet/fireworks）加 `backgroundColor: "#00000000"`。仅设 `transparent: true` 时 wry 只禁用 WKWebView 的 `drawsBackground`（白底消失），但 macOS 上缺 `underPageBackgroundColor` 会导致 WKWebView 内容（canvas 精灵等）整体不渲染——`backgroundColor` 让 wry 走完整透明路径（`drawsBackground` + `underPageBackgroundColor`），透明与内容两者兼得。
 
+> **窗口创建时序（issue #9 定案，v0.1.2）**：三窗口均 `"create": false`，由 setup 闭包在**全部 managed state 就绪后**经 `WebviewWindowBuilder::from_config` 创建（窗口参数仍以本 config 为单一来源）。原因：config 窗口默认由 tauri 在用户 setup 闭包**之前**创建（`App::run` 起点先遍历 `app.windows` 再跑闭包），而 Windows 上 WebView2 环境创建是异步的——主线程泵消息期间页面已加载，前端启动 `invoke` 的 IPC 会在闭包 `manage` 状态之前被派发，命令内 `state()` 即 panic；且 panic 发生在 WndProc（`extern "C"`）回调里不可展开，直接 abort 进程——这是 v0.1.0/v0.1.1 Windows 闪退的根因（日志证据见 issue #9：横幅后 3.2s panic `state() called before manage()`，无 `setup begin` 行）。macOS 的 WKWebView 不在该阶段派发 IPC，故从未触发。setup 内依赖窗口的操作（panel 标题、穿透应用、位置恢复）在创建之后执行。
+
 `pet` 与 `fireworks` 运行时默认非穿透（可交互）；`ignoreCursorEvents` 不是 tauri.conf.json 配置字段（Tauri 2 schema 无此项），穿透仅通过运行时 `setIgnoreCursorEvents` 动态切换。M1-M5 阶段不做切换，pet 窗口始终为可交互态；M6 引入穿透开关后，开启穿透时鼠标事件全部透出，pet 窗口的右键菜单不再可达——此时右键菜单只通过托盘（§7.2）和全局热键（§7.3）唤起。
 
 ### 7.2 托盘
@@ -687,7 +689,7 @@ lab/pulse-pet/
 - **opencode 插件运行时**：opencode 插件 API 目前在演进，hooks 字段稳定但可能新增；v1 监听字段做存在性检测后兜底 `event` bus；安装脚本做"幂等合并 + `--pulse-pet-managed` 标记"保证卸载不误删用户原有插件。
 - **Tauri 2 API 变化**：锁定最新稳定版，按文档调整（与 todo-lite 同策略）。
 - **Windows 端实机验证延后**：v1 主要在 macOS 开发，Windows 在 M4/M8 阶段交叉验证。
-- **Windows 首测静默退出（2026-08-19，v0.1.0 实机）**：物理机首测发现托盘未出现、启动数秒内静默退出、宠物无动画无交互；代码级排查未发现必然失败点，根因待实机日志取证（候选：WebView2 运行时异常、透明窗口 GPU 合成崩溃、杀软拦截、残留实例）。诊断依赖 §7.5 运行日志，随下一版安装包实机验证。
+- **Windows 首测静默退出（2026-08-19，v0.1.0 实机）**：物理机首测发现托盘未出现、启动数秒内静默退出、宠物无动画无交互。**根因已定位（v0.1.1 日志实锤，issue #9）**：config 窗口在用户 setup 闭包前创建，Windows WebView2 异步初始化泵消息期间前端 invoke 的 IPC 早于 `manage` 被派发 → `state()` panic → WndProc 内 abort。**修复（v0.1.2）**：窗口 `create:false` + setup 内创建（见 §7.1 定案）。
 - **多显示器烟花绽放点实机验证（M4 注记）**：M4 实现为代码级链路（`pet.current_monitor()` 判屏 → `cover_monitor` 铺窗 → `monitor_burst_point_in_window` 纯函数），单屏已实测（绽放点固定屏中轴 + 0.3 屏高）；多屏实机（含 cover_monitor 后回读坐标竞态修复）并入 M8 验证。
 
 ---

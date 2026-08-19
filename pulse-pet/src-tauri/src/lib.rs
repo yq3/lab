@@ -83,8 +83,9 @@ fn make_idle_hook(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // 日志先行（DESIGN §7.5）：早于 Builder::build()——setup 闭包与窗口创建
-    // 都在 build() 内执行（失败走 .expect panic），init 前置后全程在捕获范围。
+    // 日志先行（DESIGN §7.5）：早于 Builder::build() 与 App::run 阶段的
+    // setup 执行（用户闭包与窗口创建都在 run 的事件循环起点，失败 panic
+    // 由 hook 捕获），init 前置后全程在捕获范围。
     logging::init();
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
@@ -114,10 +115,7 @@ pub fn run() {
                 let conn = db.lock().map_err(|e| format!("db lock: {e}"))?;
                 i18n::restore_from_db(&conn);
             }
-            // panel 初始标题按恢复的语言设置（tauri.conf.json 里是中性 "PulsePet"）
-            if let Some(win) = app.get_webview_window("panel") {
-                let _ = win.set_title(i18n::current().panel_title());
-            }
+            // panel 初始标题设置移至窗口创建之后（窗口尚不存在时 get 返回 None）
 
             // ---- M5 atlas：按加载顺序解析当前宠物（pet.selected → 内置 → codex → petdex）----
             let atlas_state = {
@@ -177,17 +175,14 @@ pub fn run() {
             app.manage(windows::PositionSaver::new(app.handle().clone()));
 
             // ---- M6 交互模式（穿透开/关，DESIGN §6.3）----
-            // 状态从 app_state 恢复（TC-APP-12 重启保留）；持久化过"开"则启动
-            // 即应用穿透（apply 内持久化/托盘同步在早期阶段安全跳过/后建）。
+            // 状态从 app_state 恢复（TC-APP-12 重启保留）；持久化过"开"则在
+            // 窗口创建后应用（apply 需要 pet 窗口存在；此处先 manage 状态）。
             let pass_through = {
                 let db = app.state::<Mutex<Connection>>();
                 let conn = db.lock().map_err(|e| format!("db lock: {e}"))?;
                 interaction::read_persisted(&conn)
             };
             app.manage(interaction::InteractionState::new(pass_through));
-            if pass_through {
-                interaction::apply_pass_through(app.handle(), true);
-            }
 
             // ---- M4 提醒调度器：读表 → in-memory 倒计时 → tokio interval（Skip） ----
             let reminders_state = {
@@ -199,6 +194,29 @@ pub fn run() {
             let reminders_state = Arc::new(Mutex::new(reminders_state));
             app.manage(reminders_state.clone());
             reminder_scheduler::spawn_scheduler(app.handle().clone(), reminders_state);
+
+            // ---- 窗口创建（issue #9 修复，DESIGN §7.1）：三窗口均 create:false。
+            // config 窗口默认由 tauri 在用户 setup 闭包**之前**创建（App::run
+            // 起点先遍历 app.windows 再跑闭包）；Windows 上 WebView2 环境创建
+            // 异步、主线程泵消息期间页面已加载，前端启动 invoke 的 IPC 会在
+            // 闭包 manage 状态之前被派发 → 命令内 state() panic → WndProc
+            //（extern "C"）panic 不可展开 → abort 闪退（Windows 独有，macOS
+            // 的 WKWebView 不会在此阶段派发 IPC）。改为全部状态 manage 完成
+            // 后从 config 创建窗口——参数单一来源不变，时序竞态消除。
+            for wc in app.config().app.windows.iter().filter(|w| !w.create) {
+                tauri::WebviewWindowBuilder::from_config(app.handle(), wc)?.build()?;
+                plog!("[pulsepet] window created: {}", wc.label);
+            }
+
+            // panel 初始标题按恢复的语言设置（tauri.conf.json 里是中性 "PulsePet"）
+            if let Some(win) = app.get_webview_window("panel") {
+                let _ = win.set_title(i18n::current().panel_title());
+            }
+            // 持久化过"开"则应用穿透（pet 窗口已存在；托盘勾选态由 build_tray
+            // 从 InteractionState 读初值，无需提前）
+            if pass_through {
+                interaction::apply_pass_through(app.handle(), true);
+            }
 
             windows::restore_pet_position(app.handle());
             // ---- M6 托盘（五项菜单 + 勾选句柄）与全局热键 ----
