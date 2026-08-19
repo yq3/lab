@@ -1,0 +1,69 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "PulsePet",
+  "version": "0.1.2",
+  "identifier": "com.pulsepet.app",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1430",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "macOSPrivateApi": true,
+    "windows": [
+      {
+        "label": "pet",
+        "create": false,
+        "url": "index.html#/pet",
+        "title": "PulsePet",
+        "width": 220,
+        "height": 220,
+        "transparent": true,
+        "backgroundColor": "#00000000",
+        "decorations": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": false,
+        "visible": true,
+        "shadow": false
+      },
+      {
+        "label": "panel",
+        "create": false,
+        "url": "index.html#/panel",
+        "title": "PulsePet",
+        "width": 900,
+        "height": 640,
+        "visible": false
+      },
+      {
+        "label": "fireworks",
+        "create": false,
+        "url": "index.html#/fireworks",
+        "transparent": true,
+        "backgroundColor": "#00000000",
+        "decorations": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visible": false,
+        "shadow": false,
+        "maximized": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  }
+}

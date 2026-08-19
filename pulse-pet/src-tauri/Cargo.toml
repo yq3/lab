@@ -1,0 +1,41 @@
+[package]
+name = "pulse-pet"
+version = "0.1.2"
+description = "PulsePet desktop pet"
+authors = ["you"]
+edition = "2021"
+
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and not conflict with the bin name
+# (Windows-only issue, see https://github.com/rust-lang/cargo/issues/8519).
+name = "pulse_pet_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["macos-private-api", "tray-icon", "image-png"] }
+tauri-plugin-single-instance = "2"
+# M6：全局快捷键（DESIGN §7.3，TC-APP-06/07/08）——仅 Rust 侧注册与分发，
+# 无 JS 插件包依赖（前端不经 global-shortcut API）。
+tauri-plugin-global-shortcut = "2"
+rusqlite = { version = "0.40", features = ["bundled"] }
+tiny_http = "0.12"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rand = "0.8"
+# M4：调度器 interval + MissedTickBehavior（tokio 已在依赖图中，仅显式引 time feature）
+tokio = { version = "1", features = ["time"] }
+# M4：本地时间（HH:MM 窗口 / RFC3339 时间戳；iana-time-zone 随 chrono 已缓存）
+chrono = "0.4"
+# M5：atlas 解码（DESIGN §6.2）。webp feature = image-webp 解码器。
+# Windows 编译 image-webp 需 nasm（TC-SP-10 风险项）；若 CI 复杂度上升，
+# 回退方案是 atlas 直接要求 png 格式（petdex 也接受 png，DESIGN §12）。
+image = { version = "0.25", default-features = false, features = ["png", "webp"] }
+
+[dev-dependencies]
+# M7：mock runtime（tauri::test）——todo/plugins 命令级集成测试
+# （真实 command 函数 + managed state + 事件 emit，无需 GUI）。
+tauri = { version = "2", features = ["test"] }
