@@ -689,7 +689,7 @@ lab/pulse-pet/
 - **opencode 插件运行时**：opencode 插件 API 目前在演进，hooks 字段稳定但可能新增；v1 监听字段做存在性检测后兜底 `event` bus；安装脚本做"幂等合并 + `--pulse-pet-managed` 标记"保证卸载不误删用户原有插件。
 - **Tauri 2 API 变化**：锁定最新稳定版，按文档调整（与 todo-lite 同策略）。
 - **Windows 端实机验证延后**：v1 主要在 macOS 开发，Windows 在 M4/M8 阶段交叉验证。
-- **Windows 首测静默退出（2026-08-19，v0.1.0 实机）**：物理机首测发现托盘未出现、启动数秒内静默退出、宠物无动画无交互。**根因已定位（v0.1.1 日志实锤，issue #9）**：config 窗口在用户 setup 闭包前创建，Windows WebView2 异步初始化泵消息期间前端 invoke 的 IPC 早于 `manage` 被派发 → `state()` panic → WndProc 内 abort。**修复（v0.1.2）**：窗口 `create:false` + setup 内创建（见 §7.1 定案）。
+- **Windows 首测静默退出（2026-08-19，v0.1.0 实机）**：物理机首测发现托盘未出现、启动数秒内静默退出、宠物无动画无交互。**根因已定位（v0.1.1 日志实锤，issue #9）**：config 窗口在用户 setup 闭包前创建，Windows WebView2 异步初始化泵消息期间前端 invoke 的 IPC 早于 `manage` 被派发 → `state()` panic → WndProc 内 abort。**修复（v0.1.2）**：窗口 `create:false` + setup 内创建（见 §7.1 定案）。**v0.1.2 实机验证通过（2026-08-19，issue #9 关闭）：宠物正常显示、动画/拖拽/点击/右键/托盘均恢复。**
 - **多显示器烟花绽放点实机验证（M4 注记）**：M4 实现为代码级链路（`pet.current_monitor()` 判屏 → `cover_monitor` 铺窗 → `monitor_burst_point_in_window` 纯函数），单屏已实测（绽放点固定屏中轴 + 0.3 屏高）；多屏实机（含 cover_monitor 后回读坐标竞态修复）并入 M8 验证。
 
 ---
