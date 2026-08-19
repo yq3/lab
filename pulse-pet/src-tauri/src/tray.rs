@@ -11,6 +11,7 @@
 //! 左键单击切换 pet 可见性：`TrayIconEvent::Click` 在 Down/Up 各触发一次，
 //! 因此必须判断 `button_state`（只处理 Down），否则一次单击会连切两次（todo-lite 同坑）。
 
+use crate::plog;
 use std::sync::{Arc, Mutex};
 
 use rusqlite::Connection;
@@ -144,7 +145,7 @@ pub fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
                 .unwrap_or(false)
         })
         .unwrap_or(false);
-    eprintln!(
+    plog!(
         "[pulsepet] tray built (pause_reminders checked={paused}, interaction checked={pass_through})"
     );
     Ok(())
@@ -160,7 +161,7 @@ pub fn apply_language(app: &tauri::AppHandle) -> tauri::Result<()> {
     if let Some(tray) = app.tray_by_id("pulsepet-tray") {
         tray.set_menu(Some(menu))?;
     }
-    eprintln!("[pulsepet] tray menu rebuilt for language switch");
+    plog!("[pulsepet] tray menu rebuilt for language switch");
     Ok(())
 }
 
@@ -189,5 +190,5 @@ fn toggle_pause_reminders(app: &tauri::AppHandle) {
             }
         }
     }
-    eprintln!("[pulsepet] reminders paused = {next} (tray)");
+    plog!("[pulsepet] reminders paused = {next} (tray)");
 }

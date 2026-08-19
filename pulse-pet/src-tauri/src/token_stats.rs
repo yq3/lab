@@ -512,6 +512,7 @@ pub fn now_ms() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::plog;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     /// 与真实 opencode.db 一致的 session 表建表语句（白名单列 + 少量真实存在的
@@ -925,7 +926,7 @@ mod tests {
     fn real_db_reconciliation_manual() {
         let dir = opencode_data_dir();
         let Some(path) = detect_db_path(&dir) else {
-            eprintln!("[reconcile] 本机无 opencode.db，跳过");
+            plog!("[reconcile] 本机无 opencode.db，跳过");
             return;
         };
         println!("[reconcile] db = {}", path.display());

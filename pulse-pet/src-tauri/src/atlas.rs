@@ -18,6 +18,7 @@
 //! 纯逻辑不依赖 Tauri（扫描根目录可注入），`cargo test` 直接覆盖；
 //! Tauri command 在文件末尾薄封装。
 
+use crate::plog;
 use std::path::{Path, PathBuf};
 
 /// 单帧逻辑尺寸（codex atlas 标准）。
@@ -664,7 +665,7 @@ pub fn init_selection(conn: &Connection) -> Result<AtlasState, String> {
 }
 
 fn log_selection(s: &Selection) {
-    eprintln!(
+    plog!(
         "[pulsepet] atlas: loaded {} from {} ({}×{}, frame {}×{})",
         s.current_id,
         s.current_source,
@@ -674,7 +675,7 @@ fn log_selection(s: &Selection) {
         s.data.frame_h
     );
     if let Some(n) = &s.notice {
-        eprintln!("[pulsepet] atlas: fallback notice: {n}");
+        plog!("[pulsepet] atlas: fallback notice: {n}");
     }
 }
 

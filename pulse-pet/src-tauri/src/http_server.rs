@@ -14,6 +14,7 @@
 //! 事件入内存：合法 `/state` 事件 apply 到 `SessionStateMachine` 并触发显示状态回调
 //! （经 Tauri event 推给前端），不明文落盘（TC-SEC-06）。
 
+use crate::plog;
 use std::io::Read;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -346,7 +347,7 @@ pub fn start(
                     // P3-①（M2 遗留）：accept 错误不再静默退出——记录原因后继续服务
                     // （EOF/连接被客户端丢弃等可恢复错误很常见；停机由顶部标志控制）。
                     // 短暂 sleep 防持续错误下热转。
-                    eprintln!("[pulsepet] http server accept error: {e}");
+                    plog!("[pulsepet] http server accept error: {e}");
                     std::thread::sleep(Duration::from_millis(50));
                 }
             }

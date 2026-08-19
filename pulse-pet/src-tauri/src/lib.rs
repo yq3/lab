@@ -4,6 +4,7 @@ mod hotkeys;
 mod http_server;
 mod i18n;
 mod interaction;
+mod logging;
 mod plugins;
 mod reminder_scheduler;
 mod runtime;
@@ -82,16 +83,20 @@ fn make_idle_hook(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // 日志先行（DESIGN §7.5）：早于 Builder::build()——setup 闭包与窗口创建
+    // 都在 build() 内执行（失败走 .expect panic），init 前置后全程在捕获范围。
+    logging::init();
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             // 第二实例启动：唤起已运行实例的 panel 窗口（TC-APP-02）
-            eprintln!("[pulsepet] second instance detected, showing panel");
+            plog!("[pulsepet] second instance detected, showing panel");
             windows::show_panel(app);
         }))
         // M6 全局快捷键（DESIGN §7.3）：插件本体在 builder 注册，具体热键在
         // setup（state 就绪后）经 hotkeys::register_all 登记 + 分发
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(|app| {
+            plog!("[pulsepet] setup begin");
             let conn = db::init(app.handle())?;
             app.manage(Mutex::new(conn));
 
@@ -146,7 +151,7 @@ pub fn run() {
             )
             .map_err(|e| format!("start http server: {e}"))?;
             let shutdown = server.shutdown_flag();
-            eprintln!("[pulsepet] http server listening on 127.0.0.1:{}", server.port);
+            plog!("[pulsepet] http server listening on 127.0.0.1:{}", server.port);
 
             // 后台回收线程：瞬态超时回退 + idle 回收（TC-EV-06 / TC-EV-17）
             {
@@ -202,8 +207,9 @@ pub fn run() {
             if let Err(e) = hotkeys::register_all(app.handle()) {
                 // 热键注册失败（如组合被其它 App 占用）不阻断启动：面板/穿透
                 // 仍有托盘菜单通道（TC-WIN-05 双通道互备）
-                eprintln!("[pulsepet] global shortcut register failed: {e}");
+                plog!("[pulsepet] global shortcut register failed: {e}");
             }
+            plog!("[pulsepet] setup complete");
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -263,6 +269,9 @@ pub fn run() {
 
     app.run(|app_handle, event| {
         if let RunEvent::Exit = event {
+            // 有 exit 行 = 干净退出；无 exit 行 = 崩溃/被杀（与事件查看器
+            // Application Error ID 1000 互为印证，DESIGN §7.5）
+            plog!("[pulsepet] exit");
             // 退出时兜底保存位置（正常拖拽期间已由防抖线程持续保存）
             windows::save_pet_position(app_handle);
             // 清除运行时文件：token 每次会话轮换、endpoint 不再指向已退出实例

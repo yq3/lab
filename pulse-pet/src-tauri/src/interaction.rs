@@ -12,6 +12,7 @@
 //! 穿透关 = 可交互（可拖拽 / 右键，TC-WIN-01/03）。tauri.conf.json 无
 //! `ignoreCursorEvents` 配置字段（Tauri 2 schema 无此项），仅运行时切换。
 
+use crate::plog;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use rusqlite::Connection;
@@ -67,7 +68,7 @@ pub fn apply_pass_through(app: &tauri::AppHandle, enabled: bool) {
     //    让 WKWebView 立即重建交互，热键切回后即可拖拽/右键）
     if let Some(win) = app.get_webview_window("pet") {
         if let Err(e) = win.set_ignore_cursor_events(enabled) {
-            eprintln!("[pulsepet] set_ignore_cursor_events({enabled}) failed: {e}");
+            plog!("[pulsepet] set_ignore_cursor_events({enabled}) failed: {e}");
         }
         if !enabled {
             let _ = win.set_focus();
@@ -84,7 +85,7 @@ pub fn apply_pass_through(app: &tauri::AppHandle, enabled: bool) {
     }
     // 3) 广播前端（pet 拖拽/右键守卫 + panel 设置开关同步，TC-WIN-05）
     if let Err(e) = app.emit(PASS_THROUGH_EVENT, serde_json::json!({ "enabled": enabled })) {
-        eprintln!("[pulsepet] emit {PASS_THROUGH_EVENT} failed: {e}");
+        plog!("[pulsepet] emit {PASS_THROUGH_EVENT} failed: {e}");
     }
     // 4) 托盘 CheckMenuItem 勾选态同步（热键通道切换后托盘可见）
     if let Some(items) = app.try_state::<crate::tray::TrayItems>() {
@@ -94,7 +95,7 @@ pub fn apply_pass_through(app: &tauri::AppHandle, enabled: bool) {
             }
         }
     }
-    eprintln!("[pulsepet] pass-through = {enabled}");
+    plog!("[pulsepet] pass-through = {enabled}");
 }
 
 /// 翻转穿透（热键 / 托盘 / 右键菜单共用）。返回翻转后的值。

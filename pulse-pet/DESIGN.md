@@ -437,6 +437,31 @@ CREATE TABLE reminder_logs (
 
 Tauri `tauri-plugin-single-instance` 插件。第二实例启动时把已运行实例的 panel 唤起并退出自身。
 
+### 7.5 运行日志与诊断（logging.rs，2026-08-19 补入）
+
+**背景**：v0.1.0 Windows 实机首测（物理机、联网安装、Edge 可用）发现：托盘图标未出现、App 启动数秒内静默退出、宠物窗口无动画且无交互。代码级排查（Rust 侧平台分支 / setup 链路 / 前端交互路径）未发现必然失败点；而 `main.rs` 的 `#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]` 使 Windows release 构建的 panic 与 `eprintln!` **完全静默**（无控制台、无弹窗、无日志文件）——实机排障没有任何证据可用。本节为诊断增强：运行日志落文件 + panic 捕获。
+
+**目标**：任何一次运行都留下可回溯的证据链——启动横幅（环境四要素）→ setup 各步骤 → 退出方式（干净退出 / panic）。日志最后一行 = 死前最后完成的步骤；panic 记录 = 直接原因。
+
+**非目标**：不引入 `log`/`tracing` 生态与分级日志（全仓仅 35 个 `eprintln!` 调用点，宏足够，POC 定位）；不改前端（webview console 走 devtools）；不做压缩/定时清理等轮转服务（保留一代即可）。
+
+| 项 | 定案 | 说明 |
+|---|---|---|
+| 模块 | 新增 `src-tauri/src/logging.rs` | `run()` 第一行 `logging::init()`，早于 `Builder::build()`——setup 闭包与窗口创建都在 `build()` 内执行（失败走 `.expect` panic），init 前置后全程在捕获范围内 |
+| 日志路径 | Windows `%LOCALAPPDATA%\pulsepet\pulsepet.log`；POSIX `~/.pulsepet/pulsepet.log`（即 `runtime_dir()` 的父目录） | 与 runtime 目录（token/endpoint，退出即清，§3.1）刻意分离：日志**跨会话保留**——崩溃后残留的上一会话日志正是排障证据 |
+| 轮转 | 启动时检查，超 1MB 改名 `.old`（只保留一代） | 两代足够对照"上次崩溃 vs 本次" |
+| 写入形态 | `plog!` 宏（`#[macro_export]`）：`chrono::Local` 时间戳前缀 + 追加写文件 + 同时写 stderr | 全仓 35 处 `eprintln!` 机械替换为 `plog!`（文案不变）；stderr 保留 `tauri dev` 终端可读的习惯。句柄 `OnceLock<Mutex<Option<File>>>` 惰性持有；init 失败时宏退化为仅 stderr——日志系统自身故障不阻断 App 启动 |
+| panic 捕获 | `init()` 安装 `std::panic::set_hook`：panic 消息 + 位置（file:line）+ `Backtrace::force_capture()` 落文件 | 关键路径：lib.rs setup 返回 Err / `.expect("error while building tauri application")` 在 Windows GUI 子系统下原本完全不可见 |
+| 启动横幅 | App 版本（`env!("CARGO_PKG_VERSION")`）、OS（`std::env::consts::OS`）、debug/release、WebView 版本（`tauri::webview_version()`，`Result<String>`） | WebView 版本直接验证"WebView2 运行时缺失/过老"假设（缺失时记 Err 原文）；一条日志含环境四要素 |
+| setup 步骤标记 | lib.rs 补 `setup begin` / `setup complete`；既有步骤日志（`http server listening` / `tray built` / `hotkey registered` 等）原样保留 | 日志最后一行即死点定位 |
+| 退出记录 | `RunEvent::Exit` 写 exit 日志 | 区分"干净退出"（有 exit 行）vs"崩溃/被杀"（无 exit 行）——与 Windows 事件查看器 Application Error（ID 1000）的故障模块名互为印证 |
+| 测试 | `init_at(path)` 注入式（tempdir）：横幅写入、追加写、超限轮转改名、panic hook 落文件 | 不污染真实用户目录；沿用 atlas.rs 的注入测试模式 |
+| 依赖 | 零新增（chrono 已有；不加 windows-sys / 日志框架） | 见"非目标" |
+
+**日志内容边界（对齐 TC-SEC 系列）**：不打 token 值（现有日志仅含端口/路径/状态字面量，替换不改文案）；panic 消息可能含 OS 错误串原文（文件路径等），落本机用户目录风险可接受，与"事件体不明文落盘"（TC-SEC-06）口径不冲突——日志不含事件体。
+
+**决策记录（2026-08-19 用户裁定）**：① panic / 启动失败**不弹** Windows 原生 MessageBox，只落日志文件（实机排障读 `%LOCALAPPDATA%\pulsepet\pulsepet.log`）；② 先改代码并本地验证（`cargo test` + `tauri dev` 双通道核对 + macOS release 冒烟），tag 触发 CI 出 Windows 包另行决定。
+
 ---
 
 ## 8. Todo 插件机制
@@ -544,6 +569,7 @@ lab/pulse-pet/
 │   │   ├── reminders.rs                # 调度器（tokio interval）
 │   │   ├── windows.rs                  # pet/panel/fireworks 窗口管理 + spawn
 │   │   ├── tray.rs                     # 托盘
+│   │   ├── logging.rs                  # 运行日志：plog! + panic hook + 轮转（§7.5）
 │   │   └── db.rs                       # 本地 SQLite 迁移
 │   ├── capabilities/                   # 权限配置
 │   ├── resources/
@@ -661,6 +687,7 @@ lab/pulse-pet/
 - **opencode 插件运行时**：opencode 插件 API 目前在演进，hooks 字段稳定但可能新增；v1 监听字段做存在性检测后兜底 `event` bus；安装脚本做"幂等合并 + `--pulse-pet-managed` 标记"保证卸载不误删用户原有插件。
 - **Tauri 2 API 变化**：锁定最新稳定版，按文档调整（与 todo-lite 同策略）。
 - **Windows 端实机验证延后**：v1 主要在 macOS 开发，Windows 在 M4/M8 阶段交叉验证。
+- **Windows 首测静默退出（2026-08-19，v0.1.0 实机）**：物理机首测发现托盘未出现、启动数秒内静默退出、宠物无动画无交互；代码级排查未发现必然失败点，根因待实机日志取证（候选：WebView2 运行时异常、透明窗口 GPU 合成崩溃、杀软拦截、残留实例）。诊断依赖 §7.5 运行日志，随下一版安装包实机验证。
 - **多显示器烟花绽放点实机验证（M4 注记）**：M4 实现为代码级链路（`pet.current_monitor()` 判屏 → `cover_monitor` 铺窗 → `monitor_burst_point_in_window` 纯函数），单屏已实测（绽放点固定屏中轴 + 0.3 屏高）；多屏实机（含 cover_monitor 后回读坐标竞态修复）并入 M8 验证。
 
 ---

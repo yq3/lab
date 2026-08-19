@@ -30,6 +30,7 @@
 //! ready/pending 握手：fireworks 窗口挂载后 invoke `fireworks_ready`，未 ready 时
 //! 的 play 请求存 pending，ready 到达即补发。
 
+use crate::plog;
 use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, Local, NaiveDate, NaiveDateTime, SecondsFormat, TimeZone, Timelike};
@@ -648,7 +649,7 @@ fn fire_and_notify(app: &tauri::AppHandle, fired: &[ReminderRule]) {
     for rule in fired {
         let ts = rule.last_triggered_at.clone().unwrap_or_default();
         let Ok(log_id) = insert_log(&conn, rule.id, &ts) else {
-            eprintln!("[pulsepet] reminder #{} insert_log 失败，跳过事件", rule.id);
+            plog!("[pulsepet] reminder #{} insert_log 失败，跳过事件", rule.id);
             continue;
         };
         let _ = mark_triggered(&conn, rule.id, &ts);
@@ -667,7 +668,7 @@ fn fire_and_notify(app: &tauri::AppHandle, fired: &[ReminderRule]) {
             },
         };
         let _ = app.emit("reminder://trigger", payload);
-        eprintln!(
+        plog!(
             "[pulsepet] reminder fired: #{} kind={} label={:?} fireworks={} log={} at {}",
             rule.id, rule.kind, rule.label, rule.use_fireworks, log_id, ts
         );
@@ -729,7 +730,7 @@ fn compute_play_payload(app: &tauri::AppHandle, log_id: i64) -> PlayPayload {
         (fw_x, fw_y, fw_w, fw_h),
         sf,
     );
-    eprintln!(
+    plog!(
         "[pulsepet] fireworks target = monitor axis x center + y*{BURST_Y_RATIO} ({target_x:.0}, {target_y:.0}) logical, origin ({origin_x:.0}, {origin_y:.0})"
     );
     PlayPayload {
@@ -829,7 +830,7 @@ fn cover_monitor(win: &tauri::WebviewWindow, mon: &tauri::Monitor) {
     }
     let _ = win.set_position(*mpos);
     let _ = win.set_size(*msize);
-    eprintln!(
+    plog!(
         "[pulsepet] fireworks window moved to monitor {:?} ({},{} {}x{})",
         mon.name(),
         mpos.x,
@@ -861,7 +862,7 @@ pub fn spawn_scheduler(app: tauri::AppHandle, state: Arc<Mutex<RemindersState>>)
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         // interval 首个 tick 立即到期：跳过第 0 次避免启动瞬间扫一次（无害但省心）
         interval.tick().await;
-        eprintln!("[pulsepet] reminder scheduler started (tick {}ms)", tick_ms());
+        plog!("[pulsepet] reminder scheduler started (tick {}ms)", tick_ms());
         loop {
             interval.tick().await;
             run_tick(&app, &state);
@@ -1035,7 +1036,7 @@ pub fn play_debug_fireworks(app: &tauri::AppHandle) {
     let Some(state) = app.try_state::<Arc<Mutex<RemindersState>>>() else {
         return;
     };
-    eprintln!("[pulsepet] debug fireworks (hotkey)");
+    plog!("[pulsepet] debug fireworks (hotkey)");
     dispatch_play(app, &state, -1);
 }
 
@@ -1057,7 +1058,7 @@ fn dispatch_play(app: &tauri::AppHandle, state: &Arc<Mutex<RemindersState>>, log
         if st.fw_ready {
             let _ = app.emit_to("fireworks", "fireworks://play", payload);
         } else {
-            eprintln!(
+            plog!(
                 "[pulsepet] fireworks not ready, queueing play (log {log_id})"
             );
             st.fw_pending = Some(payload);
@@ -1067,7 +1068,7 @@ fn dispatch_play(app: &tauri::AppHandle, state: &Arc<Mutex<RemindersState>>, log
         if let Some(db) = app.try_state::<Mutex<Connection>>() {
             if let Ok(conn) = db.lock() {
                 let _ = dismiss_log(&conn, old, "fireworks");
-                eprintln!("[pulsepet] fireworks superseded: backfill log {old} via 'fireworks'");
+                plog!("[pulsepet] fireworks superseded: backfill log {old} via 'fireworks'");
             }
         }
     }
@@ -1112,7 +1113,7 @@ fn spawn_fireworks_watchdog<R: tauri::Runtime>(
                 if let Some(db) = app.try_state::<Mutex<Connection>>() {
                     if let Ok(conn) = db.lock() {
                         let _ = dismiss_log(&conn, log_id, "fireworks");
-                        eprintln!("[pulsepet] fireworks watchdog: backfill log {log_id} via 'fireworks'");
+                        plog!("[pulsepet] fireworks watchdog: backfill log {log_id} via 'fireworks'");
                     }
                 }
             }
@@ -1122,7 +1123,7 @@ fn spawn_fireworks_watchdog<R: tauri::Runtime>(
                 .unwrap_or(false);
             if visible {
                 windows::hide_fireworks(&app);
-                eprintln!("[pulsepet] fireworks watchdog hide (gen {gen})");
+                plog!("[pulsepet] fireworks watchdog hide (gen {gen})");
             }
         }
     });
@@ -1151,7 +1152,7 @@ pub fn fireworks_ready<R: tauri::Runtime>(
         let _ = app.emit_to("fireworks", "fireworks://play", p.clone());
         windows::show_fireworks(&app);
         spawn_fireworks_watchdog(app.clone(), state.inner().clone(), p.log_id, gen);
-        eprintln!(
+        plog!(
             "[pulsepet] fireworks ready → replay pending (log {}, watchdog reset to gen {gen})",
             p.log_id
         );
@@ -1177,7 +1178,7 @@ pub fn fireworks_finished(app: tauri::AppHandle, log_id: i64) -> Result<(), Stri
     if let Ok(conn) = db.lock() {
         let _ = dismiss_log(&conn, log_id, "fireworks");
     }
-    eprintln!("[pulsepet] fireworks finished: log {log_id} hidden");
+    plog!("[pulsepet] fireworks finished: log {log_id} hidden");
     Ok(())
 }
 

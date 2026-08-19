@@ -16,6 +16,7 @@
 //!   单测固化。
 //! - 仅 Rust 侧使用插件 API（注册 + 分发），无 JS 插件包依赖。
 
+use crate::plog;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
 /// 热键动作（dispatch 用；DebugFireworks 仅 debug 构建出现在规格表）。
@@ -78,15 +79,15 @@ fn accel_normalized(accel: &str) -> String {
 fn dispatch(app: &tauri::AppHandle, action: HotkeyAction) {
     match action {
         HotkeyAction::TogglePanel => {
-            eprintln!("[pulsepet] hotkey: toggle panel");
+            plog!("[pulsepet] hotkey: toggle panel");
             crate::windows::toggle_panel(app);
         }
         HotkeyAction::TogglePassThrough => {
-            eprintln!("[pulsepet] hotkey: toggle pass-through");
+            plog!("[pulsepet] hotkey: toggle pass-through");
             crate::interaction::toggle(app);
         }
         HotkeyAction::DebugFireworks => {
-            eprintln!("[pulsepet] hotkey: debug fireworks");
+            plog!("[pulsepet] hotkey: debug fireworks");
             crate::reminder_scheduler::play_debug_fireworks(app);
         }
     }
@@ -103,7 +104,7 @@ pub fn register_all(app: &tauri::AppHandle) -> Result<(), tauri_plugin_global_sh
                 dispatch(_app, action);
             }
         })?;
-        eprintln!("[pulsepet] hotkey registered: {}", spec.accel);
+        plog!("[pulsepet] hotkey registered: {}", spec.accel);
     }
     Ok(())
 }

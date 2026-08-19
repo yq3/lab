@@ -13,6 +13,7 @@
 //!   边缘路径（A3 契约测试钉住该分工），v1 不做全量错误串双语。
 //! - 不翻译项：宠物状态名（idle/working…技术词）、品牌名 PulsePet。
 
+use crate::plog;
 use std::sync::Mutex;
 
 use rusqlite::Connection;
@@ -214,7 +215,7 @@ pub fn ui_set_language(app: tauri::AppHandle, lang: String) -> Result<(), String
         let _ = win.set_title(parsed.panel_title());
     }
     let _ = app.emit(LANGUAGE_EVENT, serde_json::json!({ "lang": parsed.as_str() }));
-    eprintln!("[pulsepet] ui language set to {}", parsed.as_str());
+    plog!("[pulsepet] ui language set to {}", parsed.as_str());
     Ok(())
 }
 

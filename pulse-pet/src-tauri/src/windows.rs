@@ -6,6 +6,7 @@
 //! + 坐标，显示器已不存在则回退主显示器（TC-APP-09/10）；panel 支持可见性
 //! 切换（全局热键，TC-APP-06）。
 
+use crate::plog;
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::Mutex;
 use std::time::Duration;
@@ -62,7 +63,7 @@ pub fn toggle_pet(app: &tauri::AppHandle) {
 pub fn show_fireworks<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     if let Some(win) = app.get_webview_window("fireworks") {
         let _ = win.show();
-        eprintln!("[pulsepet] fireworks window show");
+        plog!("[pulsepet] fireworks window show");
     }
 }
 
@@ -70,7 +71,7 @@ pub fn show_fireworks<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
 pub fn hide_fireworks<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     if let Some(win) = app.get_webview_window("fireworks") {
         let _ = win.hide();
-        eprintln!("[pulsepet] fireworks window hide");
+        plog!("[pulsepet] fireworks window hide");
     }
 }
 
@@ -236,13 +237,13 @@ pub fn restore_pet_position(app: &tauri::AppHandle) {
                 .filter(|id| monitors.iter().any(|m| &m.id == *id))
                 .cloned()
                 .unwrap_or_else(|| primary_id.clone().unwrap_or_default());
-            eprintln!(
+            plog!(
                 "[pulsepet] restored pet position: ({cx}, {cy}) on monitor {target_id:?} (saved {:?}, monitors {:?})",
                 mon,
                 monitors.iter().map(|m| m.id.as_str()).collect::<Vec<_>>()
             );
         }
-        None => eprintln!("[pulsepet] no saved pet position"),
+        None => plog!("[pulsepet] no saved pet position"),
     }
 }
 
@@ -270,7 +271,7 @@ pub fn save_pet_position(app: &tauri::AppHandle) {
     if let Some(name) = &mon {
         let _ = crate::db::set_state(&conn, KEY_MON, name);
     }
-    eprintln!(
+    plog!(
         "[pulsepet] saved pet position: ({}, {}) monitor {:?}",
         pos.x, pos.y, mon
     );
