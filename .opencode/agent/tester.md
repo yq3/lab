@@ -51,6 +51,11 @@ permission:
 - 外部临时目录已放行（/var/folders、/tmp、~/Library/Application Support）：测试工具、截图、中间产物、被测 App 数据放这些位置，仓库内不留测试残留
 - 能用内置 read/grep/glob 工具完成的一律优先用工具（不经权限系统，零摩擦）；找文件用 Glob，不用 find
 
+【图像识别选型】GUI 截屏验证时：
+- 断言"某段文字存在" → OCR（字符级、确定性、可给坐标）
+- 语义判断（控件状态对不对、动效是否渲染、布局是否异常、中文 UI 截图理解）→ Task 委派 Vision（subagent_type=Vision）：传截图绝对路径 + 具体问题（如"弹窗是否正确遮挡"，不要泛泛"描述截图"）；Vision 纯只读、无状态，单次调用
+- 优先级：DOM/accessibility 断言 > 测试钩子 > OCR > Vision，像素识别是最后手段
+
 【失败分类协议】测试失败必须归类：
 - IMPL_BUG：实现与用例预期不符 → 报给 coder 修
 - TEST_BUG：测试自身写错（mock/断言错误）→ 自己修测试重跑

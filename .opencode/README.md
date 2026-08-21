@@ -853,3 +853,44 @@ D31 落地后切换到任一 agent 即报错：`Agent Supervised-Coding's config
 5. ~~支持多技术栈时，引入 per-target 测试命令配置（如 `opencode-test-config.json`），替代静态 bash 白名单~~（已被 D37 取代：bash 默认放行后无白名单可替代）
 6. 新领域监督模式（`supervised-design` 等）按 D21 模式族扩展，subagent 按需复用（D23 默认开放）
 7. **用户直连通道实施（D35，已定稿）**：supervised-coding 调用预告附 taskId + 可粘贴直连命令、3 个 subagent prompt 增直连协议（只答询、只读代码、要改引导回主线）、§7 使用指南补 B/C/A 三通道用法——方案全文见 D35
+
+---
+
+## 10. 第二版演进（v11 起，2026-08-22）
+
+> v10 之后的演进只在本节追加记录，不改写上文（含 §1-§9 与 D1-D37）；与上文冲突时以本节为准。
+
+### D38. Vision 图像识别 subagent（2026-08-22，第二版首项演进）
+
+**问题**：4 个角色全是纯文本语言模型，GUI 验证中 tester 只能 screencapture + OCR（D32/D37 放行的命令）——字符提取尚可，语义判断（控件状态、渲染效果、布局异常）无能为力。 tester prompt 中"screencapture 截屏/OCR"是明确的缺口。
+
+**设计**（新增 `.opencode/agent/vision.md`，其余配置零改动）：
+
+- `mode: subagent`，`model: zhipuai-coding-plan/glm-4.6v`（coding plan 内视觉模型：attachment: true、128K ctx、reasoning toggle；按 token 计费 0.3/0.9 每百万。备选 `glm-5v-turbo` 零成本、200K ctx，frontmatter 一行可切）
+- 纯只读：`edit: deny` + `bash: deny`，只用 read 工具读图（原生支持 png/jpg/PDF）；路径不可读时如实报告，禁止猜测内容
+- 无状态单次调用：**不进检查点协议**（无 xxxTaskId 字段、无会话续接），结果即弃
+- 结构化输出 5 小节：图片概况 / 文本提取（原文照抄+大致区域）/ 视觉元素 / 针对所提问题的观察结论 / 低置信度标注
+- 调用方式：调用方 Task 时传**图片绝对路径 + 具体问题**，Vision 自己读图（文本模型调用方读图无意义）
+- 委派入口：Coder/Tester/Committer 均无 task 权限限制（D23 默认开放），三者皆可自动委派；**supervised-coding 不调用**（task 白名单 `"*": deny` 未加 Vision——用户决策：编排者用不到，不加）
+- D28 闸门不涉及：调用预告只约束 supervised-coding 对 Coder/Tester/Committer 的调用；Vision 的委派发生在三个 subagent 层，天然不在闸门内（低风险纯只读，也无需扩展闸门）
+
+**Vision vs OCR 选型**（已作为简短指引写入 3 个 subagent prompt）：
+
+| 场景 | 选择 |
+|---|---|
+| 语义判断（控件状态、渲染效果、布局异常、中文 UI 截图理解） | Vision |
+| 断言"某段文字存在"（便宜、确定性） | OCR |
+| 字符级精确提取、精确像素坐标、CI 确定性断言、批量/离线 | OCR |
+| 通用优先级 | DOM/accessibility 断言 > 测试钩子 > OCR > Vision（像素识别是最后手段） |
+
+**验证记录**（2026-08-22 实测，均经 Task 委派真实调用 glm-4.6v）：
+
+1. 128×128 小图标（hexo fluid.png）：文本 "Fluid"/"H" 提取正确，5 小节格式遵守
+2. 5MB retina 桌面截屏（pulse-pet/images/截屏2026-08-20 18.57.24.png）：中文 UI 全量提取准确（窗口标题、标签页、提醒规则文案、按钮状态 √启用/□烟花 未勾选），连桌面截屏文件名都逐个识别；控件状态语义区分正确
+3. **定向提问对比实验**：泛问"描述截图"→ 烟花效果仅一句带过（"中央有彩色烟花效果"）；定向问"烟花位置/形态/是壁纸还是叠加特效"→ 完整分析（中央偏上、放射状、数百粒子+拖尾、多色，判断为实时叠加特效并给出层次/动态感/设置项三重依据）。**结论：委派时问题质量决定输出深度，第 4 小节（针对问题的结论）才是核心价值**——该教训已体现在 3 个 subagent prompt 的指引措辞中（"问题要问准"）
+
+**已知限制**：
+
+- 桌面等敏感目录受 macOS TCC 拦截（`Operation not permitted`，且 Glob 会表象为"空目录"）：需在系统设置为 opencode 宿主终端授予"桌面文件夹"访问权，或把图拷到仓库/已放行的临时目录（D37 的 external_directory 白名单目录可用）
+- 字符级精确性与像素坐标不如专用 OCR；LLM 输出有随机性，CI 确定性断言仍走 OCR
+- 4.6v 按 token 计费，coding plan 额度抵扣情况待长期观察；不划算时切 `glm-5v-turbo`（零成本）
