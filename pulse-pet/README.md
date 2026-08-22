@@ -2,7 +2,7 @@
 
 桌面宠物 App：监听 opencode agent 工作状态，用一只像素小猫实时呈现（9 行姿态 atlas 动画），配 token 本地统计、喝水/休息提醒（气泡 + 烟花）、轻量 todo 插件（派生提醒 / 完成联动庆祝）。
 
-> POC 阶段，效果验证通过后可能拆仓独立演进。设计与范围见 [DESIGN.md](./DESIGN.md)、[DECISIONS.md](./DECISIONS.md)，验收依据见 [TEST-CASES.md](./TEST-CASES.md)。
+> POC 阶段，效果验证通过后可能拆仓独立演进。设计与范围见 [docs/v1/DESIGN.md](./docs/v1/DESIGN.md)、[docs/v1/DECISIONS.md](./docs/v1/DECISIONS.md)，验收依据见 [docs/v1/TEST-CASES.md](./docs/v1/TEST-CASES.md)；v1 遗留与 v0.1.3 维护版计划见 [docs/v1/V1-OPEN-ITEMS.md](./docs/v1/V1-OPEN-ITEMS.md)，v2 范围见 [docs/v2/V2-SCOPE.md](./docs/v2/V2-SCOPE.md)。
 
 ## 技术栈
 
@@ -374,7 +374,9 @@ pulse-pet/
 │   └── Cargo.toml
 ├── opencode-plugin/          # opencode 插件（install.sh / install.ps1 + hook，详见其 README）
 ├── scripts/gen-assets.mjs    # 生成内置精灵素材 + 图标源
-├── DESIGN.md / TEST-CASES.md / DECISIONS.md
+├── docs/                     # 文档（按版本划分：v1 = 0.1.x 线设计/验收/遗留，v2 = v2 范围）
+│   ├── v1/                   # DESIGN / TEST-CASES / DECISIONS / V1-OPEN-ITEMS（含 v0.1.3 计划 §八）等
+│   └── v2/                   # V2-SCOPE 等
 └── README.md
 ```
 
@@ -390,7 +392,7 @@ pulse-pet/
 - **M8** ✅ 收尾——i18n（zh/en）、Windows CI 级兼容（TC-CI-02）、capability 收敛 + TC-SEC 回溯、README/AGENTS 更新、遗留清偿（A1 迁移事务化 / A2 重武装边界 / A3 校验口径契约 / A4 静默吞错 / A5 pending 补发 watchdog / A6 install.ps1 BOM + permission.asked / A7 主屏兜底注释固化 / A8 不可达分支定案保留 / A9 烟花点位显示器 bounds 计算）。
 - **后移项**：多屏实机验证（TC-APP-10/11、跨屏烟花）、Windows 实机验证（TC-DONE-03 等）——具备硬件时；心跳 / `/health` 限流豁免——v2（心跳引入时）；TC-DONE-01~09 综合验收——v1 Done 验收任务。
 
-详见 [DESIGN.md §10](./DESIGN.md) 实施里程碑。
+详见 [docs/v1/DESIGN.md §10](./docs/v1/DESIGN.md) 实施里程碑。
 
 ## M3 实测记录：opencode session 表写入时机（TC-TK-11）
 

@@ -6,6 +6,12 @@
 
 PulsePet 是一个桌面宠物 App（Tauri 2 + React + TS + Vite），监听 opencode agent 状态并用像素小猫动画呈现。v1 仅支持 opencode，架构上预留多 agent 扩展。
 
+## 文档地图（2026-08-22 起按版本归档于 `docs/`）
+
+- `docs/v1/`——**0.1.x 发版线**文档：`DESIGN.md`（技术方案）、`TEST-CASES.md`（验收用例）、`DECISIONS.md`（v1 范围决策）、`V1-OPEN-ITEMS.md`（v1 遗留清单，**§八 = v0.1.3 维护版计划**）、`DESIGN-REVIEW.md` / `TEST-CASES-REVIEW.md`（历史评审，留档原貌）、`desktop-pet-research.md`（调研）。0.1.x 线的维护性文档修订（如 v0.1.3 改 TEST-CASES 措辞）仍落此处。
+- `docs/v2/`——**v2** 范围与设计：`V2-SCOPE.md`（v2 主体 M1~M6）；后续 `V2-DESIGN.md` 等落此目录，**不回改 docs/v1/ 文档**。
+- 正文中的 `DESIGN §x` / `TEST-CASES §x` 等纯文字引用均指 `docs/v1/` 下同名文件。
+
 ## 本目录技术栈与命令
 
 - **前端**：React 19 + TypeScript + Vite + Zustand。`npm run dev`（Vite，端口 1430）、`npm run build`（tsc + vite build）、`npm test`（vitest）。

@@ -583,12 +583,14 @@ lab/pulse-pet/
 │   ├── pulse-pet-hook.js               # opencode 插件本体（~200 行）
 │   ├── install.sh / install.ps1        # 安装脚本
 │   └── README.md
-├── DECISIONS.md                        # v1 范围决策记录
-├── desktop-pet-research.md             # 调研报告
-├── DESIGN.md                           # 本文档
+├── docs/                               # 2026-08-22 起：文档按版本归档
+│   ├── v1/                             #   DECISIONS / desktop-pet-research / DESIGN（本文档）/ TEST-CASES 等移此
+│   └── v2/                             #   V2-SCOPE 等
 ├── AGENTS.md                           # 项目级指令（pet 引导 + 项目说明）
 └── README.md
 ```
+
+> 注：文档原位于项目根目录，2026-08-22 起按版本归档至 `docs/v1/`（本文档所在）与 `docs/v2/`；表中其余为 v1 时点结构。
 
 ---
 

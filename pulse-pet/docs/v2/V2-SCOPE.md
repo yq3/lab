@@ -3,7 +3,7 @@
 > 记录日期：2026-08-20
 > 来源：基于 v1 收官（M8 + v0.1.0/v0.1.2 发版）后的实际使用反馈与本轮范围讨论
 > 性质：v2 的范围边界与分阶段计划，作为后续 v2 方案设计与实施的输入
-> 关联：[DECISIONS.md](./DECISIONS.md)（v1 范围）、[V1-OPEN-ITEMS.md](./V1-OPEN-ITEMS.md)（v1 遗留清单，本文件对其逐条裁定去向）
+> 关联：[DECISIONS.md](../v1/DECISIONS.md)（v1 范围）、[V1-OPEN-ITEMS.md](../v1/V1-OPEN-ITEMS.md)（v1 遗留清单）
 
 ---
 
@@ -11,34 +11,13 @@
 
 - **个人工具深耕**：v2 服务于作者自己的日常使用（opencode + Claude Code 双 agent、多 session 多开），不做开源产品化运营（排行榜 / 插件市场 / 自动更新等均不在内）。
 - **暂不拆仓**：继续在 lab/pulse-pet 下演进，拆仓时机后续再议。
-- **前置**：先发 **v0.1.3 维护版**清偿 v1 遗留（§2），再进入 v2 主体（§3）。分两段的原因：遗留 7 条均为日常使用正在忍受的痛点，早发早受益；其中 3 条改插件（`pulse-pet-hook.js`），插件与 App 需配套发布（改完需重跑 `install.sh`）。
+- **前置**：先发 **v0.1.3 维护版**清偿 v1 遗留，再进入 v2 主体（§3）。分两段的原因：遗留 7 条均为日常使用正在忍受的痛点，早发早受益；其中 3 条改插件（`pulse-pet-hook.js`），插件与 App 需配套发布（改完需重跑 `install.sh`）。
 
 ---
 
 ## 2. v0.1.3 维护版（先行，~1 周）
 
-### 2.1 范围（对应 V1-OPEN-ITEMS 编号）
-
-| 来源 | 事项 | 要点 |
-|---|---|---|
-| 三-1 | `settings.languageFail` 文案 key | 新增键替换语义错位的 `settings.passFail` 复用，~3 行 + 1 字典键 |
-| 三-2 | GitHub Actions v4 升级 | `actions/checkout` / `setup-node` 升大版本；**与 todo-lite 共用 build.yml，需一起回归** |
-| 四-1 | 设置页宠物下拉自动刷新 | 监听面板重新可见 / `panel://tab` 重新 `load()`，使 README「放好即出现」承诺无条件成立 |
-| 四-2 | thinking 粘性窗口 | `chat.message` 投递 thinking 后 3-5s 内吞掉 reaction 桶的 working/idle（更高优先级状态照常穿透） |
-| 四-3 | idle 节流豁免 | `bucketFor("idle")` 返回 null 永远放行（行为缺陷修复） |
-| 四-4 | 流式心跳 | `classifyEvent` 增加 `message.updated` / `message.part.updated` → working，防纯文本生成阶段静默超时回 idle |
-| 四-5 | 烟花+气泡叠加 | 去掉二选一编排，烟花提醒同时展示气泡文案；原则：特效只叠加不替代气泡 |
-| 二 | TC-DONE-01~09 综合验收 | 含 **TC-DONE-04 无人值守 30 分钟**（从未完整执行；顺带验证四-2/3/4 真实长会话效果） |
-| 七-1 | draft Release 处置 | v0.1.3 发布时一并决定 v0.1.0 draft 的 publish 或丢弃 |
-
-### 2.2 设计约束
-
-- **四-2 与四-4 必须联动设计**（V1-OPEN-ITEMS 四-4 已注明）：粘性窗口吞 working 会减少计时刷新机会、加剧流式静默超时。初步方向：粘性窗口只吞 `session.status(busy)` 来源的 working，流式心跳类 working 照常投递（只刷新活性、不改变显示）——实现阶段定案。
-- **四-4 前置 spike**：实测 opencode 1.18 `message.updated` / `message.part.updated` 事件字段（联合类型中存在，字段未证实）。
-
-### 2.3 发版
-
-- tag `pulse-pet-v0.1.3` 触发现有 CI（windows-latest + macos-latest 矩阵）；发布说明提醒用户重跑 `install.sh`（插件侧改动配套）。
+> **（2026-08-22 移出）** 本节范围与计划已移至 [V1-OPEN-ITEMS.md §八](../v1/V1-OPEN-ITEMS.md)——v0.1.3 属 **0.1.x 发版线维护收尾**（清偿 v1 遗留），与 v2 开发并行，归入 v1 文档目录更合身份；本文件自 §3 起为 v2 主体，章节编号保持不变。
 
 ---
 
