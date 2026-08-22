@@ -958,3 +958,38 @@ D31 落地后切换到任一 agent 即报错：`Agent Supervised-Coding's config
 
 - `OPENCODE_CONFIG_CONTENT` 注入的配置**不走严格校验**（typo 键不报错）——判断配置键是否被当前版本支持必须用真配置文件（未知顶级键 ConfigInvalidError 拒启）
 - Vision 读**工作区外**图片触发 `external_directory` ask：TUI 交互模式下用户可批准；无头 `opencode run` 会挂死。tester 委派时截图应放仓库内或 D37 已放行的目录（external_directory 规则会继承进 Vision 会话，`subagent-permissions.ts` 把父会话的 external_directory 与 deny 规则并入子会话）
+
+### D41. 双前端设计 skill 并存：frontend-design + impeccable（2026-08-22）
+
+**问题**：coder 生成的 UI 有模板味（AI 设计三大俗：奶油底衬线陶土色 / 近黑底荧光绿 / 报纸风零圆角）；且 UI 打磨缺少体系化手段（批评、定向调整、发布前收尾各自靠临时 prompt）。
+
+**选型**（两个都装，定位互补）：
+
+| | frontend-design（Anthropic） | impeccable（pbakaus，v4.1.1） |
+|---|---|---|
+| 形态 | 纯 SKILL.md 设计哲学（8KB） | skill + 23 命令 + 59 条确定性检测 + live 浏览器迭代 |
+| 作用方式 | **被动**：生成新 UI 时自动加载，管"下限"（不落俗套） | **主动**：`/impeccable <command> <target>` 定向迭代，管"上限" |
+| 典型场景 | coder 写新页面/组件的品味兜底 | `/impeccable init` 建上下文 → `critique`/`polish`/`bolder`/`harden` 等针对性打磨 |
+
+**分流机制**：两者靠 description 天然分流（"building new UI"（生成时）vs "user wants to ... improve"（用户要求改进））；impeccable 额外有 `user-invocable` + `argument-hint` frontmatter，opencode 注册为 `/impeccable` slash 命令（确定性出口，零歧义）。残余重叠最坏结果是双加载，内容互补无冲突。
+
+**路径约定精确化（修正 D39 表述）**：
+
+- 纯 SKILL.md、无 provider 差异的第三方 skill（playwright-cli、frontend-design）→ `.agents/skills/`（跨工具约定，Codex 等亦发现）
+- **带 provider 编译的（impeccable）→ 跟安装器走 `.opencode/skills/`**（opencode 主路径；`--providers=opencode --scope=project` 安装）
+- 关键坑（实测踩过）：**两处同名的 impeccable 是不同 provider 构建，不可互换不可并存**——opencode 构建（`user-invocable`/`argument-hint`、`/` 前缀、脚本路径指 `.opencode/`）vs Codex 构建（`$` 前缀、多 "Codex sub-agent gate" 段与 `agents/` 专用目录、脚本路径指 `.agents/`）。opencode 要求 skill 名跨位置唯一，同名双装有加载冲突风险，发现重复立即删非 opencode 构建
+
+**升级姿势**：`impeccable update`（全局 CLI 保留，更新 `.opencode/` 的 opencode 构建）。警惕安装器"检测到的 harness"自动扩展：交互默认值会按检测列表安装，误装 Codex 构建到 `.agents/` + `.codex/hooks.json` 的事故已发生并清理（见踩坑 2）。
+
+**踩坑三条（都实测）**：
+
+1. `npx impeccable install` 在非交互 shell 挂起——npx 首次下载的 "Ok to proceed? (y)" 确认卡死，须用 `npx -y`；本次改走全局装安装器（588ms 完成）
+2. **`impeccable install --help` 非只读**：走交互安装流程并接受默认值，实际执行了安装（多装 Codex 构建 + `.codex/hooks.json`）——把它当只读帮助命令用是错的
+3. puppeteer postinstall 被 allow-scripts 拦截：仅影响浏览器扩展功能，skill/detector 不依赖；live 模式需要时再 `npm approve-scripts`
+
+**验证记录**（2026-08-22）：
+
+1. frontend-design：`gh api` 取 SKILL.md（8.3KB，SHA-256 与上游一致）+ LICENSE.txt → `.agents/skills/frontend-design/`
+2. impeccable：安装器输出 "Installed impeccable into: .opencode (project)"；detector CLI 可跑（`node .opencode/skills/impeccable/scripts/detector/detect-antipatterns.mjs --help`，零 LLM 零 API key）
+3. 清理后盘点：`.agents/skills/` = {frontend-design, playwright-cli}，`.opencode/skills/` = {impeccable}，`.codex` 已删
+4. 待新会话验证：skill 列表三者齐全 + `/impeccable` 命令可补全（当前会话 skill 列表是启动快照，测不了）
