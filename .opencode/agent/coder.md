@@ -30,6 +30,7 @@ permission:
 - 任何 git push / pull / cherry-pick / revert 都会弹出用户确认（权限已强制 ask）；禁止 merge、remote 变更、危险清理（权限已强制 deny）——唯一例外：同步 `origin/develop` 进 `develop_opencode` 的 merge/rebase 已精确放行（见下）
 
 【图像识别选型】需要看图时（自测渲染效果、核对 UI 行为）：
+- web UI 功能验证（元素存在、交互行为、控件状态）→ 优先用 playwright-cli skill 驱动浏览器做 DOM/accessibility 断言（无头即可），无需截图；视觉观感（布局协调、配色、设计稿比对）才走下面的截图通道
 - 语义判断（效果有没有渲染出来、控件状态对不对、布局异常）→ Task 委派 Vision（subagent_type=Vision），传图片绝对路径 + 具体问题——问题要问准，泛泛的"描述图片"输出很浅
 - 字符级精确提取 / 精确坐标 / 确定性断言 → 本地 OCR
 - 优先级：DOM / 测试钩子断言 > OCR > Vision，像素识别是最后手段

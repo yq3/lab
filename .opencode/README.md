@@ -894,3 +894,41 @@ D31 落地后切换到任一 agent 即报错：`Agent Supervised-Coding's config
 - 桌面等敏感目录受 macOS TCC 拦截（`Operation not permitted`，且 Glob 会表象为"空目录"）：需在系统设置为 opencode 宿主终端授予"桌面文件夹"访问权，或把图拷到仓库/已放行的临时目录（D37 的 external_directory 白名单目录可用）
 - 字符级精确性与像素坐标不如专用 OCR；LLM 输出有随机性，CI 确定性断言仍走 OCR
 - 4.6v 按 token 计费，coding plan 额度抵扣情况待长期观察；不划算时切 `glm-5v-turbo`（零成本）
+
+### D39. playwright-cli skill：浏览器自动化走 CLI+Skill，弃 MCP（2026-08-22）
+
+**问题**：D38 选型表的首选层"DOM/accessibility 断言"一直无工具支撑——coder/tester 验证 web UI 只能截图走 OCR/Vision。补齐该层时评估了 Playwright MCP 与 playwright-cli 两条路线。
+
+**选型**（微软官方 README 明示 coding agent 用 CLI+Skill 更合适）：
+
+| | Playwright MCP | playwright-cli + skill（选定） |
+|---|---|---|
+| token 开销 | 工具 schema 常驻每个 agent 的 context；交互全量 accessibility tree 进 context | 无 schema；快照为精简 YAML，`find` 只返回匹配节点片段 |
+| 接入成本 | 需写 opencode.json 的 mcp 配置 | 零配置：走 bash 命令，Coder/Tester 的 bash 权限天然放行 |
+| 适用 | 探索性自动化、长时自治循环 | 高吞吐 coding agent（大代码库 + 测试 + 推理共享有限 context） |
+
+对 subagent 架构尤其关键：Coder/Tester 每次 Task 都是全新 context，MCP 的 schema 常驻是每会话重复开销；CLI 调用零常驻成本。
+
+**安装**（已执行，commit 2945794）：
+
+- `npm install -g @playwright/cli@0.1.18`（~/.npm-global，用系统 Chrome，无需下载浏览器；附带 FFmpeg 供录屏）
+- `playwright-cli install --skills=agents` → `.agents/skills/playwright-cli/`（SKILL.md + 9 个 references：test-generation/tracing/request-mocking/storage-state/session-management 等）
+
+**为什么放 `.agents/skills/` 而非 `.opencode/skills/`**：`.agents/skills/` 是 Agent Skills 开放标准（agentskills.io，Anthropic 发起）的中立路径，跨工具可发现——opencode 官方支持已验证；Codex 源码实锤（`codex-rs/ext/skills/src/host_roots.rs` 从 cwd 向上扫 `.agents/skills/`）；Claude Code 未确认是否扫此路径，需要时跑 `playwright-cli install --skills`（装到 `.claude/skills/`）即可，CLI 自带两处版本一致性校验。自建 skill 仍放 `.opencode/skills/`（与本仓 `.opencode/agent/` 结构一致）。
+
+**配套变更**：`.gitignore` 增加 `.playwright/`（CLI 的 workspace 配置目录，安装时创建的空占位）与 `.playwright-cli/`（运行缓存：快照 yml / 截图 png / traces / console log）——均为机器本地状态，不随 git。
+
+**与 D38 选型表的衔接**：本 skill 把"DOM/accessibility 断言"层做实（snapshot 拿带 ref 的 accessibility 树 → `click/fill/check e<n>` 精确操作 → 输出等价 Playwright 代码）；视觉观感验证（布局协调、配色、设计稿比对）仍需截图走 Vision，两层互补不互替。
+
+**prompt 指引（同日补）**：coder.md / tester.md 的【图像识别选型】各加 1 条首位 bullet，点明 web UI 验证的时机与通道——理由：① 选型表顶层"DOM 断言"原本无工具指向，悬空；② skill 发现靠一行描述是概率触发，Tester（deepseek-v4-flash）任务框架是"用例转测试"，不点破连接大概率继续走截屏 OCR 老路；③ tester 的 edit 白名单 `**/*.spec.*` 恰好容纳 playwright 生成的 `*.spec.ts`，持久测试合规。committer 不加（bash 全 deny 跑不了 CLI，其角色审查证据不执行验证）。指引只写"何时用"，"怎么用"归 skill 本体。
+
+**验证记录**（2026-08-22 实测）：
+
+1. example.com：`open → snapshot`（输出几十行精简 YAML，含 ref 编号）→ `click e6`（回显等价代码 `getByRole('link', ...)`）→ `close`，链路全通
+2. TodoMVC 有头演示：`open --headed` → `type "买牛奶"`/Enter → `type "写周报"`/Enter → `find --regex "买牛奶|写周报"` 定位 → `check f1e21` 勾选完成项 → `screenshot` 截图留证；中文输入、regex 搜索、勾选交互均正常
+
+**已知限制**：
+
+- CLI 年轻（v0.1.x），命令面可能随版本变化；skill 与工具版本不匹配时 CLI 会提示重装命令
+- 默认无头；观察 agent 操作需 `--headed`、`playwright-cli show` 可视化面板，或多会话隔离用 `-s=<name>`
+- 依赖系统 Chrome；浏览器未装的环境需另行处理
