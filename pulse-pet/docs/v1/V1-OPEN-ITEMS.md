@@ -5,6 +5,8 @@
 > 性质：v1 功能开发（M1~M8）已全部收官并合入 develop；本清单为**实机验证、综合验收、小修、体验优化、v2 项**五类未了结事项。多数为"等硬件/等触发条件"，非阻塞缺陷。
 >
 > **2026-08-20 裁定**：本清单各条目去向已定——三/四全部 + 二（综合验收）→ **v0.1.3 维护版**（计划见本文 [§八](#八v013-维护版计划01x-线收尾)）；五-2（抢镜）→ **v2 M6**；五-1/3（心跳）→ **裁定不做**；七-1 随 v0.1.3 发版处置；七-2 拆仓 → **暂不拆**（v2 侧范围见 [V2-SCOPE.md](../v2/V2-SCOPE.md)）。各节内已逐条标注。
+>
+> **2026-08-22 补录**：新增 [§九](#九已修复严重缺陷插件钩子同步阻塞宿主-opencode2026-08-22)——0.1.x 线迄今最严重缺陷（插件钩子同步阻塞宿主 opencode）的完整记录：症状、源码级根因、主流设计对照、修复与回归保护、残余风险裁定。已修复，随 v0.1.3 发布（§8.1 已列入）。
 
 ---
 
@@ -150,15 +152,103 @@
 | 四-5 | 烟花+气泡叠加 | 去掉二选一编排，烟花提醒同时展示气泡文案；原则：特效只叠加不替代气泡 |
 | 二 | TC-DONE-01~09 综合验收 | 含 **TC-DONE-04 无人值守 30 分钟**（从未完整执行；顺带验证四-2/3/4 真实长会话效果） |
 | 七-1 | draft Release 处置 | v0.1.3 发布时一并决定 v0.1.0 draft 的 publish 或丢弃 |
+| 九 | §九 修复随版发布 | 修复已在 develop 工作区完成（无需开发）；发布说明**重点**提醒重跑 `install.sh`（插件副本在 `~/.config/opencode/plugins/`，不随 App 更新） |
 
 ### 8.2 设计约束
 
 - **四-2 与四-4 必须联动设计**（§四-4 已注明）：粘性窗口吞 working 会减少计时刷新机会、加剧流式静默超时。初步方向：粘性窗口只吞 `session.status(busy)` 来源的 working，流式心跳类 working 照常投递（只刷新活性、不改变显示）——实现阶段定案。
 - **四-4 前置 spike**：实测 opencode 1.18 `message.updated` / `message.part.updated` 事件字段（联合类型中存在，字段未证实）。
+- **与 §九 零阻塞契约联动（2026-08-22）**：四-2/四-4 均改 `classifyEvent` / `Throttle` / `bucketFor`（§九 修复保留了这些纯函数原实现），实现时**必须保持钩子 fire-and-forget**——`plugin-hook.test.ts`「全部 6 个钩子返回 undefined 且非 thenable」用例钉住该不变量，回归即红。四-4 落地后流式事件高频进入 `deliver`（killswitch `existsSync` 前置于节流），单次 ~µs 级仍可忽略；若实测有影响，届时评估 killswitch TTL 缓存（§九 9.6 R1）。
 
 ### 8.3 发版
 
 - tag `pulse-pet-v0.1.3` 触发现有 CI（windows-latest + macos-latest 矩阵）；发布说明提醒用户重跑 `install.sh`（插件侧改动配套）。
+
+---
+
+## 九、已修复严重缺陷：插件钩子同步阻塞宿主 opencode（2026-08-22）
+
+> 定级：**0.1.x 线迄今最严重缺陷**——插件设计缺陷（非 opencode 缺陷），症状为宿主 opencode 全面卡顿。潜伏自 M2 插件诞生，2026-08-22 首次显性爆发并当日修复。
+> 状态：**已修复 + 回归保护落地**（改动在 develop 工作区，未提交）；真实会话双场景验证待用户反馈（9.6）。
+
+### 9.1 症状（2026-08-22 用户报告）
+
+| # | 症状 | 触发 |
+|---|---|---|
+| 1 | 发送消息回车后，消息数秒不显示（偶发强度不同） | 每次发消息 |
+| 2 | 所有工具调用（read/write/edit 等）执行缓慢 | 每次工具调用 |
+| 3 | 权限弹窗出现前卡顿，点允许后续卡顿 | 每次权限询问 |
+| 4 | 时快时慢；回退 opencode 1.18.21→1.18.19 无效；一度怀疑模型问题 | 退避指数/队列瞬时状态决定强度 |
+
+共同前置条件：**PulsePet App 未运行**（`~/.pulsepet/runtime/` 无 endpoint/update-token 文件）。App 运行时无任何症状（成功投递使退避持续复位）——这正是"之前没遇到"的原因。
+
+### 9.2 根因（源码级证据链；opencode v1.18.19 实测，1.18.21 相同）
+
+**宿主侧**：插件钩子被同步 await 且无任何超时保护——
+
+| 触发点 | 位置（v1.18.19） | 阻塞语义 |
+|---|---|---|
+| `chat.message` | `session/prompt.ts:999` | 用户消息**保存/推送 TUI 之前** await → 症状 1 |
+| `tool.execute.before/after` | `session/tools.ts:106/121`（内置工具）、`175/208`（MCP 资源）、`402/420`（MCP 第三方工具） | **包夹**每次工具执行 → 症状 2；弹窗前 = before、点允许后 = after → 症状 3 |
+| `command.execute.before` | `session/prompt.ts:1460` | slash 命令执行前 await |
+| `event`（总线） | `plugin/index.ts:253-259` | 宿主侧 `void` 派发**不阻塞**（但旧插件在共享串行队列堆积退避，间接加重其它钩子） |
+| `permission.ask` | v1.18.19 服务端无触发点（权限走总线 `permission.asked`） | 插件注册了但不生效，无风险 |
+| 机制 | `plugin/index.ts:282-295` `trigger` 逐钩子 `yield* Effect.promise(...)` | 无超时；"钩子必须快"完全靠插件自觉（官方文档无警示，示例只 await 快速本地操作） |
+
+**插件侧**：旧实现三个失误叠加——
+
+1. 全部钩子 `await deliver(...)`，把宿主的同步等待传导进投递队列；
+2. `postState` 用 `readFileSync(endpoint)` 读 runtime 文件，App 未运行时 ENOENT 抛错，与网络失败混为一谈；
+3. 失败进 `await backoff.wait()`（1s→2s→5s→**30s 封顶**、失败不复位）且投递串行队列共享（P3-②）——一次"缺席"让后续所有钩子事件排在退避睡眠之后。
+
+**爆发时序**：插件 2026-08-20 安装，App 停运时段症状累积；8-22 中午 runtime 目录清空后持续爆发。换 opencode 版本无效 = 阻塞源在插件而非 opencode/模型；"时快时慢" = 退避指数瞬时值（首次失败 0ms、其后递增，偶发感强、诊断成本高）。
+
+### 9.3 主流设计对照（同类型遥测插件源码级调研，修复依据）
+
+| 插件 | 热路径钩子内做什么 | 网络发送在哪 | 错误处理 |
+|---|---|---|---|
+| `@langfuse/opencode-observability-plugin`（Langfuse 官方） | 仅本地记账 | Langfuse SDK 后台批量导出 | `runHook` catchAll 全吞，仅日志 |
+| `@langchain/langsmith-opencode`（LangChain 官方） | 写内存缓冲 | 仅 `session.idle` 时 `flush()`（天然允许延迟的时机） | 吞 |
+| `@mastra/opencode`（Mastra 官方） | await 但 try/catch | 后台 | toast，错误不逃逸宿主 |
+
+**公理**：热路径钩子（`chat.message` / `tool.execute.*`）零网络 I/O、错误不逃逸宿主、发送延迟到后台/idle 时机。钩子里合法 `await` 的只有变换型插件（改 output：命令转义、env 注入、消息 transform）。PulsePet 属纯观察型，适用全部约束；退避本身不是错，错在**退避睡眠发生在被宿主 await 的路径上**，且"下游缺席"被当作失败计退避（遥测语义应为"下游缺席→丢弃，永不伤害宿主"）。
+
+### 9.4 修复内容（2026-08-22，双管齐下）
+
+| # | 改动 | 文件 |
+|---|---|---|
+| 1 | 新增 `buildHooks(deliverer?)`：全部 6 钩子 **fire-and-forget**（不 await、不 return 投递 promise、内部吞错）；`default.server` 改 `async () => buildHooks()`；deliverer 可注入供单测 | `opencode-plugin/pulse-pet-hook.js` |
+| 2 | `postState` 拆 `readRuntimeFile`：endpoint/update-token **ENOENT/空 → 返回 `null`**（App 未运行 = 快速通道，非错误）；网络/HTTP≥400 仍抛错走退避 | 同上 |
+| 3 | `deliver`：结果为 `null` → 静默跳过（**不 reset、不消耗退避等级**） | 同上 |
+| 4 | 头注补记根因与"零阻塞契约"（防未来维护者无意改回 await） | 同上 |
+| 5 | `.d.ts` 同步：`buildHooks` 类型（钩子全部返回 `void`）、`postState` 返回 `unknown \| null` | `opencode-plugin/pulse-pet-hook.d.ts` |
+| 6 | 测试 +4：① postState 空目录→null 且零请求；② null 不消耗退避等级（`nextDelay()` 仍 0）；③ deliver 永久挂起时钩子立即返回且分类/自忽略语义不变；④ **全部 6 钩子返回 `undefined` 且非 thenable**（防回归为 async/await 的不变量钉子，任何一种回归写法立即红） | `src/lib/plugin-hook.test.ts` |
+
+行为差异（诚实记录）：fire-and-forget 后，PulsePet 刚启动瞬间理论上可能丢最早 1 条状态事件（对桌宠动画无实际影响，与 Langfuse/LangSmith 同语义）。
+
+### 9.5 验证
+
+- `npm test`：20 文件 / **225 用例全绿**（221 + 新 4）；`npx tsc --noEmit` 通过。
+- node 冒烟（源文件 + `~/.config/opencode/plugins/` 安装副本）：App 未运行时 `postState` **2ms** 返回 null（旧实现此处抛错进退避）；6 钩子连发本体 **~1ms**。
+- `./install.sh` 幂等重装，源/副本 md5 一致（`35c1f634…`），`opencode.jsonc` 无重复条目。
+- 真实会话验证（步骤已交用户，待反馈）：① App 停运连续多发消息/工具/权限弹窗即时性；② App 运行状态推送无回归（thinking/editing 动画正常）。
+
+### 9.6 残余风险裁定与后续事项
+
+**裁定不修（2026-08-22，量级评估后用户裁定）**：
+
+| # | 残余点 | 量级 | 裁定 |
+|---|---|---|---|
+| R1 | `deliver` 前置的 killswitch `existsSync`（`if (!kind) return` 早退在前，仅可分类事件到达；现网可分类事件均为低频状态跃迁） | ~1-5µs/次 | 不修；四-4 流式心跳落地后事件升频，届时实测再评估 TTL 缓存 |
+| R2 | 后台队列内 `readFileSync`（同步 FS 跑在 opencode 事件循环上，但不在钩子路径，且被三桶节流约束频率） | ~10-100µs/次 | 不修 |
+
+**后续事项**：
+
+| # | 事项 | 状态 |
+|---|---|---|
+| 1 | 真实会话双场景验证（9.5 第 4 条） | 待用户反馈 |
+| 2 | 随 v0.1.3 发布；发布说明**重点**提醒重跑 `install.sh`（插件副本在 `~/.config/`，不随 App 更新） | 待发版（§8.1 已列入） |
+| 3 | 改动位于 develop 工作区未提交 | 遵循仓库约定，按需提交 |
 
 ---
 

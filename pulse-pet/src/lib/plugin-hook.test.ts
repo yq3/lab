@@ -1,14 +1,18 @@
 import { describe, expect, it, vi } from "vitest";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import {
   Backoff,
   BUBBLE_POOL,
   bucketFor,
+  buildHooks,
   classifyEvent,
   classifyToolBefore,
   createDeliverer,
   isSelfTool,
   pickBubble,
+  postState,
   sanitizeText,
   Throttle,
 } from "../../opencode-plugin/pulse-pet-hook.js";
@@ -308,5 +312,76 @@ describe("插件消息净化（TC-EV-20/21）", () => {
     expect(sanitizeText("a\nb\r\nc")).toBe("a b c");
     expect(sanitizeText("x".repeat(200)).length).toBe(140);
     expect(sanitizeText("   ")).toBe("");
+  });
+});
+
+describe("插件宿主零阻塞（2026-08-22 根因修复：钩子 fire-and-forget + App 未运行快速通道）", () => {
+  it("postState：runtime endpoint/token 缺失 → 返回 null 且不发请求（App 未运行 ≠ 错误）", async () => {
+    const fetchImpl = vi.fn(async () => ({ status: 200 }));
+    const dir = join(tmpdir(), "pulsepet-no-such-runtime");
+    await expect(
+      postState("working", "s1", "opencode", fetchImpl as never, dir),
+    ).resolves.toBeNull();
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("deliver：postState → null 时静默跳过，不消耗退避等级（Backoff 序列原点不动）", async () => {
+    const backoff = new Backoff(async () => {});
+    const postStateImpl = vi.fn(async () => null);
+    const deliverer = createDeliverer({
+      throttle: { shouldSend: () => true },
+      backoff,
+      postStateImpl: postStateImpl as never,
+      killswitch: () => false,
+    });
+    await deliverer.deliver("working", "s1");
+    expect(postStateImpl).toHaveBeenCalledTimes(1);
+    // nextDelay() 返回 0 证明 index 未被 App 未运行状态推进（真失败才退避）
+    expect(backoff.nextDelay()).toBe(0);
+  });
+
+  it("钩子 fire-and-forget：deliver 永久挂起时钩子仍立即返回（绝不阻塞宿主 opencode）", async () => {
+    const deliver = vi.fn(
+      (_kind: string, _sessionId?: string) => new Promise<void>(() => {}),
+    );
+    const hooks = buildHooks({ deliver });
+    await Promise.race([
+      (async () => {
+        await hooks["chat.message"]({ sessionID: "s1" });
+        await hooks["tool.execute.before"](
+          { tool: "edit", sessionID: "s1" },
+          { args: { filePath: "a" } },
+        );
+        await hooks["tool.execute.after"]({ tool: "read", sessionID: "s1" });
+        // 自忽略工具不投递（TC-EV-19）
+        await hooks["tool.execute.after"]({ tool: "pulsepet_say", sessionID: "s1" });
+      })(),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("钩子被投递队列阻塞，宿主会卡死")), 500),
+      ),
+    ]);
+    // fire 确实触发过（挂起 ≠ 没投递），且分类/自忽略语义与旧实现一致
+    expect(deliver.mock.calls.map((c) => c[0])).toEqual(["thinking", "editing", "working"]);
+  });
+
+  it("全部 6 个钩子返回 undefined：钉住 fire-and-forget 契约（防回归为 async/await）", () => {
+    // opencode 同步 await 每个钩子且无超时（pulse-pet-hook.js 头注）；任何一种
+    // 回归写法（async 钩子 / return deliver(...) / return enqueue(...)）都会让
+    // 返回值变成 promise → 此处立即红。宿主零阻塞的不变量由实现本身钉住，
+    // 不依赖"deliver 恰好挂起"的场景构造。
+    const hooks = buildHooks({ deliver: () => new Promise<void>(() => {}) });
+    const results: unknown[] = [
+      hooks.event({ event: { type: "session.idle", properties: {} } }),
+      hooks["chat.message"]({ sessionID: "s1" }),
+      hooks["permission.ask"]({ sessionID: "s1" }),
+      hooks["tool.execute.before"]({ tool: "edit", sessionID: "s1" }, { args: {} }),
+      hooks["tool.execute.after"]({ tool: "read", sessionID: "s1" }),
+      hooks["command.execute.before"]({ command: "npm test" }),
+    ];
+    expect(results).toHaveLength(6);
+    for (const r of results) {
+      expect(r).toBeUndefined();
+      expect(typeof (r as { then?: unknown })?.then).not.toBe("function");
+    }
   });
 });

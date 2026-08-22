@@ -16,6 +16,17 @@
 //   据此定案：主复位 = tool.execute.after → working；兜底 = session.status 非 idle
 //   → working / session.idle → idle；App 侧另有 30s 瞬态超时兜底（Rust session_state）。
 // ===========================================================================
+// 零阻塞契约（2026-08-22 根因修复，实测 opencode 1.18.19/1.18.21）：
+//   - opencode 服务端**同步 await 插件钩子且无超时**：chat.message 在用户消息
+//     保存/推送 TUI 之前（session/prompt.ts），tool.execute.before/after 包夹
+//     每次工具执行（session/tools.ts）。旧实现钩子 await 串行投递队列，PulsePet
+//     未运行时 readFileSync(endpoint) 抛 ENOENT → 队列内退避 sleep 1s→30s 封顶
+//     → 宿主症状：发消息延迟数秒上屏、read/write/edit 全体变慢（换 opencode
+//     版本无效，因为阻塞源在本插件）。
+//   - 修复双管齐下：① 全部钩子 fire-and-forget（绝不 await/return 投递 promise），
+//     投递/退避只在后台队列进行；② endpoint/update-token 缺失（App 未运行）→
+//     postState 返回 null，deliver 静默跳过且不计退避（下游缺席≠错误）。
+// ===========================================================================
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -246,12 +257,26 @@ export function killswitchActive(dir = runtimeDir()) {
 
 /**
  * POST /state。每次发请求前读最新 endpoint/token 文件（端口回退后无需重装插件，
- * TC-EV-09）。返回 response；任何 IO/网络/401 错误抛出（由调用方静默退避）。
+ * TC-EV-09）。返回 response；任何网络/HTTP≥400 错误抛出（由调用方静默退避）。
+ *
+ * **App 未运行快速通道（2026-08-22 根因修复）**：endpoint/update-token 文件
+ * 缺失（ENOENT）或为空 → 返回 null，不发起请求——「下游缺席」不是错误，调用方
+ * 静默跳过且不计退避（对齐 Langfuse/LangSmith 等遥测插件「下游缺席→丢弃，
+ * 遥测永不伤害宿主」的主流语义）。
  *
  * P3-③（M2 遗留）：不再发送 `connection: close` 头——`Connection` 是 fetch 规范的
  * forbidden header name，实现会静默忽略，发了也是冗余；一次性连接语义由服务端
  * tiny_http「一请求一连接」保证（TC-EV-14），客户端配合 AbortSignal 3s 兜底。
  */
+function readRuntimeFile(dir, name) {
+  try {
+    return readFileSync(join(dir, name), "utf8").trim();
+  } catch (err) {
+    if (err && err.code === "ENOENT") return null;
+    throw err;
+  }
+}
+
 export async function postState(
   kind,
   sessionId,
@@ -259,8 +284,9 @@ export async function postState(
   fetchImpl = fetch,
   dir = runtimeDir(),
 ) {
-  const endpoint = readFileSync(join(dir, "endpoint"), "utf8").trim();
-  const token = readFileSync(join(dir, "update-token"), "utf8").trim();
+  const endpoint = readRuntimeFile(dir, "endpoint");
+  const token = readRuntimeFile(dir, "update-token");
+  if (!endpoint || !token) return null; // App 未运行：快速跳过（非错误）
   const res = await fetchImpl(`http://${endpoint}/state`, {
     method: "POST",
     headers: {
@@ -311,7 +337,8 @@ export function createDeliverer({
     if (!throttle.shouldSend(kind)) return; // TC-EV-18：节流
     await enqueue(async () => {
       try {
-        await postStateImpl(kind, sessionId ?? "default", agent);
+        const res = await postStateImpl(kind, sessionId ?? "default", agent);
+        if (res == null) return; // App 未运行：静默跳过（不 reset、不退避）
         backoff.reset(); // 恢复后下次立即投递
       } catch {
         // TC-EV-07：静默跳过（不打日志不报错）+ 指数退避
@@ -324,37 +351,53 @@ export function createDeliverer({
 
 // ---- opencode 插件注册（v1 格式：export default { id, server }）----
 
+/**
+ * 构建注册给 opencode 的 Hooks（deliverer 可注入，供单测替换）。
+ *
+ * **零阻塞契约（2026-08-22 根因修复，实测 opencode 1.18.x）**：opencode 服务端
+ * 会同步 await 每个插件钩子且无任何超时保护——`chat.message` 在用户消息保存/
+ * 推送 TUI **之前**触发（session/prompt.ts），`tool.execute.before/after` **包夹**
+ * 每次工具执行（session/tools.ts）。钩子一旦 await 投递队列（含退避 sleep
+ * 1s→30s），宿主会整体卡住：发消息延迟数秒才上屏、read/write/edit 全体变慢。
+ * 因此所有钩子 fire-and-forget：绝不 await、也绝不 return 投递 promise（宿主会
+ * await 钩子返回值）——对齐 Langfuse/LangSmith 等遥测类插件「热路径零网络 I/O」
+ * 的主流设计。
+ */
+export function buildHooks(deliverer = createDeliverer()) {
+  const fire = (kind, sessionId) => {
+    try {
+      void deliverer.deliver(kind, sessionId).catch(() => {});
+    } catch {
+      // deliver 为 async 函数不会同步抛错；防御性吞掉，钩子永不向宿主抛错
+    }
+  };
+
+  return {
+    event: ({ event }) => {
+      fire(classifyEvent(event), event?.properties?.sessionID);
+    },
+    "chat.message": (input) => {
+      fire("thinking", input?.sessionID);
+    },
+    "permission.ask": (input) => {
+      fire("waiting-permission", input?.sessionID);
+    },
+    "tool.execute.before": (input, output) => {
+      fire(classifyToolBefore(input?.tool, output?.args), input?.sessionID);
+    },
+    "tool.execute.after": (input) => {
+      // TC-EV-05：主复位信号（把 editing/testing 拉回 working）
+      if (isSelfTool(input?.tool)) return; // 自忽略
+      fire("working", input?.sessionID);
+    },
+    "command.execute.before": (input) => {
+      const cmd = input?.command ?? "";
+      if (TEST_CMD_RE.test(cmd)) fire("testing", input?.sessionID);
+    },
+  };
+}
+
 export default {
   id: "pulse-pet",
-  server: async () => {
-    const deliverer = createDeliverer();
-    const deliver = deliverer.deliver;
-
-    return {
-      event: async ({ event }) => {
-        await deliver(classifyEvent(event), event?.properties?.sessionID);
-      },
-      "chat.message": async (input) => {
-        await deliver("thinking", input?.sessionID);
-      },
-      "permission.ask": async (input) => {
-        await deliver("waiting-permission", input?.sessionID);
-      },
-      "tool.execute.before": async (input, output) => {
-        await deliver(
-          classifyToolBefore(input?.tool, output?.args),
-          input?.sessionID,
-        );
-      },
-      "tool.execute.after": async (input) => {
-        // TC-EV-05：主复位信号（把 editing/testing 拉回 working）
-        if (isSelfTool(input?.tool)) return; // 自忽略
-        await deliver("working", input?.sessionID);
-      },
-      "command.execute.before": async (input) => {
-        const cmd = input?.command ?? "";
-        if (TEST_CMD_RE.test(cmd)) await deliver("testing", input?.sessionID);
-      },
-    };
-  },
+  server: async () => buildHooks(),
 };

@@ -46,7 +46,7 @@ export function postState(
     init?: Record<string, unknown>,
   ) => Promise<{ status: number }>,
   dir?: string,
-): Promise<unknown>;
+): Promise<unknown | null>; // null = App 未运行（runtime 文件缺失）：跳过，不退避
 
 export interface Deliverer {
   deliver(kind: string | null, sessionId?: string): Promise<void>;
@@ -59,3 +59,17 @@ export function createDeliverer(opts?: {
   killswitch?: () => boolean;
   agent?: string;
 }): Deliverer;
+
+// 注册给 opencode 的 Hooks：全部 fire-and-forget（返回 void，绝不返回投递
+// promise——宿主会同步 await 每个钩子且无超时，详见 pulse-pet-hook.js 头注）。
+export function buildHooks(deliverer?: Deliverer): {
+  event: (input: { event?: unknown }) => void;
+  "chat.message": (input?: { sessionID?: string }) => void;
+  "permission.ask": (input?: { sessionID?: string }) => void;
+  "tool.execute.before": (
+    input?: { tool?: unknown; sessionID?: string },
+    output?: { args?: unknown },
+  ) => void;
+  "tool.execute.after": (input?: { tool?: unknown; sessionID?: string }) => void;
+  "command.execute.before": (input?: { command?: string }) => void;
+};
