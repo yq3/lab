@@ -932,3 +932,29 @@ D31 落地后切换到任一 agent 即报错：`Agent Supervised-Coding's config
 - CLI 年轻（v0.1.x），命令面可能随版本变化；skill 与工具版本不匹配时 CLI 会提示重装命令
 - 默认无头；观察 agent 操作需 `--headed`、`playwright-cli show` 可视化面板，或多会话隔离用 `-s=<name>`
 - 依赖系统 Chrome；浏览器未装的环境需另行处理
+
+### D40. 嵌套委派修复：subagent 调 Vision 需过双闸门（2026-08-22，D38 修正）
+
+**实跑反馈**：tester 报告无 task 工具，D38"subagent 可直接 Task 委派 Vision"落空。探测确认自定义 Tester 与内置 explore 均无 task 工具——平台级限制，与 agent 配置无关（D23 当时只验证了权限默认开放，漏了工具挂载默认收紧这层）。
+
+**双闸门机制**（v1.18.19 源码验证）：
+
+1. **挂载闸**（`agent/subagent-permissions.ts`）：subagent 被 task 工具孵化时，若自身配置**没有任何显式 `task` 权限规则**（`canTask` 只查规则存在、不看 action）→ 自动注入 `task: deny *` → task 工具从工具列表移除
+2. **执行闸**（`tool/task.ts`）：调用时 `depth >= subagent_depth`（默认 1）→ throw；该配置只拦执行，不影响工具挂载
+
+**修复**（缺一不可，均已落地）：
+
+1. `.opencode/opencode.json` 重建（D36 曾删除，此处更正其"零额外配置"结论）：`{"subagent_depth": 2}`——主→Coder/Tester/Committer 第 1 层→Vision 第 2 层；Vision 无法再嵌套（depth 2 ≥ 2 被执行闸拦截）
+2. coder/tester/committer frontmatter 显式声明 task 权限：`{"*": deny, "Vision": allow}`——既过 canTask 检查使工具挂载，又把可委派对象收窄到 Vision（Coder/Tester/Committer 互不可调，架构与 D23 设想一致）
+3. supervised-coding 仍不动（它不调 Vision，白名单无需加）；vision.md 不加 task 规则（无规则 → 平台默认 deny → Vision 看不到 task 工具，天然无嵌套）
+
+**验证记录**（`opencode run` 全新进程 A/B，排除运行中 TUI 旧配置干扰）：
+
+- 基线 A：默认配置 + 无显式 task 权限 → Tester 无 task 工具（复现 bug）
+- B：仅注入 `subagent_depth: 2`（OPENCODE_CONFIG_CONTENT）→ 仍无（证明挂载闸独立于深度闸）
+- 终验 E2E：真配置 + 显式 task 权限 → build→Tester（有 task 工具）→Tester 委派 Vision 读仓库内截图→ 结构化分析完整回传（图表轴标签/弹窗中文分类标签/数值全部提取）
+
+**附带发现**：
+
+- `OPENCODE_CONFIG_CONTENT` 注入的配置**不走严格校验**（typo 键不报错）——判断配置键是否被当前版本支持必须用真配置文件（未知顶级键 ConfigInvalidError 拒启）
+- Vision 读**工作区外**图片触发 `external_directory` ask：TUI 交互模式下用户可批准；无头 `opencode run` 会挂死。tester 委派时截图应放仓库内或 D37 已放行的目录（external_directory 规则会继承进 Vision 会话，`subagent-permissions.ts` 把父会话的 external_directory 与 deny 规则并入子会话）

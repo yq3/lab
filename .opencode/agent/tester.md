@@ -5,6 +5,9 @@ mode: subagent
 model: deepseek/deepseek-v4-flash
 reasoningEffort: max
 permission:
+  task:
+    "*": deny
+    "Vision": allow
   edit:
     "*": deny
     "**/tests/**": allow

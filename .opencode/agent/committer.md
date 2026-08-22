@@ -5,6 +5,9 @@ mode: subagent
 model: deepseek/deepseek-v4-pro
 reasoningEffort: max
 permission:
+  task:
+    "*": deny
+    "Vision": allow
   edit: deny
   bash:
     "*": deny

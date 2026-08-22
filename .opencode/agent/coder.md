@@ -5,6 +5,9 @@ mode: subagent
 model: zhipuai-coding-plan/glm-5.3
 reasoningEffort: max
 permission:
+  task:
+    "*": deny
+    "Vision": allow
   edit: allow
   bash:
     "*": allow
