@@ -6,7 +6,7 @@ import {
   type PetOption,
 } from "../lib/atlas";
 import { isTauriRuntime } from "../lib/token-stats";
-import { setPassThrough } from "../lib/interaction";
+import { setPassThrough, PANEL_TAB_EVENT, normalizeTab } from "../lib/interaction";
 import { usePetStore } from "../pet/petStore";
 import { changeLanguage, t, useLangStore, type Lang } from "../lib/i18n";
 
@@ -69,6 +69,40 @@ export default function Settings() {
     void load();
   }, [load]);
 
+  /**
+   * v0.1.3 四-1（TC-APP-14）：宠物下拉自动刷新。面板窗口为隐藏/显示复用，
+   * 停在「设置」tab 时重新打开面板不会重挂载组件 → 下拉看不到新导入素材。
+   * 双触发重新 load()：
+   * - `tauri://focus`（onFocusChanged）：面板重新可见（重开必触发）；
+   * - `panel://tab`（目标=settings）：宠物右键菜单「设置…」直达时。
+   * 使 README「放好即出现」承诺无条件成立（不再需要切 tab 强制重挂载）。
+   */
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    const unlisteners: Array<() => void> = [];
+    void (async () => {
+      try {
+        const { listen } = await import("@tauri-apps/api/event");
+        const { getCurrentWindow } = await import("@tauri-apps/api/window");
+        unlisteners.push(
+          await getCurrentWindow().onFocusChanged(({ payload: focused }) => {
+            if (focused) void load();
+          }),
+        );
+        unlisteners.push(
+          await listen(PANEL_TAB_EVENT, (event) => {
+            if (normalizeTab((event.payload as { tab?: unknown })?.tab) === "settings") {
+              void load();
+            }
+          }),
+        );
+      } catch (e) {
+        console.error("[pulsepet] settings auto-refresh listener failed:", e);
+      }
+    })();
+    return () => unlisteners.forEach((u) => u());
+  }, [load]);
+
   const onSwitch = async (value: string) => {
     setSwitching(true);
     try {
@@ -111,7 +145,8 @@ export default function Settings() {
     } catch (e) {
       console.error("[pulsepet] change language failed:", e);
       useLangStore.getState().setLang(prev); // 回滚
-      setError(t("settings.passFail", { msg: e instanceof Error ? e.message : String(e) }));
+      // v0.1.3 三-1：语言切换失败不再复用穿透语义的 settings.passFail
+      setError(t("settings.languageFail", { msg: e instanceof Error ? e.message : String(e) }));
     } finally {
       setLangBusy(false);
     }

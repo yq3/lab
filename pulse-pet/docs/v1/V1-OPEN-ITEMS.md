@@ -138,6 +138,7 @@
 > 记录日期：2026-08-20（2026-08-22 自 V2-SCOPE §2 移入并改写引用）
 > 身份：**0.1.x 发版线的维护收尾**——清偿本清单 v1 遗留（§8.1 各项），与 v2 开发并行；不是 v1 功能追加，也不是 v2 范围。v2 主体计划见 [V2-SCOPE.md](../v2/V2-SCOPE.md) §3。
 > 来源：v1 收官（M8 + v0.1.0/v0.1.2 发版）后的实际使用反馈与范围讨论。
+> **状态（2026-08-22）**：开发完成（§8.4 定案全部落地）+ 三方验证通过（§8.5：developer 自测 / tester 验收 PASS / committer 评审 APPROVED）；待 commit 与发版（§8.5 前置条件）。
 
 ### 8.1 范围（对应本清单编号）
 
@@ -148,7 +149,7 @@
 | 四-1 | 设置页宠物下拉自动刷新 | 监听面板重新可见 / `panel://tab` 重新 `load()`，使 README「放好即出现」承诺无条件成立 |
 | 四-2 | thinking 粘性窗口 | `chat.message` 投递 thinking 后 3-5s 内吞掉 reaction 桶的 working/idle（更高优先级状态照常穿透） |
 | 四-3 | idle 节流豁免 | `bucketFor("idle")` 返回 null 永远放行（行为缺陷修复） |
-| 四-4 | 流式心跳 | `classifyEvent` 增加 `message.updated` / `message.part.updated` → working，防纯文本生成阶段静默超时回 idle |
+| 四-4 | 流式心跳 | `classifyEvent` 增加流式事件 → working（定案主力载体为 `message.part.delta`，`message.updated` / `message.part.updated` 低频补充，见 §8.4 spike），防纯文本生成阶段静默超时回 idle |
 | 四-5 | 烟花+气泡叠加 | 去掉二选一编排，烟花提醒同时展示气泡文案；原则：特效只叠加不替代气泡 |
 | 二 | TC-DONE-01~09 综合验收 | 含 **TC-DONE-04 无人值守 30 分钟**（从未完整执行；顺带验证四-2/3/4 真实长会话效果） |
 | 七-1 | draft Release 处置 | v0.1.3 发布时一并决定 v0.1.0 draft 的 publish 或丢弃 |
@@ -156,13 +157,88 @@
 
 ### 8.2 设计约束
 
-- **四-2 与四-4 必须联动设计**（§四-4 已注明）：粘性窗口吞 working 会减少计时刷新机会、加剧流式静默超时。初步方向：粘性窗口只吞 `session.status(busy)` 来源的 working，流式心跳类 working 照常投递（只刷新活性、不改变显示）——实现阶段定案。
-- **四-4 前置 spike**：实测 opencode 1.18 `message.updated` / `message.part.updated` 事件字段（联合类型中存在，字段未证实）。
+- **四-2 与四-4 必须联动设计**（§四-4 已注明）：粘性窗口吞 working 会减少计时刷新机会、加剧流式静默超时。初步方向：粘性窗口只吞 `session.status(busy)` 来源的 working，流式心跳类 working 照常投递（只刷新活性、不改变显示）——**已由 §8.4 定案取代**（量化后无需按来源区分）。
+- **四-4 前置 spike**：实测 opencode 1.18 `message.updated` / `message.part.updated` 事件字段（联合类型中存在，字段未证实）——**已完成（2026-08-22），结论见 §8.4**（真正的心跳载体是 `message.part.delta`）。
 - **与 §九 零阻塞契约联动（2026-08-22）**：四-2/四-4 均改 `classifyEvent` / `Throttle` / `bucketFor`（§九 修复保留了这些纯函数原实现），实现时**必须保持钩子 fire-and-forget**——`plugin-hook.test.ts`「全部 6 个钩子返回 undefined 且非 thenable」用例钉住该不变量，回归即红。四-4 落地后流式事件高频进入 `deliver`（killswitch `existsSync` 前置于节流），单次 ~µs 级仍可忽略；若实测有影响，届时评估 killswitch TTL 缓存（§九 9.6 R1）。
 
 ### 8.3 发版
 
 - tag `pulse-pet-v0.1.3` 触发现有 CI（windows-latest + macos-latest 矩阵）；发布说明提醒用户重跑 `install.sh`（插件侧改动配套）。
+
+### 8.4 设计定案（2026-08-22，实施依据）
+
+> 含 S1 spike 实测结论。用例落 `TEST-CASES.md`（TC-EV-24~27 / TC-RM-17 / TC-APP-14 / TC-CI-05 及修订项）。
+
+**S1 spike 结论（opencode 1.18.19 本机实测，2026-08-22，headless `opencode run` + 事件探针）**：
+
+- `sessionID` 在所有相关事件的 `properties.sessionID`（现有插件取法正确，无需改提取路径）；
+- **`message.part.updated` 非高频**：纯文本流式生成全程仅在 part 边界发（step-start / reasoning 首 / text 首 / text 尾…共 7 次）——**不能当心跳**（推翻 §8.2 初步假设中的载体）；
+- **`message.part.delta` 才是高频流式事件**（实测 40 行文本 ~4s 生成 112 次 ≈ 28 次/s，TUI 打字机数据源）；
+- `session.status(busy)` 仅在生成开始发一次，纯文本长生成期间总线静默——四-4 病因实锤。
+
+**四-4 流式心跳（定案）**：`classifyEvent` 增加 `message.part.delta`（主力心跳）+ `message.updated` / `message.part.updated`（低频补充，同映射无害）三个 case → `working`。delta 高频到达、经 reaction 桶 10s 节流后天然形成 ~10s 一次心跳 POST，`apply_event` 刷新 `last_event_at`，30s `idle_timeout` 不再误触。**Rust / 协议 / 前端零改动**（心跳对 App 就是普通状态事件）。
+
+**四-2 thinking 粘性窗口（定案）**：`STICKY_MS = 4000` 固定常量（不做配置）。机制：`deliver` 链在 throttle 检查**前**——`kind=thinking` 记 `stickyUntil[sid]=now+4s`；此后 4s 内同 session 的 `working`/`idle` 静默丢弃（不占节流桶、不重置冷却）；`editing`/`testing`/`waiting-permission`/`error`/`success` 优先级高于 thinking(3)，不在吞没集合、自然穿透。粘性在 speech 桶节流检查**前**记录：连续两条消息第二条 thinking 被 20s 节流吞掉也能续窗。**不做 §8.2 设想的"按来源区分 working"**：量化后不必要——窗口 4s « idle_timeout 30s（仅消耗活性预算 13%），窗口过后首个 delta 心跳（≤10s 节流间隔）即恢复刷新；"吞全部 working/idle" 4 行代码达同等效果，Rust 零改动。
+
+**四-3 idle 节流豁免（定案）**：`bucketFor("idle")` 返回 null（从 `REACTION_KINDS` 移除）——idle 永远放行，会话结束信号即到即投；`session.idle` + `session.status(idle)` 双通道重复投递到 App 幂等覆盖，无害。
+
+**三机制联动时间线（设计自检）**：发消息 → thinking 置粘性窗、显示 thinking → 0-4s 内 delta→working 被吞（显示保持）→ 窗口过期后首个心跳 working（≤10s）→ 显示 working（生成中，正确）→ 工具期 `tool.execute.before(edit)`→editing 穿透 → 纯文本长生成 delta 心跳 ~10s/次防误 idle → 会话结束 `session.idle` 豁免放行、即时回 idle。
+
+**零阻塞契约保持（§9 联动约束）**：三机制全部在 `deliver` 内部，钩子仍 fire-and-forget；delta 高频下 `deliver` 前置的 killswitch `existsSync`（~µs 级，§9.6 R1）+ classify 开销可忽略。
+
+**四-5 烟花+气泡叠加（定案）**：`reminder-bridge.ts` 的 if/else 重构为纯函数 `planReminderActions(t, nowMs) → { bubbleText, fireworks }`（todo 派生文案构造 + 净化内聚，落 `src/lib/reminders.ts`）；桥消费：无条件 `showReminderBubble(bubbleText)`，`fireworks=true` 时**额外** invoke 烟花。原则：**特效只叠加、不替代气泡**。文档同步 4 处：README 烟花模式措辞、DESIGN §5.1（到点编排句）/§5.3（叠加语义段）、TEST-CASES TC-RM-09/11。
+
+**四-1 下拉自动刷新（定案）**：`Settings.tsx` 加 effect 监听 `tauri://focus`（面板重开必触发）+ `PANEL_TAB_EVENT`（目标=settings 时），任一触发重新 `load()`。双触发使「放好即出现」无条件成立（停在设置页重开面板无 tab 事件，靠 focus 兜住）。
+
+**三-1 languageFail（定案）**：`i18n.ts` 加 `settings.languageFail`（zh：`切换语言失败：{msg}` / en 对应），`Settings.tsx` `onLanguage` catch（现误用 `settings.passFail`，L94 穿透路径不动）。
+
+**三-2 Actions 升级（定案）**：`actions/checkout` / `actions/setup-node` 升当前最新大版本（实施时 `gh api` 查最新 major）；build.yml 与 todo-lite 共用，两项目路径各回归一次 CI。
+
+**七-1 draft 处置（用户已裁定 2026-08-22）**：v0.1.0 draft **丢弃**（产物含 Windows 闪退缺陷 issue #9，发布徒增误导）——v0.1.3 发版时删除该 draft。
+
+### 8.5 实施与三方验证记录（2026-08-22）
+
+#### 8.5.1 开发实施（developer）
+
+13 个文件，按 §8.4 定案落地，Rust 零改动：
+
+| 分组 | 文件 | 内容 |
+|---|---|---|
+| 插件 | `opencode-plugin/pulse-pet-hook.js` / `.d.ts` | 流式心跳（delta/updated/part.updated→working + 缺 sessionID 丢弃）、`ThinkingSticky`（STICKY_MS=4000，节流前置、不占桶）、idle 移出 reaction 桶；头注补三机制段 |
+| 插件测试 | `src/lib/plugin-hook.test.ts` | +17 用例（TC-EV-24 五子项/25 三子项/26 四子项/27 联动），2 处旧断言修订 |
+| App | `src/lib/reminders.ts` + `reminder-bridge.ts` + `reminders.test.ts` | `planReminderActions` 纯函数 + 桥层叠加编排（+4 用例，TC-RM-17） |
+| App | `src/panel/Settings.tsx` + `src/lib/i18n.ts` | `tauri://focus`+`panel://tab` 双触发下拉刷新；`settings.languageFail` 新键替换 passFail 误用 |
+| 文档 | DESIGN §5.1/§5.3、TEST-CASES（新增/修订用例）、README（烟花叠加措辞）、本文件 §8.4 | 语义与实现同步 |
+| CI | `.github/workflows/build.yml` | checkout / setup-node v4→v7（TC-CI-05 实跑待发版） |
+
+自测（tester 已独立复验一致）：`npm test` **242/242**（基线 225+17）、`tsc --noEmit` 0 错、`npm run build` 通过、`cargo test` **163 passed + 1 ignored**（Rust 零改动基线确认）、`tauri build` 成功（版本号仍 0.1.2，bump 属发版步骤）。插件副本已重装（源/副本 md5 一致）；**长驻 opencode 会话需重启才加载新插件**（插件代码随宿主进程启动加载）。spike 探针与配置残留已清理恢复。
+
+#### 8.5.2 tester 验收（2026-08-22 17:08–17:18，testedSha=9d57ca2 工作区）
+
+**testVerdict: PASS**（0 缺陷，PENDING-USER 4 项 / SKIPPED 2 项不计 FAIL）：
+
+- **独立回归**：npm test 242/242、tsc 0 错、vite/cargo/tauri build——与开发声明逐项一致。
+- **用例↔测试映射审计**：TC-EV-24（5）/25（3）/26（4）/27/RM-17（4）全部子项在单测中有对应断言且语义一致（粘性不占桶、被 speech 节流仍续窗、60s delta 恰 6 次投递、缺 sessionID 不投、烟花开时 bubbleText 照常产出）；实现序核验（arm 在节流前、桥层无 if/else）。
+- **TC-DONE 缩版实机**：04 真实 e2e——`opencode run` 纯文本生成 4.36s **零阻塞**（delta 高频链路上 §九修复的运行时证据）、宠物帧活性 A/B 交替、退出干净；05 DB 侧对账（今日 12 会话 $0.037079，对账单测 ≤0.01 USD 断言过）；06 实机烟花——fireworks 窗口 4s hide、`dismissed_via=fireworks` 记账无双写、用户 DB 备份恢复 md5 一致；07 实机重启 app_state 全保留（含宠物位置/语言/选择）。
+- **HTTP 契约顺带**（TC-EV-11/12）：401/400/200/404 全符合。
+- **PENDING-USER 4 项**（tester 无视觉通道）：TC-EV-27/DONE-04 姿态目视（thinking ≥4s、不闪 idle、结束 ≤10s 回 idle，完整 30 分钟版同此）；DONE-05 面板 UI 数值比对；DONE-06 烟花+气泡叠加目视；TC-APP-14 下拉刷新 GUI 验证。
+- **SKIPPED**：TC-CI-05（需 push）、Windows 矩阵、版本 bump、draft 处置、tag 发版。
+- 环境恢复：进程 0 残留、DB md5 一致恢复、仓库零测试残留、git 全程只读。
+
+#### 8.5.3 committer 评审（2026-08-22，reviewVerdict: APPROVED）
+
+- **P0/P1 = 0**；P2×2、P3×7（记录级）。可进入 commit / 发版流程。
+- 重点量化核验通过：**三机制无饿死**——粘性窗过期后首个心跳最坏 ≤14s 到达（30s idle_timeout 余量 ≥16s）；连发消息极端场景由 speech 桶 20s 冷却承载活性（最长静默 20s < 30s）无误 idle。**idle 豁免无过载**（会话边界低频 + App 幂等覆盖）。**ThinkingSticky 无泄漏**。**无循环依赖**（reminders→todos 单向）。**Settings 双触发可靠**（Rust `show_panel` 必 `set_focus` → focus 必触发）。**零阻塞契约保持**（§九：同步前缀 µs 级、钉子用例双守护）。**i18n 完备**。**文档与实现一致**。
+- **评审后已修**：P2-1（§8.4 两处索引错误 TC-CI-03→05、DESIGN §5.2→§5.1）+ P3-9（§8.1 四-4 行补 delta 主力载体）；链接校验 19/19 通过。
+- 记录在案 P3（不处理）：短会话 idle 被吞（与旧行为等价非回归）；烟花先 dismiss 后点宠物的统计口径（既有行为）；桥层无自动化测试（与既有风格一致，纯函数已覆盖）；unlisten 注册间隙（无害）；`images/` 与 blog 草稿不入本次 commit。
+
+#### 8.5.4 发版前置条件（交付把关）
+
+1. **TC-CI-05**：push 后实跑 todo-lite + pulse-pet 双路径 CI（v4→v7 零实跑是唯一未验证面；失败回退 pin v4 单独评估）；
+2. 版本 bump 0.1.2 → 0.1.3（`tauri.conf.json`）；
+3. 4 项用户目视验收（§8.5.2 PENDING-USER，需在插件更新后**新起**的 opencode 会话中观察）；
+4. 删除 v0.1.0 draft Release（七-1 已裁定丢弃）；
+5. 发布说明**重点**提醒重跑 `install.sh`（插件副本不随 App 更新，§8.3/§九）。
 
 ---
 

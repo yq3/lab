@@ -13,12 +13,22 @@ export function classifyToolBefore(
   command?: unknown,
 ): string | null;
 
-export function bucketFor(kind: string): string | null;
+export function bucketFor(kind: string): string | null; // v0.1.3：idle → null（节流豁免，永远放行）
 
 export class Throttle {
   constructor(now?: () => number);
   shouldSend(kind: string): boolean;
 }
+
+// v0.1.3 四-2：thinking 粘性窗口——thinking 后 STICKY_MS 内吞同 session 的
+// working/idle（节流前判定、不占桶）；更高优先级事件自然穿透。
+export class ThinkingSticky {
+  constructor(now?: () => number);
+  arm(sessionId: string): void;
+  swallows(kind: string, sessionId: string): boolean;
+}
+
+export const STICKY_MS: number;
 
 export class Backoff {
   constructor(sleepFn?: (ms: number) => Promise<unknown>);
@@ -58,6 +68,7 @@ export function createDeliverer(opts?: {
   postStateImpl?: typeof postState;
   killswitch?: () => boolean;
   agent?: string;
+  sticky?: ThinkingSticky;
 }): Deliverer;
 
 // 注册给 opencode 的 Hooks：全部 fire-and-forget（返回 void，绝不返回投递

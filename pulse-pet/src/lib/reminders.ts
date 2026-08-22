@@ -13,6 +13,7 @@
 import { sanitizeBubbleText } from "./bubble";
 import { isTauriRuntime } from "./token-stats";
 import { t, type Lang } from "./i18n";
+import { todoReminderText } from "./todos";
 
 export { isTauriRuntime };
 
@@ -256,6 +257,27 @@ export function parseReminderTrigger(payload: unknown): ReminderTrigger | null {
 /** 烟花判定：单条 use_fireworks 覆盖（升级）全局开关（TC-RM-11，OR 语义）。 */
 export function usesFireworks(t: Pick<ReminderTrigger, "use_fireworks" | "fireworks_global">): boolean {
   return t.use_fireworks || t.fireworks_global;
+}
+
+/** 触发编排计划（v0.1.3 四-5，TC-RM-17）。 */
+export interface ReminderPlan {
+  /** 净化后的气泡文案（气泡无条件展示，特效只叠加不替代）。 */
+  bubbleText: string;
+  /** 是否额外放烟花。 */
+  fireworks: boolean;
+}
+
+/**
+ * 提醒触发编排（纯函数，v0.1.3 四-5 定案）：原 reminder-bridge 的 if/else
+ * 二选一重构——气泡路径无条件执行（todo 派生文案构造 + 净化内聚于此），
+ * `usesFireworks(t)` 时**额外**放烟花。原则：特效只叠加、不替代气泡。
+ */
+export function planReminderActions(t: ReminderTrigger, nowMs: number): ReminderPlan {
+  const raw =
+    t.kind === "todo"
+      ? (todoReminderText(t.label, t.todo_due_ms, nowMs) ?? t.label)
+      : t.label;
+  return { bubbleText: sanitizeReminderText(raw), fireworks: usesFireworks(t) };
 }
 
 // ---- Rust 命令封装（非 Tauri 环境抛错/返回空，与 token-stats 风格一致） ----

@@ -241,7 +241,7 @@ fn token_stats_current_session(session_id: String) -> Result<Option<TokenRow>, S
 - v1 用 Tauri 的 `tokio` runtime + `tokio::time::interval` 最简实现：每 1 分钟 tick 一次，检查所有启用的提醒规则是否到点。
 - **macOS 睡眠恢复**：`tokio::time::interval` 默认 `MissedTickBehavior::Burst`，系统睡眠醒来会补发所有错过的 tick（可能瞬间连弹数次提醒）。调度器初始化时显式设 `MissedTickBehavior::Skip`，错过的不补，等下一个整 tick。
 - 提醒规则持久化在脉冲内 SQLite（`pulsepet.db`）的 `reminders` 表。
-- 到点：发送 Tauri event `reminder://trigger` 给前端，前端根据规则决定渲染气泡还是烟花。
+- 到点：发送 Tauri event `reminder://trigger` 给前端，前端**无条件渲染气泡**，烟花规则**额外**放烟花（v0.1.3 四-5 定案：特效只叠加、不替代气泡，`planReminderActions` 纯函数编排）。
 - 调度器读 SQLite 表后做 in-memory 倒计时，避免每分钟查库；用户改设置后通过 Tauri command 通知调度器 reload。
 - **暂停所有提醒（M4 定案）**：托盘"暂停所有提醒"开关（app_state 持久化）暂停期间，到期规则的倒计时**顺延**，取消暂停后按顺延点触发，不补弹错过场次。
 - **"试一试"手动触发（M4 定案）**：panel 的"试一试"（`reminders_trigger_now`）受暂停 + 3 分钟去重约束，跳过窗口/倒计时检查；触发后推进 `last_triggered_at` 与 next_due（会顺延下一自然触发点）。
@@ -256,6 +256,7 @@ fn token_stats_current_session(session_id: String) -> Result<Option<TokenRow>, S
 ### 5.3 烟花模式（用户设置中开启）
 
 - **触发**：用户在提醒规则上勾"烟花模式"或全局开关。
+- **叠加语义（v0.1.3 四-5 修订，原"烟花替代气泡"已废弃）**：烟花触发时**同时展示气泡**（文案 = 规则 label 或 todo 派生文案，经净化，8s 自动消失）——烟花是视觉增强，不携带信息，用户看到烟花不知道提醒了什么即此因；后续新增其它特效同样只「叠加」不「替代」气泡。记账无双写风险（`ack_log`/`dismiss_log` 均 `WHERE dismissed_via IS NULL`，先到先写、后到 no-op）。
 - **全局开关 OR 语义（M4 定案）**：全局烟花开关开 → 所有规则升级放烟花（无单条豁免机制）；单条 `use_fireworks=1` 覆盖全局关。`use_fireworks ∥ fireworks_global` 任一为真即放烟花。
 - **效果**：宠物位置为发射点，**绽放点固定为宠物当前所处屏幕（显示器）的中轴线上、高度为屏幕从上往下 0.3 倍处（中间偏上）**——即绽放点 x = 该屏水平中心，y = 屏高 × 0.3（多显示器场景取宠物所在显示器计算；单显示器即当前屏）。**屏高取整显示器物理高度（含菜单栏/Dock 区域；用户 2026-08-16 确认维持整屏口径）**。无论宠物在该屏幕的哪个位置，烟花都发射到该点绽放。3-5s 消散，粒子带渐变与拖尾，参考日本动漫烟花的"流光花瓣"质感。
 - **实现选型**：HTML canvas 全屏透明窗口 + 粒子动画。理由：① 跨 macOS/Windows 一致（不用写两套平台原生）② Tauri 多窗口天然支持 ③ 体积小（不引入 pixi/three）④ canvas 2D 粒子配合 radial gradient + 拖尾即可达到动漫质感。
