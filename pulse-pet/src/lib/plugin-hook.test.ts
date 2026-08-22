@@ -14,6 +14,8 @@ import {
   pickBubble,
   postState,
   sanitizeText,
+  STICKY_MS,
+  ThinkingSticky,
   Throttle,
 } from "../../opencode-plugin/pulse-pet-hook.js";
 
@@ -169,7 +171,7 @@ describe("插件 Throttle：三类冷却互不干扰（TC-EV-18）", () => {
     expect(th.shouldSend("thinking")).toBe(true);
   });
 
-  it("bucketFor 分类正确", () => {
+  it("bucketFor 分类正确（v0.1.3 四-3：idle 豁免 → null）", () => {
     expect(bucketFor("thinking")).toBe("speech");
     expect(bucketFor("success")).toBe("speech");
     expect(bucketFor("error")).toBe("speech");
@@ -177,7 +179,7 @@ describe("插件 Throttle：三类冷却互不干扰（TC-EV-18）", () => {
     expect(bucketFor("working")).toBe("reaction");
     expect(bucketFor("editing")).toBe("reaction");
     expect(bucketFor("testing")).toBe("reaction");
-    expect(bucketFor("idle")).toBe("reaction");
+    expect(bucketFor("idle")).toBeNull(); // 节流豁免：永远放行
   });
 });
 
@@ -200,8 +202,8 @@ describe("插件 Throttle：同桶升级放行（DESIGN §3.1，TC-EV-18 语义�
     expect(th.shouldSend("editing")).toBe(true); // 已投递 editing(4)
     t = 1000;
     expect(th.shouldSend("working")).toBe(false); // 1 < 4 → 节流
-    expect(th.shouldSend("idle")).toBe(false); // 0 < 4 → 节流
     expect(th.shouldSend("editing")).toBe(false); // 4 = 4 不高于 → 节流
+    // v0.1.3 四-3：idle 已豁免出桶（shouldSend 恒 true），同桶降级场景见 TC-EV-25
   });
 
   it("speech 桶升级：thinking(3) 后 error(7) 放行；error 后 success(2) 节流", () => {
@@ -256,7 +258,18 @@ describe("插件 classifyEvent / classifyToolBefore：归一化（TC-EV-04）", 
     ).toBe("working");
     expect(classifyEvent({ type: "session.idle" })).toBe("idle");
     expect(classifyEvent({ type: "session.error" })).toBe("error");
-    expect(classifyEvent({ type: "message.updated" })).toBeNull();
+  });
+
+  it("流式事件 → working（v0.1.3 四-4，TC-EV-26-1；TC-EV-04 修订）", () => {
+    expect(
+      classifyEvent({
+        type: "message.part.delta",
+        properties: { sessionID: "s1", delta: "x" },
+      }),
+    ).toBe("working");
+    expect(classifyEvent({ type: "message.updated" })).toBe("working"); // v0.1.3 起不再是 null
+    expect(classifyEvent({ type: "message.part.updated" })).toBe("working");
+    expect(classifyEvent({ type: "plugin.added" })).toBeNull(); // 未分类事件仍忽略
   });
 
   it("总线 permission.asked → waiting-permission（A6，M2 P3-⑤ 清偿）", () => {
@@ -382,6 +395,208 @@ describe("插件宿主零阻塞（2026-08-22 根因修复：钩子 fire-and-forg
     for (const r of results) {
       expect(r).toBeUndefined();
       expect(typeof (r as { then?: unknown })?.then).not.toBe("function");
+    }
+  });
+});
+
+describe("插件 ThinkingSticky + deliver 集成：thinking 粘性窗口（v0.1.3 四-2，TC-EV-24）", () => {
+  function rig(clockMs: () => number) {
+    const posted: Array<{ kind: string; sid: string }> = [];
+    const deliverer = createDeliverer({
+      throttle: new Throttle(clockMs),
+      sticky: new ThinkingSticky(clockMs),
+      postStateImpl: (async (kind: string, sid: string) => {
+        posted.push({ kind, sid });
+        return { status: 200 };
+      }) as never,
+      killswitch: () => false,
+    });
+    return { deliverer, posted };
+  }
+
+  it("STICKY_MS = 4000（定案常量，防误改）", () => {
+    expect(STICKY_MS).toBe(4000);
+  });
+
+  it("窗口内 working/idle 被吞且不占节流桶（TC-EV-24-1/4）", async () => {
+    let t = 0;
+    const { deliverer, posted } = rig(() => t);
+    await deliverer.deliver("thinking", "s1"); // t=0 置窗（speech 桶放行）
+    t = 1000;
+    await deliverer.deliver("working", "s1"); // 被吞
+    t = 1500;
+    await deliverer.deliver("idle", "s1"); // 被吞
+    expect(posted).toEqual([{ kind: "thinking", sid: "s1" }]);
+    // 不占桶的证明：t=4.5s 窗口过期，reaction 桶若在 t=1s 被吞事件占用则此刻
+    // 仍在 10s 冷却内必被节流；实际桶空 → 放行
+    t = 4500;
+    await deliverer.deliver("working", "s1");
+    expect(posted.map((p) => p.kind)).toEqual(["thinking", "working"]);
+  });
+
+  it("更高优先级事件窗口内照常穿透（TC-EV-24-2）", async () => {
+    let t = 0;
+    const { deliverer, posted } = rig(() => t);
+    await deliverer.deliver("thinking", "s1");
+    t = 1000;
+    await deliverer.deliver("editing", "s1"); // editing(4) > thinking(3)，不吞
+    t = 1200;
+    await deliverer.deliver("testing", "s1"); // 升级放行
+    t = 1400;
+    await deliverer.deliver("waiting-permission", "s1"); // permission 桶
+    expect(posted.map((p) => p.kind)).toEqual([
+      "thinking",
+      "editing",
+      "testing",
+      "waiting-permission",
+    ]);
+  });
+
+  it("被 speech 节流吞掉的 thinking 仍续窗（TC-EV-24-3）", async () => {
+    let t = 0;
+    const { deliverer, posted } = rig(() => t);
+    await deliverer.deliver("thinking", "s1"); // speech 桶占
+    t = 5000;
+    await deliverer.deliver("thinking", "s1"); // speech 20s 冷却内被节流
+    t = 6000;
+    await deliverer.deliver("working", "s1"); // 但粘性窗已续到 t=9s → 被吞
+    expect(posted).toEqual([{ kind: "thinking", sid: "s1" }]);
+  });
+
+  it("多 session 隔离：A 的窗口不影响 B（TC-EV-24-5）", async () => {
+    let t = 0;
+    const { deliverer, posted } = rig(() => t);
+    await deliverer.deliver("thinking", "A");
+    t = 1000;
+    await deliverer.deliver("working", "B"); // B 无窗口 → 正常投递
+    expect(posted).toEqual([
+      { kind: "thinking", sid: "A" },
+      { kind: "working", sid: "B" },
+    ]);
+  });
+});
+
+describe("插件 idle 节流豁免（v0.1.3 四-3，TC-EV-25）", () => {
+  function rig() {
+    const posted: string[] = [];
+    const deliverer = createDeliverer({
+      throttle: new Throttle(() => 0), // 同一时刻：冷却语义最严格
+      postStateImpl: (async (kind: string) => {
+        posted.push(kind);
+        return { status: 200 };
+      }) as never,
+      killswitch: () => false,
+    });
+    return { deliverer, posted };
+  }
+
+  it("reaction 桶刚投 working，紧邻 idle 立即放行（原行为缺陷回归钉子）", async () => {
+    const { deliverer, posted } = rig();
+    await deliverer.deliver("working", "s1"); // t=0 占 reaction 桶
+    await deliverer.deliver("idle", "s1"); // 旧实现：0<1 同桶降级被吞 → 停 working 30-60s
+    expect(posted).toEqual(["working", "idle"]);
+  });
+
+  it("双通道重复 idle 均放行（幂等由 App 侧覆盖兜底）", async () => {
+    const { deliverer, posted } = rig();
+    await deliverer.deliver("idle", "s1");
+    await deliverer.deliver("idle", "s1");
+    expect(posted).toEqual(["idle", "idle"]);
+  });
+
+  it("其余 reaction 类仍受 10s 冷却约束（TC-EV-18 不回归）", async () => {
+    const { deliverer, posted } = rig();
+    await deliverer.deliver("working", "s1");
+    await deliverer.deliver("working", "s1"); // 1 = 1 不升级 → 节流
+    expect(posted).toEqual(["working"]);
+  });
+});
+
+describe("插件流式心跳（v0.1.3 四-4，TC-EV-26）", () => {
+  it("高频 delta 经 reaction 桶节流：60s 流式恰 6 次投递（TC-EV-26-2）", async () => {
+    let t = 0;
+    const posted: number[] = [];
+    const deliverer = createDeliverer({
+      throttle: new Throttle(() => t),
+      postStateImpl: (async () => {
+        posted.push(t);
+        return { status: 200 };
+      }) as never,
+      killswitch: () => false,
+    });
+    // spike 实测 ~28 次/s：250ms 一个 delta，持续 60s
+    for (t = 0; t < 60000; t += 250) {
+      await deliverer.deliver("working", "s1");
+    }
+    expect(posted).toEqual([0, 10000, 20000, 30000, 40000, 50000]);
+  });
+
+  it("缺 sessionID 的流式事件不投递（防污染 default session，TC-EV-26-3）", () => {
+    const deliver = vi.fn(async () => {});
+    const hooks = buildHooks({ deliver });
+    hooks.event({
+      event: { type: "message.part.delta", properties: { delta: "x" } }, // 无 sessionID
+    });
+    hooks.event({
+      event: { type: "message.part.delta", properties: { sessionID: "s1", delta: "x" } },
+    });
+    expect(deliver).toHaveBeenCalledTimes(1);
+    expect(deliver.mock.calls[0]).toEqual(["working", "s1"]);
+  });
+
+  it("零阻塞契约不回归：流式事件钩子仍返回 undefined（TC-EV-26-4）", () => {
+    const hooks = buildHooks({ deliver: () => new Promise<void>(() => {}) });
+    const r: unknown = hooks.event({
+      event: { type: "message.part.delta", properties: { sessionID: "s1", delta: "x" } },
+    });
+    expect(r).toBeUndefined();
+    expect(typeof (r as { then?: unknown })?.then).not.toBe("function");
+  });
+});
+
+describe("插件三机制联动时间线（v0.1.3 四-2/3/4 集成，TC-EV-27）", () => {
+  it("thinking 稳定 4s → 心跳续活 → editing 穿透 → 长流式无 >30s 静默 → idle 即时收尾", async () => {
+    let t = 0;
+    const posted: Array<{ t: number; kind: string }> = [];
+    const deliverer = createDeliverer({
+      throttle: new Throttle(() => t),
+      sticky: new ThinkingSticky(() => t),
+      postStateImpl: (async (kind: string) => {
+        posted.push({ t, kind });
+        return { status: 200 };
+      }) as never,
+      killswitch: () => false,
+    });
+
+    await deliverer.deliver("thinking", "s1"); // chat.message → thinking（t=0）
+    for (t = 500; t < 4000; t += 500) {
+      await deliverer.deliver("working", "s1"); // 0-4s delta 心跳被粘性吞
+    }
+    t = 4500;
+    await deliverer.deliver("working", "s1"); // 窗口过期，首个心跳放行
+    t = 5000;
+    await deliverer.deliver("editing", "s1"); // tool.execute.before(edit) 穿透
+    for (t = 6000; t < 64000; t += 2000) {
+      await deliverer.deliver("working", "s1"); // 60s+ 纯文本生成 delta 心跳
+    }
+    t = 65000;
+    await deliverer.deliver("idle", "s1"); // session.idle 豁免放行，即时收尾
+
+    expect(posted.map((p) => p.kind)).toEqual([
+      "thinking",
+      "working",
+      "editing",
+      "working",
+      "working",
+      "working",
+      "working",
+      "working",
+      "idle",
+    ]);
+    // 心跳间隔（含编辑期跨桶）无 >30s 静默：idle_timeout 不可能误触
+    const times = posted.map((p) => p.t);
+    for (let i = 1; i < times.length; i++) {
+      expect(times[i] - times[i - 1]).toBeLessThan(30000);
     }
   });
 });

@@ -27,6 +27,17 @@
 //     投递/退避只在后台队列进行；② endpoint/update-token 缺失（App 未运行）→
 //     postState 返回 null，deliver 静默跳过且不计退避（下游缺席≠错误）。
 // ===========================================================================
+// v0.1.3 事件层三机制（V1-OPEN-ITEMS §8.4，2026-08-22）：
+//   - 流式心跳（四-4）：message.part.delta（高频主力，实测 ~28 次/s）+ message.
+//     updated / message.part.updated（part 边界低频补充）→ working，经 reaction
+//     桶 10s 节流成心跳，防纯文本生成期 30s 静默误回 idle（spike：session.status
+//     busy 仅开始发一次）。缺 sessionID 的流式事件丢弃（不落 default）。
+//   - thinking 粘性窗口（四-2）：thinking 后 STICKY_MS=4s 内吞同 session 的
+//     working/idle（ThinkingSticky，节流前判定、不占桶）；更高优先级自然穿透。
+//   - idle 节流豁免（四-3）：idle 移出 reaction 桶（bucketFor→null 永远放行），
+//     会话结束信号即到即投，双通道重复幂等无害。
+//   三机制均在 deliver 内部，零阻塞契约不受影响（§九钉子用例守护）。
+// ===========================================================================
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -80,6 +91,15 @@ export function classifyEvent(event) {
       // 双处理）；补总线分支后两条通道一致——同一次询问若 hook 与总线都发，
       // permission 桶 3s 冷却天然去重，无双发。
       return "waiting-permission";
+    // v0.1.3 四-4 流式心跳（spike 实测 opencode 1.18.19，2026-08-22）：
+    // message.part.delta 是纯文本生成期的高频事件（~28 次/s，TUI 打字机源），
+    // 映射 working 后经 reaction 桶 10s 节流天然形成心跳，防 30s 静默超时
+    // 误回 idle；message.updated / message.part.updated 仅 part 边界低频到达
+    // （全程 ~7 次），同映射无害作补充。V1-OPEN-ITEMS §8.4。
+    case "message.part.delta":
+    case "message.updated":
+    case "message.part.updated":
+      return "working";
     default:
       return null;
   }
@@ -104,7 +124,11 @@ export function classifyToolBefore(tool, args, command) {
 
 const SPEECH_KINDS = new Set(["thinking", "success", "error"]);
 const PERMISSION_KINDS = new Set(["waiting-permission"]);
-const REACTION_KINDS = new Set(["working", "editing", "testing", "idle"]);
+// v0.1.3 四-3：idle 移出 reaction 桶——会话结束时最后投递的 working(1) 刚占桶，
+// 紧随的 idle(0) 永远无法穿透同桶升级放行（只放行更高优先级）→ 被 10s 冷却吞掉，
+// 宠物停 working 30-60s 才靠 App 侧 idle_timeout 兜底。idle 仅由真实会话边界事件
+// 触发、低频，豁免（bucketFor 返回 null 永远放行）后双通道重复投递幂等无害。
+const REACTION_KINDS = new Set(["working", "editing", "testing"]);
 const COOLDOWNS = { speech: 20000, permission: 3000, reaction: 10000 };
 
 // 视觉优先级（与 Rust session_state.rs / DESIGN §3.3 一致，M5 同桶升级放行用）：
@@ -164,6 +188,47 @@ export class Throttle {
       return true;
     }
     return false;
+  }
+}
+
+// ---- thinking 粘性窗口（v0.1.3 四-2，V1-OPEN-ITEMS §8.4） ----
+
+// 粘性时长：chat.message → thinking 与 session.status(busy) → working 几乎同时
+// 到达，App 侧同 session 后到覆盖 → thinking 可见窗口仅几百毫秒。窗口内吞掉
+// working/idle 使 thinking 稳定显示至真正开始干活（更高优先级的 editing/
+// testing/waiting-permission/error 不在吞没集合，自然穿透）。
+const STICKY_MS = 4000;
+// 被吞没的 kind 集合（视觉优先级 ≤ thinking(3) 的 reaction 类复位信号）。
+const STICKY_SWALLOW = new Set(["working", "idle"]);
+export { STICKY_MS };
+
+export class ThinkingSticky {
+  constructor(now = () => Date.now()) {
+    this.now = now;
+    /** sessionId → 窗口到期时刻（ms）。 */
+    this.until = new Map();
+  }
+
+  /** thinking 到达：置/续窗（在节流检查前调用——thinking 被 speech 桶 20s 节流吞掉也续窗）。 */
+  arm(sessionId) {
+    const t = this.now();
+    // 顺手清理其它 session 的过期项，防 map 无界增长（session 数小，O(n) 可忽略）
+    for (const [sid, exp] of this.until) {
+      if (exp <= t) this.until.delete(sid);
+    }
+    this.until.set(sessionId, t + STICKY_MS);
+  }
+
+  /** working/idle 到达：窗口内返回 true = 吞掉（不进节流、不占桶）。 */
+  swallows(kind, sessionId) {
+    if (!STICKY_SWALLOW.has(kind)) return false;
+    const exp = this.until.get(sessionId);
+    if (exp == null) return false;
+    if (this.now() >= exp) {
+      this.until.delete(sessionId);
+      return false;
+    }
+    return true;
   }
 }
 
@@ -320,6 +385,7 @@ export function createDeliverer({
   postStateImpl = postState,
   killswitch = killswitchActive,
   agent = "opencode",
+  sticky = new ThinkingSticky(),
 } = {}) {
   let queue = Promise.resolve();
   const enqueue = (fn) => {
@@ -334,10 +400,15 @@ export function createDeliverer({
   async function deliver(kind, sessionId) {
     if (!kind) return;
     if (killswitch()) return; // TC-EV-10：killswitch 整体跳过
+    const sid = sessionId ?? "default";
+    // v0.1.3 四-2：thinking 置/续粘性窗（节流检查前——被节流吞掉也续窗）；
+    // 窗口内 working/idle 静默丢弃（不占节流桶、不重置冷却，编辑/测试/权限照常穿透）
+    if (kind === "thinking") sticky.arm(sid);
+    if (sticky.swallows(kind, sid)) return;
     if (!throttle.shouldSend(kind)) return; // TC-EV-18：节流
     await enqueue(async () => {
       try {
-        const res = await postStateImpl(kind, sessionId ?? "default", agent);
+        const res = await postStateImpl(kind, sid, agent);
         if (res == null) return; // App 未运行：静默跳过（不 reset、不退避）
         backoff.reset(); // 恢复后下次立即投递
       } catch {
@@ -363,6 +434,14 @@ export function createDeliverer({
  * await 钩子返回值）——对齐 Langfuse/LangSmith 等遥测类插件「热路径零网络 I/O」
  * 的主流设计。
  */
+// v0.1.3 四-4：流式心跳类事件必须有 sessionID——缺号落到 "default" 会污染
+// 状态机（TC-EV-26-3；spike 实测正常事件均携带 properties.sessionID）。
+const STREAM_HEARTBEAT_TYPES = new Set([
+  "message.part.delta",
+  "message.updated",
+  "message.part.updated",
+]);
+
 export function buildHooks(deliverer = createDeliverer()) {
   const fire = (kind, sessionId) => {
     try {
@@ -374,7 +453,11 @@ export function buildHooks(deliverer = createDeliverer()) {
 
   return {
     event: ({ event }) => {
-      fire(classifyEvent(event), event?.properties?.sessionID);
+      const kind = classifyEvent(event);
+      if (!kind) return;
+      const sid = event?.properties?.sessionID;
+      if (STREAM_HEARTBEAT_TYPES.has(event?.type) && !sid) return;
+      fire(kind, sid);
     },
     "chat.message": (input) => {
       fire("thinking", input?.sessionID);

@@ -116,6 +116,15 @@
 - **步骤**：启动 App。
 - **预期**：本地 SQLite 自动迁移创建全部基础表（`app_state` / `reminders` / `reminder_logs` / `todos` / `todo_tags` / `plugins`），无迁移报错；后续启动跳过迁移。
 
+### TC-APP-14 设置页宠物下拉自动刷新（v0.1.3 四-1）
+
+- **前置**：App 运行；面板停在「设置」tab。
+- **步骤**：
+  1. 向 petdex/codex 目录放入新素材（或删除既有素材）；
+  2. 关闭面板（隐藏），重新打开面板——**不切换 tab**；
+  3. （备选路径）面板开着时经宠物右键菜单再次进入「设置」tab（`panel://tab`）。
+- **预期**：两种路径下下拉列表均反映最新素材集（新素材出现/已删素材消失），无需切走再切回强制重挂载——README「放好后打开设置页即出现」无条件成立。实现口径：`tauri://focus`（面板重新可见）+ `panel://tab`（目标=settings）双触发重新 `load()`。
+
 ---
 
 ## 二、TC-EV 事件链路
@@ -159,6 +168,8 @@
 | `tool.execute.before` + `bash/shell/terminal` + 命令含 test/vitest/jest/pytest/npm test | testing |
 | `permission.asked` | waiting-permission |
 | `session.error` | error |
+| `message.part.delta`（v0.1.3 流式心跳主力） | working（经 reaction 桶 10s 节流成 ~10s 心跳） |
+| `message.updated` / `message.part.updated`（v0.1.3 低频补充） | working |
 | 其它 `event`（自定义 bus 事件） | 按分类透传 |
 
 ### TC-EV-05 状态复位（M2 补充验证项①）
@@ -321,6 +332,39 @@
 - **步骤**：代码审查 + 编译验证。
 - **预期**：存在 `AgentAdapter` 接口（id / normalizeRawEvent / tokenSource / iconSet）；v1 仅实现 `OpenCodeAdapter`；新增 ClaudeCodeAdapter 不需要改主链路（文件级别验证）。
 
+### TC-EV-24 thinking 粘性窗口（v0.1.3 四-2）
+
+- **前置**：插件单测（虚拟时钟），无需真实 opencode。
+- **步骤/预期**（`plugin-hook.test.ts` 时间线断言）：
+  1. `thinking` 投递后 4s（`STICKY_MS=4000`）内，同 session 的 `working` / `idle` 被静默丢弃——且**不占节流桶**（reaction 桶冷却与已投递 kind 状态不变）；
+  2. 更高优先级事件（`editing` / `testing` / `waiting-permission`）在窗口内照常放行（自然穿透，不受粘性影响）；
+  3. 连续第二条消息的 `thinking` 被 speech 桶 20s 节流吞掉时，粘性窗口**仍然续期**（粘性记录发生在节流检查之前）；
+  4. 窗口过期后首个 `working` 恢复正常节流投递；
+  5. 多 session 隔离：session A 的粘性窗口不影响 session B 的投递。
+
+### TC-EV-25 idle 节流豁免（v0.1.3 四-3）
+
+- **前置**：插件单测。
+- **步骤/预期**：
+  1. reaction 桶刚投 `working`（冷却期内），紧邻的 `idle` **立即放行**（`bucketFor("idle")` 返回 null；旧实现同桶降级被吞——回归钉子）；
+  2. `session.idle` 与 `session.status(idle)` 双通道重复投递均放行（App 侧幂等覆盖，无害）；
+  3. 其余 reaction 类（working/editing/testing）仍受 10s 冷却 + 同桶升级放行约束（TC-EV-18 不回归）。
+
+### TC-EV-26 流式心跳（v0.1.3 四-4）
+
+- **前置**：插件单测 + spike 实测结论（opencode 1.18.19：`message.part.delta` 高频 ~28 次/s，`message.updated` / `message.part.updated` 仅 part 边界）。
+- **步骤/预期**：
+  1. `classifyEvent` 对 `message.part.delta` / `message.updated` / `message.part.updated` 均返回 `working`；
+  2. 高频 delta 经 reaction 桶 10s 节流 → 每 10s 至多 1 次 POST（时间线断言：60s 流式内恰 6 次放行）；
+  3. 事件缺 `properties.sessionID` → 不投递（防污染 `default` session）；
+  4. 零阻塞契约不回归：钩子仍 fire-and-forget（§9 钉子用例通过）。
+
+### TC-EV-27 三机制联动时间线（v0.1.3 四-2/3/4 集成）
+
+- **前置**：插件单测（虚拟时钟推进全链路）。
+- **步骤/预期**：`chat.message`(thinking) → 0-4s 内 delta(working) 被粘性吞 → 窗口过期后首个 delta 心跳放行（≤10s）→ `tool.execute.before`(editing) 穿透 → 60s+ 纯文本生成中心跳持续、无静默期超 30s → `session.idle` 豁免放行即时收尾。整链投递序列恰为：`thinking, working, editing, working…(每≤10s), idle`。
+- **运行时验收**（随 TC-DONE-04 无人值守 30 分钟一并目视）：thinking 可见 ≥4s；纯文本长回答期间宠物保持 working 不闪 idle；会话结束 ≤10s 内回 idle。
+
 ---
 
 ## 三、TC-TK Token 统计
@@ -454,14 +498,16 @@
 - **步骤**：托盘"暂停所有提醒"开启 → 等到原本会触发的时刻。
 - **预期**：任何提醒都不触发；取消暂停后恢复。
 
-### TC-RM-09 烟花模式触发（可断言部分）
+### TC-RM-09 烟花模式触发（可断言部分；v0.1.3 修订：烟花与气泡**叠加**）
 
 - **前置**：某规则勾选烟花模式（或全局开关开）。
 - **步骤**：触发该提醒。
 - **预期**：
-  1. `fireworks` 窗口显示（全屏透明置顶、无边框、无任务栏项）；
-  2. 3-5s 内窗口自动 `hide`；
-  3. 无重复 show、无残留帧。
+  1. **气泡与烟花同时展示**（v0.1.3 起特效只叠加、不替代气泡）：pet 头上气泡（文案 = 规则 label 或 todo 派生文案，经净化，8s 自动消失）+ `fireworks` 窗口播放；
+  2. `fireworks` 窗口显示（全屏透明置顶、无边框、无任务栏项）；
+  3. 3-5s 内窗口自动 `hide`；
+  4. 无重复 show、无残留帧；
+  5. 记账无双写（`ack_log` / `dismiss_log` 均 `WHERE dismissed_via IS NULL`，先到先写、后到 no-op）。
 - **目视验收项**（不进自动回归）：发射点位于宠物位置；**绽放点位于宠物当前所处屏幕（显示器）的中轴线上、高度为屏幕从上往下 0.3 倍处（中间偏上）**（无论宠物在屏幕哪个位置，烟花都绽放于该点，多显示器取宠物所在屏）；粒子数 ~300-500、HSL 渐变 + 拖尾；60fps 流畅。
 
 ### TC-RM-10 烟花结束后可复用
@@ -473,7 +519,7 @@
 
 - **前置**：全局烟花开关关，某条规则开烟花。
 - **步骤**：触发该条与其它规则。
-- **预期**：勾选规则放烟花；其它规则仅气泡（`use_fireworks` 单条覆盖生效）。
+- **预期**：勾选规则放烟花（**且同时出气泡**，v0.1.3 叠加语义）；其它规则仅气泡（`use_fireworks` 单条覆盖生效）。
 
 ### TC-RM-12 烟花音频（已取消，2026-08-16 用户定案）
 
@@ -500,6 +546,15 @@
 - **前置**：Windows 环境（M4 第二天验证）。
 - **步骤**：触发烟花。
 - **预期**：若 `maximized + transparent + alwaysOnTop` 组合渲染异常，按回退方案：fireworks 窗口不透明、背景接近桌面的深色 + 自适应 alpha 通道；至少保证烟花可见、不崩。
+
+### TC-RM-17 烟花+气泡叠加编排（v0.1.3 四-5，纯函数）
+
+- **前置**：`reminders.ts` 单测（`planReminderActions` 纯函数）。
+- **步骤/预期**：
+  1. `usesFireworks(t)` 为 true → `{ fireworks: true, bubbleText: <净化后文案> }`——气泡路径无条件执行；
+  2. `usesFireworks(t)` 为 false → `{ fireworks: false, bubbleText: <净化后文案> }`——行为与 v1 纯气泡路径一致；
+  3. todo 派生提醒（`kind="todo"`）文案构造正确（`todoReminderText` 回退 label）且经净化（TC-RM-15 口径），烟花与否不影响文案；
+  4. 桥层（`reminder-bridge.ts`）按返回值编排：先 `showReminderBubble`，`fireworks` 时**额外** invoke `reminder_play_fireworks`（不再 if/else 二选一）。
 
 ---
 
@@ -758,6 +813,12 @@
 
 - **步骤**：检查构建产物。
 - **预期**：atlas 素材包不在主包内（用户从 petdex/awesome-codex-pet 自取）。
+
+### TC-CI-05 GitHub Actions 大版本升级回归（v0.1.3 三-2）
+
+- **前置**：`actions/checkout` / `actions/setup-node` 升至当前最新大版本（Node 20 弃用警告清零）。
+- **步骤**：分别推 pulse-pet 与 todo-lite 的触发路径（tag 前缀 / 相应触发条件），各跑一次 build.yml。
+- **预期**：两项目 CI 矩阵（windows-latest + macos-latest）均绿、产物齐全；无 Node 运行时弃用警告。
 
 ---
 

@@ -5,12 +5,14 @@ import {
   isCrossMidnight,
   kindLabel,
   parseReminderTrigger,
+  planReminderActions,
   ruleToForm,
   sanitizeReminderText,
   usesFireworks,
   validateReminderInput,
   type ReminderInput,
   type ReminderRule,
+  type ReminderTrigger,
 } from "./reminders";
 
 function input(overrides: Partial<ReminderInput> = {}): ReminderInput {
@@ -150,6 +152,59 @@ describe("parseReminderTrigger / usesFireworks（TC-RM-11 OR 语义）", () => {
     expect(usesFireworks({ use_fireworks: true, fireworks_global: false })).toBe(true);
     expect(usesFireworks({ use_fireworks: false, fireworks_global: true })).toBe(true);
     expect(usesFireworks({ use_fireworks: true, fireworks_global: true })).toBe(true);
+  });
+});
+
+describe("planReminderActions：烟花+气泡叠加编排（v0.1.3 四-5，TC-RM-17）", () => {
+  const trig = (over: Partial<ReminderTrigger> = {}): ReminderTrigger => ({
+    id: 1,
+    kind: "hydration",
+    label: "该喝水啦 💧",
+    use_fireworks: false,
+    fireworks_global: false,
+    log_id: 9,
+    todo_due_ms: null,
+    ...over,
+  });
+  const NOW = 1_700_000_000_000;
+
+  it("烟花开启：气泡文案照常产出（叠加不替代，TC-RM-17-1）", () => {
+    const plan = planReminderActions(trig({ use_fireworks: true }), NOW);
+    expect(plan).toEqual({ bubbleText: "该喝水啦 💧", fireworks: true });
+    const plan2 = planReminderActions(trig({ fireworks_global: true }), NOW);
+    expect(plan2).toEqual({ bubbleText: "该喝水啦 💧", fireworks: true });
+  });
+
+  it("烟花关闭：与 v1 纯气泡路径一致（TC-RM-17-2）", () => {
+    expect(planReminderActions(trig(), NOW)).toEqual({
+      bubbleText: "该喝水啦 💧",
+      fireworks: false,
+    });
+  });
+
+  it("todo 派生提醒：构造「还有 X 分钟」文案且烟花与否不影响文案（TC-RM-17-3）", () => {
+    const due = NOW + 30 * 60_000; // 30 分钟后
+    const a = planReminderActions(trig({ kind: "todo", todo_due_ms: due }), NOW);
+    expect(a.bubbleText).toBe("还有 30 分钟要完成「该喝水啦 💧」");
+    expect(a.fireworks).toBe(false);
+    const b = planReminderActions(
+      trig({ kind: "todo", todo_due_ms: due, use_fireworks: true }),
+      NOW,
+    );
+    expect(b.bubbleText).toBe(a.bubbleText);
+    expect(b.fireworks).toBe(true);
+    // due 缺失 → 回退纯 label
+    expect(planReminderActions(trig({ kind: "todo", todo_due_ms: null }), NOW).bubbleText).toBe(
+      "该喝水啦 💧",
+    );
+  });
+
+  it("文案经净化（TC-RM-15 口径）：URL/路径/secret 置换后再入 plan", () => {
+    const plan = planReminderActions(
+      trig({ label: "看 http://evil.com/x 和 /etc/passwd" }),
+      NOW,
+    );
+    expect(plan.bubbleText).toBe("看 ［链接］ 和 ［路径］");
   });
 });
 
