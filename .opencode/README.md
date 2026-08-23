@@ -993,3 +993,24 @@ D31 落地后切换到任一 agent 即报错：`Agent Supervised-Coding's config
 2. impeccable：安装器输出 "Installed impeccable into: .opencode (project)"；detector CLI 可跑（`node .opencode/skills/impeccable/scripts/detector/detect-antipatterns.mjs --help`，零 LLM 零 API key）
 3. 清理后盘点：`.agents/skills/` = {frontend-design, playwright-cli}，`.opencode/skills/` = {impeccable}，`.codex` 已删
 4. 待新会话验证：skill 列表三者齐全 + `/impeccable` 命令可补全（当前会话 skill 列表是启动快照，测不了）
+
+### D42. Reviewer 通用方案审查 subagent（2026-08-22）
+
+**空白**：设计方案（DESIGN.md）、测试用例（TEST-CASES.md）等**方案文档本身的质量审查**此前无专门角色——Committer 审代码 diff + CASE_BUG 裁定（用例预期与实现矛盾时才介入用例），D18 预留过"上下文膨胀时拆独立 approver"的演进方向。
+
+**定位**（用户决策）：
+
+- **独立于 supervised-coding 工作流**：不进状态机、不进检查点协议、不占用调用预告——调用通道是用户在 build/plan 模式主动 cue（@mention 直连，D35 已验证 @mention 不受 `permission.task` 约束；或 build/plan 用 task 委派，二者作为 primary 默认有 task 工具，零配置改动）
+- **与 Committer 分工**：Reviewer 审方案文档（自洽性/完整性/可行性/可测性/风险），Committer 审代码 + CASE_BUG 裁定，互不重叠，committer.md 不改
+- **模型 deepseek-v4-pro + reasoningEffort: max**：方案文档多为 glm 系模型产出，审查者跨族正交（D11 盲点正交理论，与 Committer 同款配置）
+
+**权限设计**：
+
+- `edit: deny`（纯审查只产出意见）；`bash: ask`（读仓库现状不足时可跑只读探查/验证命令核实现状，逐条弹用户确认——P1"授权不能自动"）
+- `task: {"*": deny, "Vision": allow}`：审 UI 设计稿等需要看图时委派 Vision（复用 D40 结论：显式 task 规则过挂载闸，`subagent_depth: 2` 已就位）
+
+**输出契约**（对齐 Committer 的 P1/P2 风格）：问题清单（严重度 + 文档位置 + 修改建议）/ 需澄清项 / verdict（APPROVED / NEEDS_CHANGES，有 P1 即 NEEDS_CHANGES）。审查维度写入 prompt：自洽性、完整性（边界/异常路径遗漏）、可行性（对照仓库现状，须引用实读代码为证）、可测性、风险点。
+
+**命名说明**：reviewer 之名曾在 D24 改名为 committer（代码审查者）；本 reviewer 是**新角色**（方案文档审查），非回归——角色名与动作/状态分离原则（D24）不变。
+
+**接入面**：supervised-coding / coder / tester / committer 的 task 权限均不放开（他们不调用 Reviewer）；opencode.json 不改。未来若要进工作流（如 spec 确认后强制方案审查），再走决策记录修订。
