@@ -425,7 +425,7 @@ pub fn install_cc(settings: &Path, hooks_dir: &Path) -> Result<(), String> {
         plog!("[pulsepet] integrations cc install: refuse symlink: {e}");
     })?;
     // 解析失败/结构非法 → 报 error 不落笔
-    let mut root = match read_settings_object(settings) {
+    let root = match read_settings_object(settings) {
         Ok(v) => v,
         Err(e) => {
             plog!("[pulsepet] integrations cc install: settings unusable, abort (no write): {e}");
