@@ -157,7 +157,7 @@ opencode 进程（Bun）                        Claude Code 进程
 | 脚本落点 | `~/.config/opencode/plugins/pulse-pet-hook.js`（既有） | `~/.pulsepet/hooks/claude-code-hook.js`（Windows `%LOCALAPPDATA%\pulsepet\hooks\`） |
 | 脚本来源 | App 内嵌 `include_str!("../../opencode-plugin/pulse-pet-hook.js")` | 同左（claude-code-hook.js） |
 | 配置文件 | `~/.config/opencode/opencode.json`（或 `.jsonc`，既有查找顺序） | `~/.claude/settings.json` |
-| 配置形态 | `plugin` 数组一项 `"./plugins/pulse-pet-hook.js" // --pulse-pet-managed`（JSONC，v1 既有） | `hooks` 下 8 个事件键，各一条无 matcher 条目（§1.4.2） |
+| 配置形态 | `plugin` 数组一项 `"./plugins/pulse-pet-hook.js" // --pulse-pet-managed`（JSONC，v1 既有） | `hooks` 下 8 个事件键，各追加一组 matcher 省略（=全捕）的 matcher 组条目（§1.4.2） |
 | 修改方式 | **JSONC 文本外科手术**（v1 `opencode-config.mjs` 算法移植 Rust，保注释/尾逗号） | **严格 JSON 结构化改写**（serde_json `preserve_order` feature，保键序）+ 备份 + 原子写 |
 | managed 标记 | 行内注释 `--pulse-pet-managed`（JSONC 官方容忍） | command 字符串内嵌 `--pulse-pet-managed` 参数（数据级，S9 绕开注释问题） |
 
@@ -167,14 +167,14 @@ opencode 进程（Bun）                        Claude Code 进程
 
 #### 1.4.2 claude-code 安装条目（canonical 形态）
 
-每个事件键下追加一个条目（已存在的 pulse-pet 条目先移除再追加——升级即重装，openpets 同款）。pulse-pet 条目是**事件数组的直接元素**（无 matcher 全捕；matcher 组形态仅出现在检测/卸载的递归场景）：
+每个事件键下追加一个 matcher 组（已存在的 pulse-pet 特征条目先移除再追加——升级即重装，openpets 同款）。**〔勘误 2026-08-24〕**初版把 pulse-pet 条目写成事件数组的直接元素（裸 command 对象），实机安装后 CC 报 `hooks.<Event>.0.hooks: Expected array, but received undefined`——CC zod schema 要求事件数组元素必须是 `{matcher?, hooks: [...]}` 组、command 条目在内层 hooks 数组（错误信息附官方示例），且为**文件级校验：一条错误整个 settings 文件被跳过**。S5 的事实提取 `hooks.EVENT[].matcher + hooks[].{...}` 本正确，§1.13 P2-5 修订时示例用错。正确定案：**matcher 组形态，外层省略 matcher = 全捕**（满足 PreToolUse 脚本内分类需求）：
 
 ```jsonc
 {
   "hooks": {
     "UserPromptSubmit": [
       // 用户已有条目原样保留……
-      { "type": "command", "command": "…", "timeout": 3, "async": true, "asyncRewake": false }  // pulse-pet 条目
+      { "hooks": [ { "type": "command", "command": "…", "timeout": 3, "async": true, "asyncRewake": false } ] }  // pulse-pet matcher 组（省略 matcher = 全捕）
     ]
     // … 共 8 个事件键：SessionStart / UserPromptSubmit / PreToolUse / PostToolUse /
     //    PostToolUseFailure / PermissionRequest / Stop / StopFailure
@@ -182,7 +182,7 @@ opencode 进程（Bun）                        Claude Code 进程
 }
 ```
 
-pulse-pet hook 条目（command 为 Unix 形态；Windows 见 §1.4.4）：
+pulse-pet 组内 hook 条目（command 为 Unix 形态；Windows 见 §1.4.4）：
 
 ```jsonc
 {
@@ -204,9 +204,9 @@ command 分解（petdex `canonicalCommandForTarget` 同构 + P2-2 修订的 node
 
 #### 1.4.3 幂等 / 卸载 / 备份 / 原子写（对齐 openpets）
 
-- **幂等判定**（P1-1 修订）：逐事件键检查——该事件键下 **pulse-pet 特征条目数恰为 1 且其 command 与 canonical 串完全一致** → `installed`；pulse-pet 特征条目数 > 1，或存在任一 pulse-pet 特征条目形态不一致 → `stale`（重装即修复）；无 pulse-pet 特征条目 → 未安装。「pulse-pet 特征」= command 字符串含 `--pulse-pet-managed` 或 pulsepet 路径；检测**递归进入 matcher 组的 hooks 数组**（openpets `containsOpenPetsHook` 同构——存在性检测，与用户条目总数无关，用户自有条目共存不影响判定）。
-- **安装** = 移除全部 pulse-pet 特征条目（含 matcher 组内，递归）→ 逐事件追加 canonical 条目（事件数组缺失则建）→ 序列化写回。用户条目永不触碰。
-- **卸载** = 移除全部 pulse-pet 特征条目（**与检测同口径递归进 matcher 组**）→ 事件数组空则删事件键 → `hooks` 对象空则删 `hooks` 键。
+- **幂等判定**（P1-1 修订 + 2026-08-24 勘误适配）：逐事件键检查——遍历该事件键下全部 matcher 组（含省略 matcher 键的组）的 **hooks 数组内 command 条目**，pulse-pet 特征条目数恰为 1 且其 command 与 canonical 串完全一致 → `installed`；特征条目数 > 1，或存在任一特征条目形态不一致（含初版坏形态残留——**坏形态即 stale，重装即修复**）→ `stale`；无特征条目 → 未安装。「pulse-pet 特征」= command 字符串含 `--pulse-pet-managed` 或 pulsepet 路径（openpets `containsOpenPetsHook` 同构——存在性检测，与用户条目总数无关，用户自有条目共存不影响判定）。
+- **安装** = 移除全部 pulse-pet 特征条目（含 matcher 组内，递归；所在组 hooks 空则整组移除）→ 逐事件追加 canonical matcher 组（事件数组缺失则建）→ 序列化写回。用户条目永不触碰。
+- **卸载** = 移除全部 pulse-pet 特征条目（**与检测同口径递归进 matcher 组的 hooks 数组**；特征条目移除后所在组 hooks 空则整组移除）→ 事件数组空则删事件键 → `hooks` 对象空则删 `hooks` 键。
 - **备份**：写前若文件存在，复制为 `settings.json.pulsepet-backup-<ISO时间戳>.json`（0600）；**写新备份前先清理旧 `settings.json.pulsepet-backup-*.json`**（时间戳文件名不会自然覆盖，显式清理保「仅保留最近 1 份」）。
 - **原子写**：`settings.json.<pid>.tmp`（0600）→ rename（跨平台原子）。
 - **解析失败防御**：JSON.parse 失败 / 顶层非对象 / `hooks` 非对象 → 报 error **不落笔**（openpets `readClaudeSettings` 同构）；文件不存在视为 `{}` 新建。
