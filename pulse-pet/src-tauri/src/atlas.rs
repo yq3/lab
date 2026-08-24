@@ -651,7 +651,8 @@ impl AtlasState {
         }
     }
 
-    /// 从 AtlasData 构造（测试便捷通道）。
+    /// 从 AtlasData 构造（测试便捷通道；release 无调用面）。
+    #[cfg(test)]
     pub fn from_data(data: AtlasData) -> Self {
         Self::new(Selection {
             requested: None,

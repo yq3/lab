@@ -23,6 +23,27 @@ body,
   box-sizing: border-box;
 }
 
+/* 键盘焦点环（craft-floor states：焦点可见且主题化；鼠标点击不显环） */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* 文本选中态（craft-floor browser surfaces：selection 属于设计面，从色板取） */
+.panel ::selection {
+  background: var(--accent);
+  color: var(--bg);
+}
+
+/* 减少动态偏好（craft-floor motion：spinner 转为静态强调，保状态可辨） */
+@media (prefers-reduced-motion: reduce) {
+  .intg-spinner {
+    animation: none;
+    border: 2px solid var(--line);
+    border-top-color: var(--accent);
+  }
+}
+
 /* 滚动条（深浅两主题可读，R7） */
 ::-webkit-scrollbar {
   width: 10px;
@@ -240,6 +261,39 @@ body,
   padding: 32px 0;
   text-align: center;
   color: var(--ink-faint);
+}
+
+/* ---- 深色主题组件覆盖（skill 审查 R1-supplement：对齐 b-cool 样例） ----
+ * 两份权威样例的边框系统在深色下系统性不同（b-cool 比 a 低调）：卡片/控件
+ * 用 --line 线框而非亮墨重边、芯片与分段容器用 --ink-faint、激活 tab 与
+ * KPI 首卡强调改走 --accent 边框（浅色 a 的「ink 边 + 首卡 accent 阴影」
+ * 直接映射深色会得到刺眼的亮白粗边）。覆盖只改边框引用，值仍全部来自
+ * tokens.css 既有 token（token 表零变更）。 */
+[data-theme="dark"] .panel-header {
+  border-bottom-color: var(--ink-faint); /* b-cool .hd */
+}
+
+[data-theme="dark"] .panel-status-chip {
+  border-color: var(--ink-faint); /* b-cool .hd-state */
+}
+
+[data-theme="dark"] .token-seg,
+[data-theme="dark"] .theme-seg {
+  border-color: var(--ink-faint); /* b-cool .seg */
+}
+
+[data-theme="dark"] .panel-tab.active {
+  border-color: var(--accent); /* b-cool .tab.on */
+}
+
+[data-theme="dark"] .kpi,
+[data-theme="dark"] .token-section {
+  border-color: var(--line); /* b-cool .kpi / .card */
+}
+
+[data-theme="dark"] .token-kpis .kpi:first-child {
+  border-color: var(--accent); /* b-cool .kpi.first：边框强调（非阴影） */
+  box-shadow: var(--shadow-hard-lg);
 }
 
 /* ---- 通用分段控件（时间跨度/维度/主题三档等） ---- */

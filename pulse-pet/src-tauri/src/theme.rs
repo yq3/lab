@@ -21,9 +21,6 @@ pub const KEY_THEME: &str = "ui.theme";
 /// 前端主题偏好变化广播事件名（`ui_set_theme` 下发，panel 窗订阅）。
 pub const THEME_EVENT: &str = "ui://theme";
 
-/// 合法主题偏好值。
-pub const THEMES: [&str; 3] = ["auto", "light", "dark"];
-
 /// 解析并规范化主题偏好（trim 容忍；非法 → None）。
 pub fn parse_theme(s: &str) -> Option<&'static str> {
     match s.trim() {
