@@ -258,8 +258,10 @@ pub fn canonical_cc_command(windows: bool, hooks_dir: &Path) -> String {
     }
 }
 
-/// canonical hook 条目（数组直接元素，无 matcher；§1.4.2）。
-fn canonical_cc_entry(windows: bool, hooks_dir: &Path) -> serde_json::Value {
+/// canonical 组内 hook 条目（§1.4.2 勘误 2026-08-24：command 条目在 matcher 组
+/// 的内层 hooks 数组）。Windows 的 `shell` 字段按 CC schema 语义（S8：per-hook
+/// 执行器选择）落在 hook 条目上——组级无此字段。
+fn canonical_cc_hook(windows: bool, hooks_dir: &Path) -> serde_json::Value {
     let mut v = serde_json::json!({
         "type": "command",
         "command": canonical_cc_command(windows, hooks_dir),
@@ -273,8 +275,15 @@ fn canonical_cc_entry(windows: bool, hooks_dir: &Path) -> serde_json::Value {
     v
 }
 
+/// canonical matcher 组（事件数组直接元素；外层**省略 matcher = 全捕**，
+/// §1.4.2 勘误形态——满足 PreToolUse 脚本内分类需求）。
+fn canonical_cc_group(windows: bool, hooks_dir: &Path) -> serde_json::Value {
+    serde_json::json!({ "hooks": [canonical_cc_hook(windows, hooks_dir)] })
+}
+
 /// 「pulse-pet 特征」= type:"command" 且 command 含 `--pulse-pet-managed` 或
-/// pulsepet 路径（§1.4.3）。
+/// pulsepet 路径（§1.4.3）。特征条目的**合法位置**是 matcher 组内层 hooks 数组；
+/// 出现在事件数组直接元素 = 初版坏形态（CC zod 拒绝，勘误前的 R1 产物）。
 fn is_feature_entry(entry: &serde_json::Value) -> bool {
     let ty = entry.get("type").and_then(|v| v.as_str());
     if ty != Some("command") {
@@ -286,36 +295,59 @@ fn is_feature_entry(entry: &serde_json::Value) -> bool {
         .is_some_and(|cmd| cmd.contains(MANAGED_FLAG) || cmd.contains(".pulsepet"))
 }
 
-/// 递归移除事件数组内全部特征条目（含 matcher 组 `{"matcher":…,"hooks":[…]}`
-/// 内部——与检测同口径，§1.4.3）；返回移除数。
+/// 移除事件数组内全部特征条目（§1.4.3 勘误口径）：
+/// 1. matcher 组 `{"matcher"?, "hooks":[…]}` 内层的特征条目 → 移除；**特征清空
+///    的组整组移除**（只移除因特征而空的组，用户本就空的组不动）；
+/// 2. 直接元素位置的坏形态特征条目 → 移除（用户现场修复路径）。
+/// 返回移除的特征条目数。
 fn remove_feature_entries(arr: &mut Vec<serde_json::Value>) -> usize {
-    let mut removed = 0;
-    for entry in arr.iter_mut() {
+    let mut removed = 0usize;
+    let mut emptied_groups: Vec<usize> = Vec::new();
+    for (i, entry) in arr.iter_mut().enumerate() {
         if let Some(hooks) = entry.get_mut("hooks").and_then(|h| h.as_array_mut()) {
-            removed += remove_feature_entries(hooks);
+            let before = hooks.len();
+            hooks.retain(|h| !is_feature_entry(h));
+            let n = before - hooks.len();
+            removed += n;
+            if n > 0 && hooks.is_empty() {
+                emptied_groups.push(i);
+            }
         }
     }
+    // 从后往前移除空组（索引稳定）
+    for i in emptied_groups.into_iter().rev() {
+        arr.remove(i);
+    }
+    // 坏形态直接元素（裸 command 条目）
     let before = arr.len();
     arr.retain(|e| !is_feature_entry(e));
     removed + (before - arr.len())
 }
 
-/// 统计事件数组：`(特征条目总数（含 matcher 组内）, 与 canonical 完全一致的直接元素数)`。
-fn count_key(arr: &[serde_json::Value], canonical: &str) -> (usize, usize) {
-    let mut feature = 0;
-    let mut canonical_direct = 0;
+/// 统计事件数组（§1.4.3 勘误口径）：`(组内特征条目数, 组内与 canonical 完全
+/// 一致数, 坏形态直接元素特征条目数)`。CC schema 两层结构：事件数组 → matcher
+/// 组 → hooks 数组 → command 条目；不递归更深层（schema 无此形态）。
+fn count_key(arr: &[serde_json::Value], canonical: &str) -> (usize, usize, usize) {
+    let mut in_groups = 0;
+    let mut canonical_ok = 0;
+    let mut bad_form = 0;
     for e in arr {
         if let Some(hooks) = e.get("hooks").and_then(|h| h.as_array()) {
-            feature += count_key(hooks, canonical).0;
-        }
-        if is_feature_entry(e) {
-            feature += 1;
-            if e.get("command").and_then(|v| v.as_str()) == Some(canonical) {
-                canonical_direct += 1;
+            for h in hooks {
+                if is_feature_entry(h) {
+                    in_groups += 1;
+                    if h.get("command").and_then(|v| v.as_str()) == Some(canonical) {
+                        canonical_ok += 1;
+                    }
+                }
             }
         }
+        // 直接元素位置的特征条目 = 初版坏形态残留
+        if is_feature_entry(e) {
+            bad_form += 1;
+        }
     }
-    (feature, canonical_direct)
+    (in_groups, canonical_ok, bad_form)
 }
 
 /// 配置条目三态（P1-1 修订口径：特征条目恰 1 且与 canonical 一致 → installed；
@@ -357,19 +389,21 @@ pub fn cc_config_state(settings: &Path, canonical: &str) -> Result<ConfigState, 
                 let arr = a
                     .as_array()
                     .ok_or_else(|| format!("hooks.{ev} 不是数组"))?;
-                let (feature, canonical_direct) = count_key(arr, canonical);
-                total += feature;
-                if feature != 1 || canonical_direct != 1 {
+                let (in_groups, canonical_ok, bad_form) = count_key(arr, canonical);
+                total += in_groups + bad_form;
+                // 勘误口径：组内特征恰 1 且与 canonical 一致、无坏形态残留
+                if bad_form > 0 || in_groups != 1 || canonical_ok != 1 {
                     all_ok = false;
                 }
             }
         }
     }
-    // 其它事件键里的特征条目（用户复制走的）也计入总量（>8 → stale）
+    // 其它事件键里的特征条目（用户复制走的，含坏形态）也计入总量（多出 → stale）
     for (k, val) in hooks {
         if !CC_EVENTS.contains(&k.as_str()) {
             if let Some(arr) = val.as_array() {
-                total += count_key(arr, canonical).0;
+                let (in_groups, _, bad_form) = count_key(arr, canonical);
+                total += in_groups + bad_form;
             }
         }
     }
@@ -463,8 +497,8 @@ pub fn install_cc(settings: &Path, hooks_dir: &Path) -> Result<(), String> {
         if removed_total == 0 {
             plog!("[pulsepet] integrations cc install: no existing feature entries (fresh install)");
         }
-        // 2) 逐事件追加 canonical 条目（事件数组缺失则建；非数组 → 不落笔）
-        let entry = canonical_cc_entry(cfg!(windows), hooks_dir);
+        // 2) 逐事件追加 canonical matcher 组（事件数组缺失则建；非数组 → 不落笔）
+        let entry = canonical_cc_group(cfg!(windows), hooks_dir);
         let obj = root
             .as_object_mut()
             .ok_or_else(|| "顶层不是对象".to_string())?;
@@ -1120,15 +1154,22 @@ mod tests {
         assert!(c.starts_with("node \"C:\\Users\\name\\.pulsepet\\hooks"));
         assert!(c.ends_with("claude-code-hook.js\" --pulse-pet-managed"));
         assert!(!c.contains("if [")); // 无 POSIX 包装语法
-        let entry = canonical_cc_entry(true, dir);
-        assert_eq!(entry["shell"], serde_json::json!("powershell"));
-        assert_eq!(entry["timeout"], serde_json::json!(3));
-        assert_eq!(entry["async"], serde_json::json!(true));
-        assert_eq!(entry["asyncRewake"], serde_json::json!(false));
-        assert_eq!(entry["type"], serde_json::json!("command"));
+        // 勘误形态：组 = {"hooks":[hook]}；shell 字段按 CC schema 语义在 hook 条目上
+        let group = canonical_cc_group(true, dir);
+        assert!(
+            group.get("matcher").is_none(),
+            "外层省略 matcher = 全捕"
+        );
+        let hook = &group["hooks"][0];
+        assert_eq!(hook["shell"], serde_json::json!("powershell"));
+        assert_eq!(hook["timeout"], serde_json::json!(3));
+        assert_eq!(hook["async"], serde_json::json!(true));
+        assert_eq!(hook["asyncRewake"], serde_json::json!(false));
+        assert_eq!(hook["type"], serde_json::json!("command"));
+        assert_eq!(hook["command"], serde_json::json!(c));
         // Unix 条目无 shell 键
-        let unix_entry = canonical_cc_entry(false, dir);
-        assert!(unix_entry.get("shell").is_none());
+        let unix_hook = &canonical_cc_group(false, dir)["hooks"][0];
+        assert!(unix_hook.get("shell").is_none());
     }
 
     // ---- 安装 / 幂等 / 卸载 / 状态（TC-INT-03、TC-INT-07、TC-INT-08-1/2） ----
@@ -1144,8 +1185,22 @@ mod tests {
         assert_eq!(hooks_obj.len(), 8, "恰 8 个事件键");
         for ev in CC_EVENTS {
             let arr = hooks_obj[ev].as_array().expect("array");
-            assert_eq!(arr.len(), 1, "{ev} 下恰一条 canonical 条目");
-            assert_eq!(arr[0]["command"], serde_json::json!(canonical_cc_command(false, &hooks)));
+            assert_eq!(arr.len(), 1, "{ev} 下恰一组 canonical matcher 组");
+            // 勘误形态：事件数组元素是 {hooks:[…]} 组（非裸 command），无 matcher = 全捕
+            assert!(
+                arr[0].get("hooks").and_then(|h| h.as_array()).is_some(),
+                "{ev} canonical 条目必须是 matcher 组形态（TC-INT-03-1 勘误）"
+            );
+            assert!(arr[0].get("matcher").is_none(), "{ev} 外层省略 matcher");
+            let hook = &arr[0]["hooks"][0];
+            assert_eq!(hook["type"], serde_json::json!("command"));
+            assert_eq!(
+                hook["command"],
+                serde_json::json!(canonical_cc_command(false, &hooks))
+            );
+            assert_eq!(hook["timeout"], serde_json::json!(3));
+            assert_eq!(hook["async"], serde_json::json!(true));
+            assert_eq!(hook["asyncRewake"], serde_json::json!(false));
         }
         // 脚本落点 + 内容与内嵌一致
         assert_eq!(read(&hooks.join("claude-code-hook.js")), BUNDLED_CC_HOOK);
@@ -1185,10 +1240,15 @@ mod tests {
         // 键序不变（preserve_order）：env 仍在最前
         let keys: Vec<&String> = v.as_object().expect("obj").keys().collect();
         assert_eq!(keys[0], "env");
-        // canonical 追加在既有数组尾部
+        // canonical 组追加在既有数组尾部（组形态，command 在组内）
         let pre = v["hooks"]["PreToolUse"].as_array().expect("arr");
         assert_eq!(pre.len(), 3);
-        assert!(pre[2]["command"].as_str().expect("cmd").contains(MANAGED_FLAG));
+        assert!(
+            pre[2]["hooks"][0]["command"]
+                .as_str()
+                .expect("cmd")
+                .contains(MANAGED_FLAG)
+        );
         // 用户条目 + canonical 共存 → installed（P1-1）
         assert_eq!(
             cc_config_state(&settings, &canonical_cc_command(false, &hooks)).expect("state"),
@@ -1209,7 +1269,7 @@ mod tests {
         // 手改一条 command（经 JSON 改写——文件内 command 带转义引号，文本替换
         // 不可靠）→ stale；重装修复
         let mut v: serde_json::Value = serde_json::from_str(&once).expect("parse");
-        v["hooks"]["Stop"][0]["command"] = serde_json::json!("echo tampered --pulse-pet-managed");
+        v["hooks"]["Stop"][0]["hooks"][0]["command"] = serde_json::json!("echo tampered --pulse-pet-managed");
         fs::write(&settings, serde_json::to_string_pretty(&v).unwrap()).expect("write");
         assert_eq!(
             cc_config_state(&settings, &canonical_cc_command(false, &hooks)).expect("state"),
@@ -1231,17 +1291,71 @@ mod tests {
         let settings = dir.join("settings.json");
         let hooks = dir.join("hooks");
         install_cc(&settings, &hooks).expect("install");
-        // 复制一条 canonical 到 matcher 组内 → 特征条目 >1 → stale（TC-INT-07-4）
+        // 复制整个 canonical 组作为直接元素（合法位置的重复组）→ 该事件键下
+        // 组内特征 = 2 → stale（TC-INT-07-4）
         let mut v: serde_json::Value = serde_json::from_str(&read(&settings)).expect("parse");
-        let entry = v["hooks"]["Stop"][0].clone();
+        let group = v["hooks"]["Stop"][0].clone();
         v["hooks"]["PreToolUse"]
             .as_array_mut()
             .expect("arr")
-            .push(serde_json::json!({ "matcher": ".*", "hooks": [entry] }));
+            .push(group);
         fs::write(&settings, serde_json::to_string_pretty(&v).unwrap()).expect("write");
         assert_eq!(
             cc_config_state(&settings, &canonical_cc_command(false, &hooks)).expect("state"),
             ConfigState::Stale
+        );
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn legacy_bad_form_bare_entries_are_stale_and_reinstall_fixes() {
+        // P0 修复核心回归钉子（2026-08-24 勘误）：初版 R1 安装器把裸 command
+        // 条目写成事件数组直接元素，CC zod 报 `hooks.<Event>.0.hooks: Expected
+        // array` 且整文件被跳过。用户现场 = 8 键全坏形态。重装必须清掉坏形态
+        // 并落正确 matcher 组形态。
+        let dir = tempdir("cc-legacy");
+        let settings = dir.join("settings.json");
+        let hooks = dir.join("hooks");
+        // 构造用户现场：8 键坏形态（直接元素 = 裸 command 条目）+ env 键
+        let bad_hook = serde_json::json!({
+            "type": "command",
+            "command": canonical_cc_command(false, &hooks),
+            "timeout": 3,
+            "async": true,
+            "asyncRewake": false,
+        });
+        let mut hooks_obj = serde_json::Map::new();
+        for ev in CC_EVENTS {
+            hooks_obj.insert(ev.to_string(), serde_json::json!([bad_hook.clone()]));
+        }
+        let mut v = serde_json::json!({ "env": { "KEY": "val" } });
+        v["hooks"] = serde_json::Value::Object(hooks_obj);
+        fs::write(&settings, serde_json::to_string_pretty(&v).unwrap()).expect("write");
+        // 坏形态残留 → stale（即使 command 串与 canonical 一致）
+        assert_eq!(
+            cc_config_state(&settings, &canonical_cc_command(false, &hooks)).expect("state"),
+            ConfigState::Stale,
+            "裸直接元素坏形态必须判 stale（即使 command 一致）"
+        );
+        // 重装修复
+        install_cc(&settings, &hooks).expect("reinstall fixes legacy bad form");
+        let after: serde_json::Value = serde_json::from_str(&read(&settings)).expect("parse");
+        let text = read(&settings);
+        assert!(text.contains("\"env\""), "用户 env 键保留");
+        for ev in CC_EVENTS {
+            let arr = after["hooks"][ev].as_array().expect("array");
+            assert_eq!(arr.len(), 1, "{ev} 恰一组（坏形态已清 + canonical 组）");
+            // 组形态（非裸 command）：有 hooks 数组、无 matcher、无顶层 type
+            assert!(arr[0].get("hooks").is_some(), "{ev} 是 matcher 组");
+            assert!(arr[0].get("type").is_none(), "{ev} 不是裸 command 直接元素");
+            assert_eq!(
+                arr[0]["hooks"][0]["command"],
+                serde_json::json!(canonical_cc_command(false, &hooks))
+            );
+        }
+        assert_eq!(
+            cc_config_state(&settings, &canonical_cc_command(false, &hooks)).expect("state"),
+            ConfigState::Installed
         );
         fs::remove_dir_all(&dir).ok();
     }
@@ -1265,20 +1379,22 @@ mod tests {
         install_cc(&settings, &hooks).expect("install");
         uninstall_cc(&settings, &hooks).expect("uninstall");
         let v: serde_json::Value = serde_json::from_str(&read(&settings)).expect("parse");
-        // 特征条目全部移除（含 matcher 组内递归）；用户条目保留
+        // 特征条目全部移除（matcher 组内 + 坏形态直接元素）；用户条目保留
         let text = read(&settings);
         assert!(!text.contains(MANAGED_FLAG));
         assert!(!text.contains(".pulsepet"));
         assert!(text.contains("echo user-direct"));
         assert!(text.contains("echo notify"));
         assert!(text.contains("\"env\""));
-        // 空容器清理：我们建的事件键删除；Notification（用户条目仍在）保留；
-        // PreToolUse 里 matcher 组被掏空但组壳保留（保守，仅移除特征条目）
+        // 空容器清理（§1.4.3 勘误）：特征清空的 matcher 组**整组移除**（不再留
+        // 空组壳）；我们建的事件键删除；Notification（用户条目仍在）保留；
+        // PreToolUse 剩用户直接元素 1 条
         let hooks_obj = v["hooks"].as_object().expect("hooks");
         assert!(hooks_obj.contains_key("Notification"));
-        assert!(hooks_obj.contains_key("PreToolUse"));
+        let pre = v["hooks"]["PreToolUse"].as_array().expect("pre");
+        assert_eq!(pre.len(), 1, "用户 matcher 组因特征清空被整组移除，canonical 组已删");
+        assert_eq!(pre[0]["command"], serde_json::json!("echo user-direct"));
         assert!(!hooks_obj.contains_key("Stop"));
-        // 未注册新事件键 → hooks 未被清空（Notification/PreToolUse 仍在）→ hooks 键保留
         // 脚本删除
         assert!(!hooks.join("claude-code-hook.js").exists());
         assert!(!hooks.join("package.json").exists());
