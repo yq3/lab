@@ -65,6 +65,40 @@ select {
   font-family: inherit;
 }
 
+/* 行内按钮基类（R1-supplement-3：`.seg` 是三页共有的按钮模式，此前只有
+ * 各容器局部规则——裸用（Token 刷新 / 表单取消）落在 UA 默认渲染上，为
+ * 「组件大小粗糙」的系统性根源。基类 = 28px 规格；分段容器（token-seg /
+ * theme-seg）与主按钮由各自规则按特异性覆盖。 */
+.seg {
+  appearance: none;
+  padding: 5px 12px;
+  min-height: 28px;
+  border: 2px solid var(--line);
+  background: var(--surface);
+  font-size: 12px;
+  font-family: inherit;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+
+.seg:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+
+.seg.danger {
+  color: var(--danger);
+}
+
+/* 禁用态（craft-floor states：↑/↓ 到边界、加载中刷新等真实场景） */
+.seg:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.seg:disabled:hover {
+  background: var(--surface);
+}
+
 /* 滚动条（深浅两主题可读，R7） */
 ::-webkit-scrollbar {
   width: 10px;
@@ -259,6 +293,17 @@ select {
   top: -1px;
 }
 
+/* 非激活 tab hover（craft-floor states）；按下时落回基线（位移阴影世界的
+ * 按压语汇：上浮 -1px 的逆动作） */
+.panel-tab:hover:not(.active) {
+  border-color: var(--ink-soft);
+  color: var(--ink);
+}
+
+.panel-tab.active:active {
+  top: 0;
+}
+
 .tab-milestone {
   margin-left: 6px;
   font-size: 10px;
@@ -359,7 +404,9 @@ select {
 }
 
 .panel-settings select {
-  appearance: none;
+  /* 不用 appearance:none——去掉原生外观会连下拉箭头一起消失（无箭头的
+   * select 缺少展开暗示，R1-supplement-3）；保留原生箭头，边框/底色/字色
+   * 仍走 token（与表单 select 同口径）。 */
   border: 2px solid var(--line);
   border-radius: 2px;
   padding: 5px 10px;
@@ -641,7 +688,7 @@ select {
 }
 
 .token-section h3 {
-  margin: 0 0 10px;
+  margin: 0 0 12px;
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -947,26 +994,7 @@ select {
   flex: none;
 }
 
-/* 行内小按钮：28px 高（5px 12px + 12px 字），统一三页操作组规格 */
-.reminder-actions .seg,
-.reminder-templates .seg {
-  padding: 5px 12px;
-  min-height: 28px;
-  border: 2px solid var(--line);
-  background: var(--surface);
-  font-size: 12px;
-  color: var(--ink-soft);
-  cursor: pointer;
-}
-
-.reminder-actions .seg.danger {
-  color: var(--danger);
-}
-
-.reminder-actions .seg:hover,
-.reminder-templates .seg:hover {
-  background: var(--surface-2);
-}
+/* （.seg 按钮规格由基类 .seg 提供——R1-supplement-3） */
 
 .reminder-form {
   display: flex;
@@ -1026,6 +1054,15 @@ select {
 
 .reminder-form input[type="text"] {
   width: 100%;
+}
+
+/* 锁定态（todo 派生规则编辑时锁类型/间隔/时刻——craft-floor states：
+ * 禁用须可辨，不只是不响应） */
+.reminder-form input:disabled,
+.reminder-form select:disabled {
+  color: var(--ink-faint);
+  background: var(--surface-2);
+  cursor: not-allowed;
 }
 
 .reminder-hint {
@@ -1194,21 +1231,4 @@ select {
   flex: none;
 }
 
-/* 行内小按钮：28px 高（与提醒页操作组同规格） */
-.todo-actions .seg {
-  padding: 5px 12px;
-  min-height: 28px;
-  border: 2px solid var(--line);
-  background: var(--surface);
-  font-size: 12px;
-  color: var(--ink-soft);
-  cursor: pointer;
-}
-
-.todo-actions .seg:hover {
-  background: var(--surface-2);
-}
-
-.todo-actions .seg.danger {
-  color: var(--danger);
-}
+/* （.seg 按钮规格由基类 .seg 提供——R1-supplement-3） */
