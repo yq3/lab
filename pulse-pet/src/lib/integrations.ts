@@ -61,3 +61,18 @@ export function uiStateOf(s: IntegrationStatus): IntegrationUiState {
   if (s.stale) return "stale";
   return "notInstalled";
 }
+
+/**
+ * 组装操作结果行内提示（tester P2-1 修复，TC-INT-07-5）：
+ * install/uninstall 命令返回的 `IntegrationStatus.message`（Rust 侧组装，
+ * claude-code 卸载/重装含「建议新开 CC 会话」提示）必须展示给用户——
+ * doctor 重拉不含该提示。message 为空 → null（不渲染提示条）。
+ */
+export function composeActionNotice(
+  prefix: string,
+  status: IntegrationStatus | null,
+): string | null {
+  const msg = status?.message?.trim();
+  if (!msg) return null;
+  return `${prefix}${msg}`;
+}

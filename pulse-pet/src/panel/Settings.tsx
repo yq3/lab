@@ -8,6 +8,7 @@ import {
 import { isTauriRuntime } from "../lib/token-stats";
 import { setPassThrough, PANEL_TAB_EVENT, normalizeTab } from "../lib/interaction";
 import {
+  composeActionNotice,
   fetchIntegrations,
   installIntegration,
   uninstallIntegration,
@@ -61,10 +62,14 @@ export default function Settings() {
   /** M6 P2 ②（M7 清偿）：穿透失败单独持有——成功时只清它，不动 atlas 错误横幅。 */
   const [passThroughError, setPassThroughError] = useState<string | null>(null);
   const [langBusy, setLangBusy] = useState(false);
-  /** v2 M1 接入管理：doctor 快照 + 操作中的接入 id + 每接入操作错误。 */
+  /** v2 M1 接入管理：doctor 快照 + 操作中的接入 id + 每接入操作错误/成功提示。 */
   const [intg, setIntg] = useState<IntegrationStatus[] | null>(null);
   const [intgBusy, setIntgBusy] = useState<IntegrationId | null>(null);
   const [intgErrors, setIntgErrors] = useState<Record<string, string>>({});
+  /** tester P2-1（TC-INT-07-5）：操作返回 message 的行内成功提示——claude-code
+   * 卸载/重装的「建议新开 CC 会话」提示在 doctor 重拉里没有，必须单独展示；
+   * 持续展示至该行下一次操作（提示是可执行建议，不做一闪而过的 toast）。 */
+  const [intgNotices, setIntgNotices] = useState<Record<string, string>>({});
   const passThrough = usePetStore((s) => s.passThrough);
   const lang = useLangStore((s) => s.lang); // M8 i18n：语言变化时本页文案重渲染
 
@@ -199,16 +204,31 @@ export default function Settings() {
     }
   };
 
-  /** v2 M1 接入管理动作（安装/重装/卸载）：完成后刷新 doctor；失败行级提示。 */
+  /** v2 M1 接入管理动作（安装/重装/卸载）：完成后刷新 doctor；结果双向可见——
+   * 失败行级错误条（intgErrors）；成功行级提示条（intgNotices，展示 Rust
+   * 返回的 message 全文，含 claude-code 卸载的「建议新开 CC 会话」提示，
+   * TC-INT-07-5 / tester P2-1）。 */
   const onIntegrationAction = async (id: IntegrationId, action: "install" | "uninstall") => {
     setIntgBusy(id);
+    // 新操作清掉该行旧结果（错误与提示都属上一动作）
+    setIntgErrors((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+    setIntgNotices((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
     try {
-      await (action === "install" ? installIntegration(id) : uninstallIntegration(id));
-      setIntgErrors((prev) => {
-        const next = { ...prev };
-        delete next[id];
-        return next;
-      });
+      const status = action === "install"
+        ? await installIntegration(id)
+        : await uninstallIntegration(id);
+      const notice = composeActionNotice(t("integrations.actionDone"), status);
+      if (notice) {
+        setIntgNotices((prev) => ({ ...prev, [id]: notice }));
+      }
     } catch (e) {
       setIntgErrors((prev) => ({
         ...prev,
@@ -353,6 +373,9 @@ export default function Settings() {
               </div>
               <p className="intg-path">{s.configPath}</p>
               <p className="intg-message">{s.message}</p>
+              {intgNotices[s.id] && (
+                <p className="intg-row-notice">✅ {intgNotices[s.id]}</p>
+              )}
               {intgErrors[s.id] && <p className="intg-row-error">⚠️ {intgErrors[s.id]}</p>}
               <p className="intg-note">{t("integrations.backupNote")}</p>
             </div>

@@ -1,0 +1,53 @@
+import { describe, expect, it } from "vitest";
+import { composeActionNotice, uiStateOf, type IntegrationStatus } from "./integrations";
+import { t, DICT } from "./i18n";
+
+/** 构造一条 IntegrationStatus（字段缺省按健康值）。 */
+function st(over: Partial<IntegrationStatus> = {}): IntegrationStatus {
+  return {
+    id: "claude-code",
+    installed: false,
+    stale: false,
+    version: "0.2.0",
+    configPath: "/x/settings.json",
+    hookFile: { exists: true, matchesBundled: true },
+    nodeAvailable: true,
+    lastEventAt: null,
+    message: "",
+    error: null,
+    ...over,
+  };
+}
+
+describe("uiStateOf：状态点四态（V2-DESIGN §1.7）", () => {
+  it("error > installed > stale > notInstalled 决策", () => {
+    expect(uiStateOf(st({ error: "boom", installed: true }))).toBe("error");
+    expect(uiStateOf(st({ installed: true }))).toBe("installed");
+    expect(uiStateOf(st({ stale: true }))).toBe("stale");
+    expect(uiStateOf(st())).toBe("notInstalled");
+  });
+});
+
+describe("composeActionNotice：操作结果提示（tester P2-1 / TC-INT-07-5）", () => {
+  it("Rust 返回 message → 前缀 + 全文（卸载提示必须可见）", () => {
+    const status = st({
+      message: "未安装 · node 已就绪 · 最近无事件 · 已卸载；如 CC 会话仍在运行，建议新开会话使其生效",
+    });
+    expect(composeActionNotice("操作完成：", status)).toBe(
+      "操作完成：未安装 · node 已就绪 · 最近无事件 · 已卸载；如 CC 会话仍在运行，建议新开会话使其生效",
+    );
+  });
+
+  it("message 空/空白 → null（不渲染提示条）；status null → null", () => {
+    expect(composeActionNotice("操作完成：", st({ message: "" }))).toBeNull();
+    expect(composeActionNotice("操作完成：", st({ message: "   " }))).toBeNull();
+    expect(composeActionNotice("操作完成：", null)).toBeNull();
+  });
+
+  it("i18n 前缀键双语言齐备（zh/en 键集合一致由完备性测试守护）", () => {
+    expect(t("integrations.actionDone")).toBe("操作完成：");
+    expect(t("integrations.actionDone", undefined, "en")).toBe("Done: ");
+    expect("integrations.actionDone" in DICT.zh).toBe(true);
+    expect("integrations.actionDone" in DICT.en).toBe(true);
+  });
+});

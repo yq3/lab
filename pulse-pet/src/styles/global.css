@@ -307,6 +307,14 @@ body,
   color: #b91c1c;
 }
 
+/* tester P2-1（TC-INT-07-5）：操作结果成功提示条（与 .intg-row-error 红色
+   错误条对称的绿色提示条；展示 Rust 返回 message，含卸载后建议） */
+.intg-row-notice {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #047857;
+}
+
 .intg-note {
   margin-top: 4px;
   font-size: 12px;

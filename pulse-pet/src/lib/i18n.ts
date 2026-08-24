@@ -238,6 +238,7 @@ const zh: Dict = {
   "integrations.opencodeDesc": "opencode 插件",
   "integrations.claudeDesc": "Claude Code hooks",
   "integrations.fail": "操作失败：{msg}",
+  "integrations.actionDone": "操作完成：",
 
   // ---- 宠物右键菜单 ----
   "menu.settings": "设置…",
@@ -463,6 +464,7 @@ const en: Dict = {
   "integrations.opencodeDesc": "opencode plugin",
   "integrations.claudeDesc": "Claude Code hooks",
   "integrations.fail": "Operation failed: {msg}",
+  "integrations.actionDone": "Done: ",
 
   "menu.settings": "Settings…",
   "menu.togglePass": "Toggle interaction mode (pass-through: {state})",
