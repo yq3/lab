@@ -43,6 +43,11 @@ interface PetState {
   raw: NormalizedState;
   /** 占位精灵状态（5 种，经 8→5 降级映射）。 */
   sprite: SpriteState;
+  /**
+   * v2 M1：当前显示状态的归属 agent（"opencode" / "claude-code"；默认
+   * "opencode"）。只存不显示（M2 状态芯片 / M6 抢镜消费，V2-DESIGN §1.6）。
+   */
+  displayAgent: string;
   /** 气泡（null = 不显示）。 */
   bubble: BubbleState | null;
   /** M5：当前 atlas RGBA 图块（null = 无 atlas，占位 PNG 渲染）。 */
@@ -56,6 +61,8 @@ interface PetState {
   /** M7：完成庆祝（waving 挥手覆盖期；null = 无）。 */
   celebration: CelebrationState | null;
   setRaw: (raw: NormalizedState) => void;
+  /** v2 M1：更新显示状态归属 agent（http-bridge 解析 payload.agent 后调用）。 */
+  setDisplayAgent: (agent: string) => void;
   next: () => void;
   /** M5：atlas 加载/热替换（atlas-bridge 调用；对象身份变化驱动 canvas 重建）。 */
   setAtlas: (meta: AtlasMeta, pixels: AtlasPixels | null) => void;
@@ -125,6 +132,7 @@ function armBubbleTimer(): void {
 export const usePetStore = create<PetState>((set, get) => ({
   raw: "idle",
   sprite: "idle",
+  displayAgent: "opencode",
   bubble: null,
   atlas: null,
   atlasMeta: null,
@@ -142,6 +150,7 @@ export const usePetStore = create<PetState>((set, get) => ({
     set({ celebration: { id: celebrationSeq, until: Date.now() + durationMs } });
   },
   setRaw: (raw) => set({ raw, sprite: degradeState(raw) }),
+  setDisplayAgent: (agent) => set({ displayAgent: agent }),
   next: () =>
     set((s) => {
       const raw = nextState(s.raw);

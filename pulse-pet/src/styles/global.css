@@ -230,6 +230,135 @@ body,
   color: #9ca3af;
 }
 
+/* ---- v2 M1 接入管理（V2-DESIGN §1.7，TC-INT-09） ---- */
+
+.intg-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 640px;
+}
+
+.intg-row {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.intg-row-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.intg-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: #111827;
+}
+
+.intg-state-label {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.intg-row-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.intg-row-actions button {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid #d1d5db;
+  background: #fff;
+  color: #374151;
+  cursor: pointer;
+}
+
+.intg-row-actions button:hover:not(:disabled) {
+  background: #f3f4f6;
+}
+
+.intg-row-actions button:disabled {
+  color: #9ca3af;
+  cursor: wait;
+}
+
+.intg-path {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #9ca3af;
+  word-break: break-all;
+}
+
+.intg-message {
+  margin-top: 2px;
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.intg-row-error {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #b91c1c;
+}
+
+/* tester P2-1（TC-INT-07-5）：操作结果成功提示条（与 .intg-row-error 红色
+   错误条对称的绿色提示条；展示 Rust 返回 message，含卸载后建议） */
+.intg-row-notice {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #047857;
+}
+
+.intg-note {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #9ca3af;
+}
+
+/* 状态点四态（已安装=绿 / 未安装=灰 / 需更新=橙 / 错误=红） */
+.intg-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex: none;
+  background: #d1d5db;
+}
+
+.intg-dot-installed {
+  background: #10b981;
+}
+
+.intg-dot-stale {
+  background: #f59e0b;
+}
+
+.intg-dot-error {
+  background: #ef4444;
+}
+
+/* 安装中 spinner（与按钮 disabled 态配合，§1.7） */
+.intg-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid #d1d5db;
+  border-top-color: #6b7280;
+  border-radius: 50%;
+  animation: intg-spin 0.8s linear infinite;
+}
+
+@keyframes intg-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 /* ---- Token 统计（M3，TC-TK-08/09） ---- */
 
 .token-controls {

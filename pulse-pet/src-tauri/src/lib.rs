@@ -3,6 +3,7 @@ mod db;
 mod hotkeys;
 mod http_server;
 mod i18n;
+mod integrations;
 mod interaction;
 mod logging;
 mod plugins;
@@ -46,38 +47,66 @@ fn idle_timeout() -> Duration {
 fn get_display_state(state: tauri::State<'_, Arc<Mutex<SessionStateMachine>>>) -> String {
     let kind = state
         .lock()
-        .map(|s| s.display().as_str().to_string())
+        .map(|s| s.display().kind.as_str().to_string())
         .unwrap_or_else(|_| "idle".to_string());
     kind
 }
 
-/// M3 token 汇报 idle 钩子：`/state` 收到 `kind == idle` 时（DESIGN §4.3 末条，
-/// TC-TK-10/11/12）查 opencode.db 本会话 token 行 → 满足「有用量 + 数字新鲜」时：
+/// M3 token 汇报 idle 钩子核心（v2 M1 起 agent 分流，TC-INT-11）：
+/// `/state` 收到 `kind == idle` 时（DESIGN §4.3 末条，TC-TK-10/11/12）——
+/// **仅 `agent == "opencode"`** 查 opencode.db 本会话 token 行（用 CC session_id
+/// 查 opencode 库必然空转，且 M5 后口径正确）；满足「有用量 + 数字新鲜」时：
 ///   1. 注入 `success` 状态（token 会话汇报是 success 的驱动来源之一，
 ///      DESIGN §3.3 优先级链 success 定案位；仅当显示优先级更低时才抬升——
 ///      优先级合并天然如此，error/waiting-permission 等更高状态不受影响）；
 ///   2. 经 Tauri event `pulsepet://bubble` 下发气泡文案（前端 sanitize 后显示）。
 /// 任一环节失败（无库/无记录/数字陈旧/全零）都静默跳过——不出气泡、不显示 0 或
 /// 陈旧数字（TC-TK-12）。
+///
+/// 查询与气泡下发以闭包注入（`idle_hook_body` 单测断言 CC idle 零查询）。
+fn idle_hook_body(
+    state: &Arc<Mutex<SessionStateMachine>>,
+    emit_bubble: &dyn Fn(String),
+    query_report: &dyn Fn(&str, i64) -> Option<String>,
+    agent: &str,
+    session_id: &str,
+) {
+    // TC-INT-11：claude-code 的 idle 不触发任何 opencode.db 查询
+    if agent != "opencode" {
+        // 分流决策记录（低频：每 CC 轮次结束一条；排障时区分「CC idle 被
+        // 正常分流跳过」与「事件没到达」）
+        plog!("[pulsepet] idle hook: skip token report (agent={agent}, opencode-only)");
+        return;
+    }
+    let now = token_stats::now_ms();
+    if let Some(text) = query_report(session_id, now) {
+        {
+            let mut st = state.lock().unwrap_or_else(|p| p.into_inner());
+            st.apply_event("opencode", session_id, Kind::Success, Instant::now());
+        }
+        emit_bubble(text);
+    }
+}
+
 fn make_idle_hook(
     state: &Arc<Mutex<SessionStateMachine>>,
     app: &tauri::AppHandle,
 ) -> http_server::IdleHook {
     let state = state.clone();
     let app = app.clone();
-    Arc::new(move |session_id: &str| {
-        let data_dir = token_stats::opencode_data_dir();
-        let now = token_stats::now_ms();
-        let max_lag = token_stats::report_max_lag_ms();
-        if let Some(text) =
-            token_stats::build_idle_report(&data_dir, session_id, now, max_lag)
-        {
-            {
-                let mut st = state.lock().unwrap_or_else(|p| p.into_inner());
-                st.apply_event(session_id, Kind::Success, Instant::now());
-            }
-            let _ = app.emit("pulsepet://bubble", serde_json::json!({ "text": text }));
-        }
+    Arc::new(move |agent: &str, session_id: &str| {
+        idle_hook_body(
+            &state,
+            &|text| {
+                let _ = app.emit("pulsepet://bubble", serde_json::json!({ "text": text }));
+            },
+            &|sid, now| {
+                let data_dir = token_stats::opencode_data_dir();
+                token_stats::build_idle_report(&data_dir, sid, now, token_stats::report_max_lag_ms())
+            },
+            agent,
+            session_id,
+        )
     })
 }
 
@@ -131,20 +160,28 @@ pub fn run() {
             runtime::write_token(&token).map_err(|e| format!("write token: {e}"))?;
 
             let state = Arc::new(Mutex::new(SessionStateMachine::new()));
-            // 显示状态变化 → Tauri event 推给前端（http-bridge → petStore）
+            // v2 M1 AgentActivity（V2-DESIGN §1.5 P2-3）：per-agent 最近事件时刻，
+            // integrations_status 读取为 lastEventAt。与 state 同批 manage
+            // （issue #9 铁律：窗口创建循环之前）。
+            let activity = http_server::new_agent_activity();
+            // 显示状态变化 → Tauri event 推给前端（http-bridge → petStore）；
+            // v2 M1 payload 携带归属 agent（前端只存不显示，向后兼容旧解析）
             let emit_handle = app.handle().clone();
-            let notifier = Arc::new(http_server::DisplayNotifier::new(Arc::new(move |kind| {
-                let _ = emit_handle.emit(
-                    "pulsepet://state",
-                    serde_json::json!({ "kind": kind.as_str() }),
-                );
-            })));
+            let notifier = Arc::new(http_server::DisplayNotifier::new(Arc::new(
+                move |kind, agent| {
+                    let _ = emit_handle.emit(
+                        "pulsepet://state",
+                        serde_json::json!({ "kind": kind.as_str(), "agent": agent }),
+                    );
+                },
+            )));
 
             let server = http_server::start(
                 state.clone(),
                 notifier.clone(),
                 make_idle_hook(&state, app.handle()),
                 token,
+                activity.clone(),
                 http_server::HttpConfig::default(),
             )
             .map_err(|e| format!("start http server: {e}"))?;
@@ -170,6 +207,7 @@ pub fn run() {
             }
 
             app.manage(state);
+            app.manage(activity);
             app.manage(shutdown);
             // Moved 防抖保存器（P2-5）
             app.manage(windows::PositionSaver::new(app.handle().clone()));
@@ -261,6 +299,9 @@ pub fn run() {
             plugins::plugins_list,
             i18n::ui_get_language,
             i18n::ui_set_language,
+            integrations::integrations_status,
+            integrations::integrations_install,
+            integrations::integrations_uninstall,
             todos::todo_list,
             todos::todo_upsert,
             todos::todo_delete,
@@ -300,4 +341,117 @@ pub fn run() {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    //! v2 M1：idle hook 分流单测（TC-INT-11）——不依赖 Tauri AppHandle，
+    //! 直接驱动 idle_hook_body（查询/下发以闭包注入）。
+
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn claude_code_idle_never_queries_opencode_db() {
+        let state = Arc::new(Mutex::new(SessionStateMachine::new()));
+        let queries = AtomicUsize::new(0);
+        let emitted = AtomicUsize::new(0);
+        idle_hook_body(
+            &state,
+            &|_| {
+                emitted.fetch_add(1, Ordering::SeqCst);
+            },
+            &|_sid, _now| {
+                queries.fetch_add(1, Ordering::SeqCst);
+                Some("本期用了 1k input / 0 output / $0".to_string())
+            },
+            "claude-code",
+            "cc-uuid-1",
+        );
+        assert_eq!(queries.load(Ordering::SeqCst), 0, "CC idle 不查 opencode.db");
+        assert_eq!(emitted.load(Ordering::SeqCst), 0, "CC idle 无气泡/无 success 注入");
+        // 未知 agent 同样零查询（白名单外值到不了这里，防御性钉住）
+        idle_hook_body(
+            &state,
+            &|_| {},
+            &|_sid, _now| {
+                queries.fetch_add(1, Ordering::SeqCst);
+                None
+            },
+            "codex",
+            "x",
+        );
+        assert_eq!(queries.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn opencode_idle_reports_and_injects_success() {
+        let state = Arc::new(Mutex::new(SessionStateMachine::new()));
+        let bubbles = Mutex::new(Vec::<String>::new());
+        let queries = AtomicUsize::new(0);
+        idle_hook_body(
+            &state,
+            &|text| {
+                bubbles.lock().unwrap().push(text);
+            },
+            &|sid, _now| {
+                queries.fetch_add(1, Ordering::SeqCst);
+                assert_eq!(sid, "ses_a");
+                Some("本期用了 58.3k input / 910 output / $0.05".to_string())
+            },
+            "opencode",
+            "ses_a",
+        );
+        assert_eq!(queries.load(Ordering::SeqCst), 1, "opencode idle 查一次库");
+        assert_eq!(
+            bubbles.lock().unwrap().as_slice(),
+            ["本期用了 58.3k input / 910 output / $0.05"]
+        );
+        // success 注入到状态机（复合键 opencode:ses_a）
+        let st = state.lock().unwrap_or_else(|p| p.into_inner());
+        let d = st.display();
+        assert_eq!(d.kind, Kind::Success);
+        assert_eq!(d.agent, "opencode");
+    }
+
+    #[test]
+    fn opencode_idle_with_no_report_is_silent() {
+        // 无记录/陈旧 → 静默跳过（不出气泡、不注入 success，TC-TK-12 不回归）
+        let state = Arc::new(Mutex::new(SessionStateMachine::new()));
+        let emitted = AtomicUsize::new(0);
+        idle_hook_body(
+            &state,
+            &|_| {
+                emitted.fetch_add(1, Ordering::SeqCst);
+            },
+            &|_sid, _now| None,
+            "opencode",
+            "ses_none",
+        );
+        assert_eq!(emitted.load(Ordering::SeqCst), 0);
+        let st = state.lock().unwrap_or_else(|p| p.into_inner());
+        assert_eq!(st.display().kind, Kind::Idle, "无汇报不注入 success");
+    }
+}
+
+#[cfg(test)]
+mod order_nails {
+    //! issue #9 铁律的源码级钉子（TC-INT-08-5）：AgentActivity 等 managed state
+    //! 必须在窗口创建循环之前 app.manage()——「命令首次调用时惰性 manage」是
+    //! Windows 闪退根因写法，禁止回归。
+
+    #[test]
+    fn agent_activity_managed_before_window_creation() {
+        let src = include_str!("lib.rs");
+        let manage_at = src
+            .find("app.manage(activity)")
+            .expect("lib.rs 须含 app.manage(activity)（issue #9）");
+        let windows_at = src
+            .find("for wc in app.config().app.windows.iter()")
+            .expect("lib.rs 须含窗口创建循环");
+        assert!(
+            manage_at < windows_at,
+            "AgentActivity 的 manage 必须在窗口创建循环之前（issue #9 铁律）"
+        );
+    }
 }

@@ -59,7 +59,7 @@
 - **前置**：`~/.claude/settings.json` 存在（或不存在），含用户自有 hooks 条目（含 matcher 组形态）与 `env` 等其它键。
 - **步骤**：设置页「接入管理」→ claude-code 行点击「安装」。
 - **预期**：
-  1. `settings.json` 的 `hooks` 下出现 8 个事件键（SessionStart / UserPromptSubmit / PreToolUse / PostToolUse / PostToolUseFailure / PermissionRequest / Stop / StopFailure），各追加一条 canonical 条目：数组**直接元素**（无 matcher）、`type:"command"`、command 内嵌 `--pulse-pet-managed`、`timeout:3`、`async:true`、`asyncRewake:false`；
+  1. `settings.json` 的 `hooks` 下出现 8 个事件键（SessionStart / UserPromptSubmit / PreToolUse / PostToolUse / PostToolUseFailure / PermissionRequest / Stop / StopFailure），各追加一组 canonical **matcher 组条目**（事件数组元素为 `{hooks:[...]}` 组、外层省略 matcher=全捕——**2026-08-24 勘误**：初版"数组直接元素"形态被 CC zod 拒绝、整文件跳过），组内 command 条目：`type:"command"`、command 内嵌 `--pulse-pet-managed`、`timeout:3`、`async:true`、`asyncRewake:false`；安装后新开 CC 会话**无 Settings Error**；
   2. command 为 Unix shell 包装形态（killswitch 前置 → hook 文件存在且 node 在 PATH 则 `exec node` → 兜底 drain stdin + exit 0，V2-DESIGN §1.4.2）；
   3. 用户已有条目（含 matcher 组内）原样保留；`env` 等未知键保留；**键序不变**（serde_json preserve_order）；
   4. 写前备份 `settings.json.pulsepet-backup-<ISO>.json`（mode 0600）产生，且旧备份被清理**仅保留最近 1 份**；写入为原子写（`<pid>.tmp` → rename）；
