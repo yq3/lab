@@ -7,6 +7,7 @@ import { initAtlasBridge } from "./lib/atlas-bridge";
 import { initInteractionBridge } from "./lib/interaction";
 import { initTodoBridge } from "./lib/todo-bridge";
 import { initI18n } from "./lib/i18n";
+import "./styles/tokens.css"; // v2 M2 设计系统 token 层（先于组件层）
 import "./styles/global.css";
 
 // M8：i18n 初始化（读持久化语言 → 无则跟随系统；订阅 ui://language 三窗口同步）。

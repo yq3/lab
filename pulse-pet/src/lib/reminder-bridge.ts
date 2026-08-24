@@ -53,8 +53,15 @@ export function initReminderBridge(): void {
       if (!t) return;
       // v0.1.3 四-5（TC-RM-17/09）：气泡无条件展示，烟花按 plan 额外叠加——
       // 特效只叠加、不替代气泡（烟花触发时用户同样能看到提醒文案）。
+      // v2 M2：critical 级 + source="reminder:<logId>"（排队模型 §2.6.2；
+      // planReminderActions 的烟花叠加编排原样保留）。
       const plan = planReminderActions(t, Date.now());
-      usePetStore.getState().showReminderBubble(plan.bubbleText, t.log_id);
+      usePetStore.getState().pushBubble({
+        text: plan.bubbleText,
+        level: "critical",
+        source: `reminder:${t.log_id}`,
+        reminder: { logId: t.log_id },
+      });
       if (plan.fireworks) {
         void (async () => {
           try {

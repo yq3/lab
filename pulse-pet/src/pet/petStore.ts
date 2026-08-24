@@ -5,17 +5,28 @@ import {
   type NormalizedState,
   type SpriteState,
 } from "../lib/state";
-import { BUBBLE_AUTO_HIDE_MS, sanitizeBubbleText } from "../lib/bubble";
+import { sanitizeBubbleText } from "../lib/bubble";
+import {
+  ackCurrent as ackCurrentQ,
+  dwellFor,
+  enqueue,
+  expireCurrent,
+  initialState as initialBubbleState,
+  setHoverPaused as setHoverPausedQ,
+  type BubbleItem,
+  type BubbleLevel,
+  type BubbleState,
+} from "../lib/bubble-queue";
 import type { AtlasMeta, AtlasPixels } from "../lib/atlas";
 
-/** 当前展示的气泡（M3：token 会话汇报；M4 起复用于提醒文案）。 */
-export interface BubbleState {
-  text: string;
-  /** 自增序号，供 React key 重建（重置自动隐藏计时）。 */
-  id: number;
-  /** M4：本气泡来自一条提醒时携带 reminder_log id（点击确认/自动消失回报用）。 */
-  reminder?: { logId: number };
-}
+/**
+ * v2 M2：气泡从单槽位（`BubbleState | null` + 恒定 8s）升级为**排队模型**
+ * （V2-DESIGN §2.6）：`bubble: {current, queue, …}`（`lib/bubble-queue.ts`
+ * 纯函数内核）——单显示位 + 三级优先级（critical 8s / info 6s / ambient 4s），
+ * 顶替回队、同源合并 10s、上限 3、悬停冻结（M3 预留接口）。
+ * 记账语义不变：只有 dismissed/acked 最终离场才回报 dismissed_via。
+ */
+export type { BubbleItem, BubbleLevel, BubbleState };
 
 /**
  * M7 完成庆祝（TC-TD-04/05）：{ id, until }——PetCanvas rAF 循环按
@@ -27,13 +38,13 @@ export interface CelebrationState {
   until: number;
 }
 
-/** 庆祝动画默认时长（waving 挥手约 3s，与气泡 8s 独立）。 */
+/** 庆祝动画默认时长（waving 挥手约 3s，与气泡 dwell 独立）。 */
 export const CELEBRATION_DEFAULT_MS = 3000;
 
 /**
  * 提醒气泡的消失方式回报（TC-RM-04/03）：
  * - "bubble"：用户点击宠物确认 → Rust `reminders_ack`（acked_at + dismissed_via）；
- * - "auto"：8s 自动消失（含被新气泡顶替）→ Rust `reminders_dismiss(via='auto')`。
+ * - "auto"：dwell 到期自动消失 → Rust `reminders_dismiss(via='auto')`。
  * 由 reminder-bridge 注册实现（petStore 不直接依赖 Tauri API，vitest 可裸跑）。
  */
 export type ReminderReporter = (logId: number, via: "bubble" | "auto") => void;
@@ -45,11 +56,11 @@ interface PetState {
   sprite: SpriteState;
   /**
    * v2 M1：当前显示状态的归属 agent（"opencode" / "claude-code"；默认
-   * "opencode"）。只存不显示（M2 状态芯片 / M6 抢镜消费，V2-DESIGN §1.6）。
+   * "opencode"）。panel 状态芯片消费（M2）；M6 抢镜在此基础上扩展。
    */
   displayAgent: string;
-  /** 气泡（null = 不显示）。 */
-  bubble: BubbleState | null;
+  /** 气泡排队状态（v2 M2；纯函数内核在 lib/bubble-queue.ts）。 */
+  bubble: BubbleState;
   /** M5：当前 atlas RGBA 图块（null = 无 atlas，占位 PNG 渲染）。 */
   atlas: AtlasPixels | null;
   /** M5：当前 atlas 元数据（含回退 notice；null = 未加载/非 Tauri）。 */
@@ -74,16 +85,20 @@ interface PetState {
   closeContextMenu: () => void;
   /** M7：开始完成庆祝（todo 完成 → waving + 气泡，TC-TD-04/05）。 */
   startCelebration: (durationMs?: number) => void;
-  /** 展示气泡（净化约束：单行 1-140；非法输入丢弃；8s 自动消失，DESIGN §5.2）。 */
-  showBubble: (text: string) => void;
-  hideBubble: () => void;
-  /** M4：展示提醒气泡并挂 log_id（8s 自动消失回报 'auto'）。 */
-  showReminderBubble: (text: string, logId: number) => void;
+  /**
+   * v2 M2：入队气泡（桥层构造 level/source/reminder；净化约束：单行 1-140，
+   * 净化后为空的提醒条目按 auto 结案——§2.6.1 规则⑤）。
+   */
+  pushBubble: (item: Omit<BubbleItem, "id" | "enqueuedAt">) => void;
+  /** v2 M2：悬停层冻结/恢复（M3 预留接口；冻结 dwell、恢复续走剩余）。 */
+  setHoverPaused: (paused: boolean) => void;
+  /** v2 M2：清空气泡并取消计时（测试 / 诊断用）。 */
+  resetBubbles: () => void;
   /** M4：点击宠物"已确认"（TC-RM-04）；非提醒气泡时返回 false（交回状态轮换）。 */
   ackReminderBubble: () => boolean;
 }
 
-/** 气泡自动隐藏定时器（store 外置，避免进入响应式状态）。 */
+/** 气泡 dwell 计时器（store 外置，避免进入响应式状态）。 */
 let bubbleTimer: ReturnType<typeof setTimeout> | null = null;
 let bubbleSeq = 0;
 let celebrationSeq = 0;
@@ -95,7 +110,7 @@ export function setReminderReporter(fn: ReminderReporter | null): void {
   reminderReporter = fn;
 }
 
-function reportReminder(b: BubbleState | null, via: "bubble" | "auto"): void {
+function reportReminder(b: BubbleItem | null | undefined, via: "bubble" | "auto"): void {
   if (b?.reminder) {
     reminderReporter?.(b.reminder.logId, via);
   }
@@ -108,15 +123,24 @@ function clearBubbleTimer(): void {
   }
 }
 
-function armBubbleTimer(): void {
+/** 到期 tick：expireCurrent（记账）→ 推进 → 按新 current 的分级 dwell 重挂。 */
+function expireTick(): void {
+  bubbleTimer = null;
+  const { bubble } = usePetStore.getState();
+  const { state, dismissed } = expireCurrent(bubble, Date.now());
+  reportReminder(dismissed, "auto");
+  usePetStore.setState({ bubble: state });
+  armForCurrent(state);
+}
+
+/** 为 current 挂 dwell 计时（null 则不挂）。 */
+function armForCurrent(b: BubbleState): void {
   clearBubbleTimer();
-  bubbleTimer = setTimeout(() => {
-    bubbleTimer = null;
-    // 8s 自动消失：提醒气泡回报 dismissed_via='auto'（TC-RM-03）
-    const cur = usePetStore.getState().bubble;
-    reportReminder(cur, "auto");
-    usePetStore.setState({ bubble: null });
-  }, BUBBLE_AUTO_HIDE_MS);
+  const cur = b.current;
+  if (!cur) return;
+  const elapsed = Date.now() - b.shownAt;
+  const remain = Math.max(0, dwellFor(cur.level) - elapsed);
+  bubbleTimer = setTimeout(expireTick, remain);
 }
 
 /**
@@ -126,14 +150,15 @@ function armBubbleTimer(): void {
  * （`pulsepet://state` event）→ 调 `setRaw` 更新。`setRaw` / `next` 仍保留，
  * 供占位精灵渲染、降级映射验证（TC-SP-01/01b）与测试 / CDP 手动驱动。
  *
- * M3 起 `pulsepet://bubble` event（token 会话汇报等）→ `showBubble`；
- * M4 起 `reminder://trigger` → `showReminderBubble`（经 reminder-bridge）。
+ * M3 起 `pulsepet://bubble` event（token 会话汇报等）→ `pushBubble`（info 级）；
+ * M4 起 `reminder://trigger` → `pushBubble`（critical 级，经 reminder-bridge）；
+ * v2 M2 起多来源经排队模型合并展示（V2-DESIGN §2.6）。
  */
 export const usePetStore = create<PetState>((set, get) => ({
   raw: "idle",
   sprite: "idle",
   displayAgent: "opencode",
-  bubble: null,
+  bubble: initialBubbleState(),
   atlas: null,
   atlasMeta: null,
   passThrough: false,
@@ -156,37 +181,51 @@ export const usePetStore = create<PetState>((set, get) => ({
       const raw = nextState(s.raw);
       return { raw, sprite: degradeState(raw) };
     }),
-  showBubble: (text) => {
-    const clean = sanitizeBubbleText(text);
-    if (!clean) return; // 净化后为空 → 不出气泡（TC-TK-12：无内容不显示 0/陈旧）
-    // 顶替提醒气泡时，旧的按自动消失回报（未确认）
-    reportReminder(get().bubble, "auto");
-    bubbleSeq += 1;
-    set({ bubble: { text: clean, id: bubbleSeq } });
-    armBubbleTimer();
-  },
-  hideBubble: () => {
-    clearBubbleTimer();
-    set({ bubble: null });
-  },
-  showReminderBubble: (text, logId) => {
-    const clean = sanitizeBubbleText(text);
+  pushBubble: (item) => {
+    const clean = sanitizeBubbleText(item.text);
     if (!clean) {
-      // 净化后无内容：不出气泡，直接按自动消失结案（不留无主日志行）
-      reminderReporter?.(logId, "auto");
+      // 净化后为空：不出气泡；提醒条目按 auto 结案（不留无主日志行，规则⑤）
+      if (item.reminder) reminderReporter?.(item.reminder.logId, "auto");
       return;
     }
-    reportReminder(get().bubble, "auto");
-    bubbleSeq += 1;
-    set({ bubble: { text: clean, id: bubbleSeq, reminder: { logId } } });
-    armBubbleTimer();
+    const now = Date.now();
+    const prev = get().bubble;
+    const next = enqueue(
+      prev,
+      { ...item, text: clean, id: ++bubbleSeq, enqueuedAt: now },
+      now,
+    );
+    set({ bubble: next });
+    // current 变化（新上屏 / 顶替 / 合并刷新重计时）→ 重挂 dwell
+    if (next.current?.id !== prev.current?.id || next.shownAt !== prev.shownAt) {
+      armForCurrent(next);
+    }
+  },
+  setHoverPaused: (paused) => {
+    const prev = get().bubble;
+    const next = setHoverPausedQ(prev, paused, Date.now());
+    set({ bubble: next });
+    if (paused) {
+      clearBubbleTimer(); // 冻结：dwell 停走（恢复时续走剩余）
+    } else if (next.current) {
+      const elapsed = Date.now() - next.shownAt;
+      const remain = Math.max(0, dwellFor(next.current.level) - elapsed);
+      clearBubbleTimer();
+      bubbleTimer = setTimeout(expireTick, remain);
+    }
+  },
+  resetBubbles: () => {
+    clearBubbleTimer();
+    set({ bubble: initialBubbleState() });
   },
   ackReminderBubble: () => {
-    const cur = get().bubble;
-    if (!cur?.reminder) return false;
-    clearBubbleTimer();
-    set({ bubble: null });
-    reportReminder(cur, "bubble"); // TC-RM-04：acked_at + dismissed_via='bubble'
+    const prev = get().bubble;
+    if (!prev.current?.reminder) return false;
+    const now = Date.now();
+    const { state, acked } = ackCurrentQ(prev, now);
+    set({ bubble: state });
+    reportReminder(acked, "bubble"); // TC-RM-04：acked_at + dismissed_via='bubble'
+    armForCurrent(state);
     return true;
   },
 }));

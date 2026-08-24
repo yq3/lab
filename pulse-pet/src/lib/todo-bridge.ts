@@ -32,9 +32,14 @@ export function initTodoBridge(): void {
     await listen("todo://completed", (event) => {
       const e = parseTodoCompleted(event.payload);
       if (!e) return;
-      // waving 覆盖 + 气泡（全清文案优先；showBubble 内部净化）
+      // waving 覆盖 + 气泡（全清文案优先；pushBubble 内部净化）。
+      // v2 M2：info 级 + source="celebration"（排队模型 §2.6.2）。
       usePetStore.getState().startCelebration();
-      usePetStore.getState().showBubble(celebrationText(e));
+      usePetStore.getState().pushBubble({
+        text: celebrationText(e),
+        level: "info",
+        source: "celebration",
+      });
     });
     console.log("[pulsepet] todo bridge ready (pet)");
   })();

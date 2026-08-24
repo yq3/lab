@@ -26,11 +26,13 @@ type Dict = Record<string, string>;
 
 const zh: Dict = {
   // ---- panel 骨架 ----
-  "panel.title": "PulsePet 控制面板",
+  "panel.title": "PulsePet · 控制面板",
   "panel.tab.token": "Token",
   "panel.tab.reminders": "提醒",
   "panel.tab.todo": "Todo",
   "panel.tab.settings": "设置",
+  // v2 M2：顶栏 agent 状态芯片 aria-label（agent/kind 字面量不翻译）
+  "panel.statusAria": "当前 agent 状态：{text}",
 
   // ---- token 统计页 ----
   "token.preset.7d": "近 7 天",
@@ -220,6 +222,14 @@ const zh: Dict = {
   "settings.languageZh": "中文",
   "settings.languageEn": "English",
 
+  // ---- v2 M2 外观（主题三档，V2-DESIGN §2.3）----
+  "settings.theme": "外观",
+  "settings.themeHint": "面板主题（跟随系统或固定浅色/深色；重启保留；气泡与右键菜单不随主题变）",
+  "settings.themeAuto": "跟随系统",
+  "settings.themeLight": "浅色",
+  "settings.themeDark": "深色",
+  "settings.themeFail": "切换主题失败：{msg}",
+
   // ---- v2 M1 接入管理（V2-DESIGN §1.7/§1.8）----
   "integrations.title": "接入管理",
   "integrations.installed": "已安装",
@@ -240,6 +250,12 @@ const zh: Dict = {
   "integrations.fail": "操作失败：{msg}",
   "integrations.actionDone": "操作完成：",
 
+  // ---- v2 M2 功能管理（feature flag，V2-DESIGN §2.5）----
+  "plugins.manage": "功能管理",
+  "plugins.manageHint": "关闭插件将隐藏其面板页并停用其派生提醒（数据保留，重新启用即恢复）",
+  "plugins.manageToggle": "启用 {name}",
+  "plugins.disabledBadge": "已停用（插件关闭）",
+
   // ---- 宠物右键菜单 ----
   "menu.settings": "设置…",
   "menu.togglePass": "切换交互模式（穿透：{state}）",
@@ -254,11 +270,12 @@ const zh: Dict = {
 };
 
 const en: Dict = {
-  "panel.title": "PulsePet Control Panel",
+  "panel.title": "PulsePet · Control Panel",
   "panel.tab.token": "Token",
   "panel.tab.reminders": "Reminders",
   "panel.tab.todo": "Todo",
   "panel.tab.settings": "Settings",
+  "panel.statusAria": "Current agent state: {text}",
 
   "token.preset.7d": "Last 7 days",
   "token.preset.30d": "Last 30 days",
@@ -446,6 +463,14 @@ const en: Dict = {
   "settings.languageZh": "中文",
   "settings.languageEn": "English",
 
+  // ---- v2 M2 appearance (theme, V2-DESIGN §2.3) ----
+  "settings.theme": "Appearance",
+  "settings.themeHint": "Panel theme (follow system or fixed light/dark; persisted; bubble and right-click menu keep their pet-world look)",
+  "settings.themeAuto": "Follow system",
+  "settings.themeLight": "Light",
+  "settings.themeDark": "Dark",
+  "settings.themeFail": "Failed to switch theme: {msg}",
+
   // ---- v2 M1 接入管理（V2-DESIGN §1.7/§1.8）----
   "integrations.title": "Integrations",
   "integrations.installed": "Installed",
@@ -465,6 +490,12 @@ const en: Dict = {
   "integrations.claudeDesc": "Claude Code hooks",
   "integrations.fail": "Operation failed: {msg}",
   "integrations.actionDone": "Done: ",
+
+  // ---- v2 M2 features (feature flag, V2-DESIGN §2.5) ----
+  "plugins.manage": "Features",
+  "plugins.manageHint": "Disabling a plugin hides its panel tab and stops its derived reminders (data is kept; re-enable to restore)",
+  "plugins.manageToggle": "Enable {name}",
+  "plugins.disabledBadge": "Disabled (plugin off)",
 
   "menu.settings": "Settings…",
   "menu.togglePass": "Toggle interaction mode (pass-through: {state})",

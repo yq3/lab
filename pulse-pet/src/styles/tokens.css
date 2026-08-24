@@ -1,0 +1,63 @@
+/**
+ * tokens.css：v2 M2 设计系统 token 层（V2-DESIGN §2.2，TC-UI-12）。
+ *
+ * - 双主题两套值：浅色 = 像素暖纸 + 蜜橘强调（样例 a.html）；深色 = 像素
+ *   冷炭 + 项圈青强调（样例 b-cool.html，2026-08-23 终审）。`:root` 即浅色
+ *   默认；`[data-theme="dark"]`（挂 &lt;html&gt;，theme-bridge 驱动）整组覆盖。
+ * - `--pet-world-*` 宠物世界固定色组：定义于主题块之外、dark 块不重定义——
+ *   两主题同值恒定（气泡/右键菜单是「宠物世界物件」，不随主题，§2.3）。
+ * - 字版：UI sans 栈不变；数字/技术字面量 `--font-mono`；字号阶
+ *   10（图表刻度/微标签）/11/12/13/17/22。
+ */
+
+:root {
+  /* ---- 暖纸（浅色默认） ---- */
+  --bg: #f7f4ee;
+  --surface: #fffdf9;
+  --surface-2: #f0ece3;
+  --ink: #29241d;
+  --ink-soft: #7a7264;
+  --ink-faint: #a89f8e;
+  --line: #ddd5c6;
+  --accent: #d96c2c;
+  --accent-ink: #b4531c;
+  --ok: #4a7c59;
+  --danger: #b3402f;
+  --chart-output: #d96c2c;
+  --chart-input: #9c6b3f;
+  --chart-cache: #d8ccae;
+  --shadow-hard: 2px 2px 0 var(--line);
+  --shadow-hard-lg: 3px 3px 0 var(--line);
+}
+
+[data-theme="dark"] {
+  /* ---- 冷炭（深色，项圈青强调） ---- */
+  --bg: #1e2227;
+  --surface: #252a30;
+  --surface-2: #2d333b;
+  --ink: #e9edf3;
+  --ink-soft: #aeb8c4;
+  --ink-faint: #737e8c;
+  --line: #3b434e;
+  --accent: #62c6c0;
+  --accent-ink: #8fd8d2;
+  --ok: #82b986;
+  --danger: #e07263;
+  --chart-output: #62c6c0;
+  --chart-input: #7286a5;
+  --chart-cache: #39414b;
+  --shadow-hard: 2px 2px 0 rgba(0, 0, 0, 0.5);
+  --shadow-hard-lg: 3px 3px 0 rgba(0, 0, 0, 0.4);
+}
+
+/* ---- 宠物世界固定色（不随主题：两主题同值；dark 块刻意不重定义） ---- */
+:root {
+  --pet-world-surface: #f6efe2;
+  --pet-world-line: #17130f;
+  --pet-world-shadow: 2px 2px 0 rgba(23, 19, 15, 0.8);
+}
+
+/* ---- 字版 ---- */
+:root {
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
+}

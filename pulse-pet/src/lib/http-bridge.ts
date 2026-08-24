@@ -44,6 +44,11 @@ export function parseStatePayload(payload: unknown): StatePayload | null {
   return { kind, agent: typeof agent === "string" && agent ? agent : null };
 }
 
+/** 解析后的启动查询结果（get_display_state 返回 `{kind, agent}`——v2 M2 拉前）。 */
+export function parseDisplayStatePayload(payload: unknown): StatePayload | null {
+  return parseStatePayload(payload);
+}
+
 /** 把 payload 应用到 petStore（含 8→5 降级映射；agent 只存不显示）。 */
 export function applyStatePayload(payload: unknown): void {
   const parsed = parseStatePayload(payload);
@@ -60,10 +65,18 @@ export function parseBubblePayload(payload: unknown): string | null {
   return typeof text === "string" && text.length > 0 ? text : null;
 }
 
-/** 把气泡 payload 应用到 petStore（showBubble 内部净化；空文案丢弃）。 */
+/**
+ * 把气泡 payload 应用到 petStore（v2 M2：token 会话汇报 = **info 级**、
+ * source="token-report"，经排队模型合并展示——§2.6.2；pushBubble 内部净化，
+ * 空文案丢弃）。
+ */
 export function applyBubblePayload(payload: unknown): void {
   const text = parseBubblePayload(payload);
-  if (text) usePetStore.getState().showBubble(text);
+  if (text) {
+    usePetStore
+      .getState()
+      .pushBubble({ text, level: "info", source: "token-report" });
+  }
 }
 
 /**
@@ -81,14 +94,14 @@ export async function initHttpBridge(): Promise<void> {
     import("@tauri-apps/api/core"),
   ]);
 
-  // 初始查询当前显示状态
+  // 初始查询当前显示状态（v2 M2：返回 {kind, agent}——面板芯片/宠物初开即正确）
   try {
-    const kind = await invoke<string>("get_display_state");
-    if (typeof kind === "string") {
-      const parsed = ALL_STATES.includes(kind as NormalizedState)
-        ? (kind as NormalizedState)
-        : null;
-      if (parsed) usePetStore.getState().setRaw(parsed);
+    const dto = await invoke<unknown>("get_display_state");
+    const parsed = parseDisplayStatePayload(dto);
+    if (parsed) {
+      const store = usePetStore.getState();
+      store.setRaw(parsed.kind);
+      if (parsed.agent) store.setDisplayAgent(parsed.agent);
     }
   } catch {
     // App 侧命令不可用时静默（不影响事件监听）

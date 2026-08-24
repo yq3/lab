@@ -292,8 +292,10 @@ impl RemindersState {
     }
 
     /// 重新读表并重建倒计时（保留 paused；TC-RM-07 改设置即时生效）。
+    /// v2 M2：走 `load_active_rules`（调度器专用过滤——禁用插件的 todo 派生
+    /// 行不进内存，禁用期间到期不触发；重启用后 reload 恢复）。
     pub fn reload(&mut self, conn: &Connection) -> Result<(), String> {
-        let rules = load_rules(conn)?;
+        let rules = load_active_rules(conn)?;
         let now = now_ms();
         self.rules = rules
             .into_iter()
@@ -409,6 +411,27 @@ pub fn load_rules(conn: &Connection) -> Result<Vec<ReminderRule>, String> {
         .query_map([], row_to_rule)
         .map_err(|e| format!("load reminders: {e}"))?;
     Ok(rows.filter_map(|r| r.ok()).collect())
+}
+
+/// 调度器专用过滤查询（v2 M2，V2-DESIGN §2.5 / TC-UI-08）：在 `load_rules`
+/// 基础上排除 `kind='todo'` 且源插件 `enabled=0` 的行（禁用插件停派生提醒）。
+///
+/// - 源插件：v2 唯一有派生能力的插件 = `built-in-todo`（kind='todo' 行全部
+///   源于它）；plugins 表缺行时保守视为启用（不因元数据缺失丢提醒）。
+/// - `reminders_list` 照旧走 `load_rules` 全量（列表「可见但惰性」+ 前端徽标）。
+pub fn load_active_rules(conn: &Connection) -> Result<Vec<ReminderRule>, String> {
+    let todo_plugin_enabled: bool = conn
+        .query_row(
+            "SELECT enabled FROM plugins WHERE id = ?1",
+            [crate::plugins::BUILTIN_TODO_ID],
+            |r| r.get::<_, i64>(0),
+        )
+        .map(|v| v != 0)
+        .unwrap_or(true);
+    Ok(load_rules(conn)?
+        .into_iter()
+        .filter(|r| !(r.kind == "todo" && !todo_plugin_enabled))
+        .collect())
 }
 
 fn rule_by_id(conn: &Connection, id: i64) -> Result<ReminderRule, String> {
@@ -1194,6 +1217,88 @@ mod tests {
         let c = Connection::open_in_memory().unwrap();
         crate::db::migrate(&c).unwrap();
         c
+    }
+
+    // ---- v2 M2：load_active_rules（调度器专用过滤，TC-UI-08） ----
+
+    fn seed_rules_for_plugin_toggle(c: &Connection) {
+        crate::db::set_state(c, "seed", "1").ok();
+        c.execute(
+            "INSERT INTO plugins (id, name, version, manifest_version, enabled) \
+             VALUES ('built-in-todo', 'Todo', '0.1.0', 1, 1)",
+            [],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO reminders (kind, label, interval_minutes, enabled, use_fireworks) \
+             VALUES ('hydration', '喝水', 30, 1, 0)",
+            [],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO reminders (kind, label, interval_minutes, enabled, use_fireworks, \
+             source_todo_id, start_time, todo_due_at) \
+             VALUES ('todo', '交周报', 0, 1, 0, 7, '2026-08-25T09:55', '2026-08-25T10:00')",
+            [],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn load_active_rules_filters_todo_derived_when_plugin_disabled() {
+        let c = conn();
+        seed_rules_for_plugin_toggle(&c);
+
+        // 插件启用：全量参与调度
+        assert_eq!(load_active_rules(&c).unwrap().len(), 2);
+
+        // 禁用：todo 派生行被过滤（停派生提醒），普通行保留
+        c.execute("UPDATE plugins SET enabled = 0 WHERE id = 'built-in-todo'", [])
+            .unwrap();
+        let active = load_active_rules(&c).unwrap();
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0].kind, "hydration");
+
+        // reminders_list 口径不变：load_rules 照旧全量（可见但惰性，P2-2 定案）
+        assert_eq!(load_rules(&c).unwrap().len(), 2, "列表可见性依据 load_rules 全量");
+
+        // 重启用：派生行恢复参与调度（数据保留，无 DELETE）
+        c.execute("UPDATE plugins SET enabled = 1 WHERE id = 'built-in-todo'", [])
+            .unwrap();
+        assert_eq!(load_active_rules(&c).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn load_active_rules_defaults_to_enabled_when_plugin_row_missing() {
+        let c = conn();
+        crate::db::set_state(&c, "seed", "1").ok();
+        // plugins 表无登记（异常态：ensure_builtin_plugins 未跑）——保守视为启用，
+        // 不因元数据缺失丢提醒
+        c.execute(
+            "INSERT INTO reminders (kind, label, interval_minutes, enabled, use_fireworks, source_todo_id) \
+             VALUES ('todo', '孤儿派生行', 0, 1, 0, 1)",
+            [],
+        )
+        .unwrap();
+        assert_eq!(load_active_rules(&c).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn scheduler_reload_uses_active_rules_and_collect_due_skips_disabled() {
+        let c = conn();
+        seed_rules_for_plugin_toggle(&c);
+        c.execute("UPDATE plugins SET enabled = 0 WHERE id = 'built-in-todo'", [])
+            .unwrap();
+
+        let mut st = RemindersState::default();
+        st.reload(&c).unwrap();
+        assert_eq!(st.rules.len(), 1, "reload 走 load_active_rules（禁用行不进内存）");
+
+        // 重启用后 reload 恢复（禁用期间行未被删除）
+        c.execute("UPDATE plugins SET enabled = 1 WHERE id = 'built-in-todo'", [])
+            .unwrap();
+        st.reload(&c).unwrap();
+        assert_eq!(st.rules.len(), 2);
     }
 
     fn input(kind: &str, label: &str, interval: i64) -> ReminderInput {

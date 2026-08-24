@@ -21,16 +21,12 @@ type Preset = "7d" | "30d" | "custom";
 /** 统计维度（TC-TK-07：day/week/range 驱动时序与汇总；session 维度固定给会话列表）。 */
 type Dimension = "day" | "week" | "range";
 
-const PROJECT_COLORS = [
-  "#6366f1",
-  "#10b981",
-  "#f59e0b",
-  "#ef4444",
-  "#06b6d4",
-  "#8b5cf6",
-  "#ec4899",
-  "#84cc16",
-];
+/**
+ * v2 M2：图表色 token 化（--chart-output/input/cache 三段循环；R8 硬编码
+ * 色清零——SVG attribute 不支持 var()，色值走 CSS 类，见 global.css）。
+ * M3 砍饼图改堆叠柱图后由三段语义直接对应。
+ */
+const CHART_CLASSES = ["pie-c0", "pie-c1", "pie-c2"] as const;
 
 /** 错误码 → 用户提示（TC-TK-03/04/13；M8 i18n 随当前语言）。 */
 function errorHint(err: StatsError): string {
@@ -219,10 +215,7 @@ export default function TokenStats() {
               dim: dimension === "day" ? t("token.dim.day") : t("token.dim.week"),
             })}
           </h3>
-          <TimeBarChart
-            data={buckets}
-            color="#6366f1"
-          />
+          <TimeBarChart data={buckets} />
         </section>
       )}
 
@@ -303,14 +296,8 @@ export default function TokenStats() {
   );
 }
 
-/** 自画 SVG 柱状图（几何来自纯函数 computeBars）。 */
-function TimeBarChart({
-  data,
-  color,
-}: {
-  data: { label: string; tokens: number }[];
-  color: string;
-}) {
+/** 自画 SVG 柱状图（几何来自纯函数 computeBars；色值走 CSS 类 = chart token）。 */
+function TimeBarChart({ data }: { data: { label: string; tokens: number }[] }) {
   const W = 640;
   const H = 180;
   const PAD = 18;
@@ -327,45 +314,44 @@ function TimeBarChart({
       aria-label={t("token.chart.aria")}
     >
       <line
+        className="chart-axis"
         x1={PAD}
         y1={H - PAD}
         x2={W - PAD}
         y2={H - PAD}
-        stroke="#d1d5db"
         strokeWidth="1"
       />
       {bars.map((b, i) => (
         <rect
           key={data[i].label}
+          className="bar-fill"
           x={b.x}
           y={b.y}
           width={b.w}
           height={b.h}
-          fill={color}
-          rx="2"
         >
           <title>{t("token.chart.bar", { label: data[i].label, n: data[i].tokens.toLocaleString() })}</title>
         </rect>
       ))}
       {/* 首尾标签（中间条 hover title 提供详情） */}
       {data.length > 0 && (
-        <text x={PAD} y={H - 4} fontSize="10" fill="#6b7280">
+        <text className="chart-label" x={PAD} y={H - 4} fontSize="10">
           {data[0].label}
         </text>
       )}
       {data.length > 1 && (
         <text
+          className="chart-label"
           x={W - PAD}
           y={H - 4}
           fontSize="10"
-          fill="#6b7280"
           textAnchor="end"
         >
           {data[data.length - 1].label}
         </text>
       )}
       {max > 0 && (
-        <text x={PAD} y={PAD - 4} fontSize="10" fill="#9ca3af">
+        <text className="chart-label faint" x={PAD} y={PAD - 4} fontSize="10">
           {formatTokens(max)}
         </text>
       )}
@@ -373,7 +359,7 @@ function TimeBarChart({
   );
 }
 
-/** 项目占比饼图 + 列表。 */
+/** 项目占比饼图 + 列表（色 = chart token 三段循环，M3 砍饼图）。 */
 function ProjectPie({
   projects,
 }: {
@@ -394,7 +380,7 @@ function ProjectPie({
         aria-label={t("token.pie.aria")}
       >
         {slices.map((s, i) => (
-          <path key={s.label} d={s.path} fill={PROJECT_COLORS[i % PROJECT_COLORS.length]}>
+          <path key={s.label} className={CHART_CLASSES[i % CHART_CLASSES.length]} d={s.path}>
             <title>{t("token.pie.slice", { label: s.label, pct: s.percent.toFixed(1) })}</title>
           </path>
         ))}
@@ -403,10 +389,7 @@ function ProjectPie({
         {projects.map((p, i) => (
           <li key={p.label}>
             <span
-              className="project-dot"
-              style={{
-                background: PROJECT_COLORS[i % PROJECT_COLORS.length],
-              }}
+              className={`project-dot ${CHART_CLASSES[i % CHART_CLASSES.length]}`}
             />
             <span className="project-name" title={p.label}>
               {p.label}

@@ -23,6 +23,7 @@ import {
   type ReminderStat,
 } from "../lib/reminders";
 import { t, useLangStore } from "../lib/i18n";
+import { pluginEnabled, usePluginStore } from "../lib/plugin-store";
 
 /**
  * 提醒配置页（DESIGN §5.4 / §10.2 M4，TC-RM-07/11/13/14）：
@@ -95,6 +96,10 @@ export default function Reminders() {
   /** 两步删除确认：第一次点"删除"变为"确认删除？"，3s 内再点才执行。 */
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
   const lang = useLangStore((s) => s.lang); // M8 i18n：语言变化时本页文案重渲染
+  // v2 M2：todo 派生行的「已停用（插件关闭）」徽标数据源（TC-UI-07-3；
+  // 禁用即惰性——行可见但不再触发，用户不疑惑「我的 todo 提醒去哪了」）
+  const plugins = usePluginStore((s) => s.plugins);
+  const todoPluginDisabled = !pluginEnabled(plugins, "built-in-todo");
 
   const load = useCallback(async () => {
     if (!isTauriRuntime()) {
@@ -268,6 +273,10 @@ export default function Reminders() {
               <span className="reminder-kind" title={r.kind}>
                 {kindEmoji(r.kind)} {kindLabel(r.kind)}
               </span>
+              {/* v2 M2：禁用插件的 todo 派生行加「已停用」徽标（可见但惰性） */}
+              {r.kind === "todo" && todoPluginDisabled && (
+                <span className="reminder-plugin-off">{t("plugins.disabledBadge")}</span>
+              )}
               <span className="reminder-label" title={r.label}>
                 {r.label}
               </span>

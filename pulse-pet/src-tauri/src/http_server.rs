@@ -51,11 +51,12 @@ pub fn new_agent_activity() -> AgentActivity {
     Arc::new(Mutex::new(HashMap::new()))
 }
 
-/// 显示状态去重通知器：仅当合并后的显示状态 kind 真正变化时回调一次。
-/// v2 M1 保持按 kind 去重（同 kind 换 agent 不发事件——前端只存不显示可接受；
-/// M2 已定案拉前改为 (kind, agent) 去重，见 V2-DESIGN §1.5 修订标注）。
+/// 显示状态去重通知器：仅当合并后的显示状态 `(kind, agent)` 真正变化时回调一次。
+/// v2 M2（P1-1 拉前，V2-DESIGN §2.4/§2.7）：去重键从 kind 改为 `(kind, agent)`
+/// ——同 kind 换 agent 也发事件（面板状态芯片的 agent 跟随依赖此改造；按 kind
+/// 去重时 kind 长期不变期 agent 错值会永久停留）。
 pub struct DisplayNotifier {
-    last: Mutex<Option<Kind>>,
+    last: Mutex<Option<(Kind, String)>>,
     on_change: StateChangeCallback,
 }
 
@@ -67,15 +68,15 @@ impl DisplayNotifier {
         }
     }
 
-    /// 计算当前显示状态，kind 变化时以 `(kind, agent)` 触发回调。
+    /// 计算当前显示状态，`(kind, agent)` 变化时以 `(kind, agent)` 触发回调。
     pub fn notify(&self, state: &Arc<Mutex<SessionStateMachine>>) {
         let display = {
             let st = state.lock().unwrap_or_else(|p| p.into_inner());
             st.display()
         };
         let mut last = self.last.lock().unwrap_or_else(|p| p.into_inner());
-        if *last != Some(display.kind) {
-            *last = Some(display.kind);
+        if *last != Some((display.kind, display.agent.clone())) {
+            *last = Some((display.kind, display.agent.clone()));
             (self.on_change)(display.kind, &display.agent);
         }
     }
@@ -915,5 +916,53 @@ mod tests {
         assert!(act.contains_key("claude-code"), "AgentActivity 应记录 claude-code");
         assert_eq!(act.len(), 2);
         h.shutdown();
+    }
+
+    // ---- v2 M2（TC-UI-06）：DisplayNotifier 去重键 (kind, agent) 拉前 ----
+
+    #[test]
+    fn notifier_dedups_on_kind_and_agent_pair() {
+        use std::sync::Mutex as StdMutex;
+        let fired = Arc::new(StdMutex::new(Vec::<(String, String)>::new()));
+        let sink = fired.clone();
+        let notifier = DisplayNotifier::new(Arc::new(move |kind, agent| {
+            sink.lock().unwrap().push((kind.as_str().to_string(), agent.to_string()));
+        }));
+        let state = Arc::new(Mutex::new(SessionStateMachine::new()));
+        let idle_to = Duration::from_secs(30);
+        let transient_to = Duration::from_secs(30);
+
+        // 同 (kind, agent) 重复 notify → 只发一次
+        {
+            let mut st = state.lock().unwrap();
+            st.apply_event("opencode", "s1", Kind::Idle, Instant::now());
+        }
+        notifier.notify(&state);
+        notifier.notify(&state);
+        assert_eq!(*fired.lock().unwrap(), vec![("idle".into(), "opencode".into())]);
+
+        // 同 kind 换 agent（TC-UI-06：整日 idle 期间另一 agent 会话起事件——
+        // 先让旧 session 走完 30s idle 回收，display 唯一归属新 agent）→ 仍发事件。
+        // M1 按 kind 去重时此事件被吞（芯片 agent 永久停留）——P1-1 拉前修复的钉子。
+        {
+            let mut st = state.lock().unwrap();
+            st.tick(
+                Instant::now() + Duration::from_secs(31),
+                transient_to,
+                idle_to,
+            );
+            st.apply_event("claude-code", "s2", Kind::Idle, Instant::now() + Duration::from_secs(31));
+        }
+        notifier.notify(&state);
+        assert_eq!(
+            *fired.lock().unwrap(),
+            vec![
+                ("idle".into(), "opencode".into()),
+                ("idle".into(), "claude-code".into()),
+            ],
+            "同 kind 换 agent 必须发事件（状态芯片 agent 跟随）"
+        );
+        notifier.notify(&state);
+        assert_eq!(fired.lock().unwrap().len(), 2, "同 (kind, agent) 二元组去重");
     }
 }

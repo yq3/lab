@@ -10,6 +10,7 @@ mod plugins;
 mod reminder_scheduler;
 mod runtime;
 mod session_state;
+mod theme;
 mod token_stats;
 mod todos;
 mod tray;
@@ -42,14 +43,32 @@ fn idle_timeout() -> Duration {
         .unwrap_or(Duration::from_secs(30))
 }
 
-/// 返回当前多 session 合并后的显示状态（前端 http-bridge 初始化时查询用）。
-#[tauri::command]
-fn get_display_state(state: tauri::State<'_, Arc<Mutex<SessionStateMachine>>>) -> String {
-    let kind = state
+/// 显示状态 DTO（v2 M2，TC-UI-03-3）：`{kind, agent}`——面板壳 agent 状态
+/// 芯片初开即正确（M1 前置拉前，V2-DESIGN §1.6/§2.4）。
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DisplayStateDto {
+    pub kind: String,
+    /// argmax 获胜 session 的归属 agent；无 session 时为空串（前端优雅降级）。
+    pub agent: String,
+}
+
+/// get_display_state 核心纯逻辑（单测直接驱动；命令薄封装）。
+fn display_state_dto(state: &Arc<Mutex<SessionStateMachine>>) -> DisplayStateDto {
+    let d = state
         .lock()
-        .map(|s| s.display().kind.as_str().to_string())
-        .unwrap_or_else(|_| "idle".to_string());
-    kind
+        .unwrap_or_else(|p| p.into_inner())
+        .display();
+    DisplayStateDto {
+        kind: d.kind.as_str().to_string(),
+        agent: d.agent,
+    }
+}
+
+/// 返回当前多 session 合并后的显示状态（前端 http-bridge / panelStore 初始化查询用）。
+#[tauri::command]
+fn get_display_state(state: tauri::State<'_, Arc<Mutex<SessionStateMachine>>>) -> DisplayStateDto {
+    display_state_dto(&state)
 }
 
 /// M3 token 汇报 idle 钩子核心（v2 M1 起 agent 分流，TC-INT-11）：
@@ -279,6 +298,7 @@ pub fn run() {
             atlas::atlas_pixels,
             atlas::atlas_list_pets,
             atlas::atlas_select,
+            atlas::atlas_sheet_png,
             token_stats::token_stats_opencode_path,
             token_stats::token_stats_query,
             token_stats::token_stats_current_session,
@@ -297,8 +317,11 @@ pub fn run() {
             reminder_scheduler::fireworks_ready,
             reminder_scheduler::fireworks_finished,
             plugins::plugins_list,
+            plugins::plugins_set_enabled,
             i18n::ui_get_language,
             i18n::ui_set_language,
+            theme::ui_get_theme,
+            theme::ui_set_theme,
             integrations::integrations_status,
             integrations::integrations_install,
             integrations::integrations_uninstall,
@@ -350,6 +373,26 @@ mod tests {
 
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    // ---- v2 M2（TC-UI-03-3/TC-UI-06）：get_display_state 扩展返回 {kind, agent} ----
+
+    #[test]
+    fn get_display_state_returns_kind_and_agent() {
+        let state = Arc::new(Mutex::new(SessionStateMachine::new()));
+        // sessions 全空 → idle + 空 agent（前端优雅降级，TC-UI-03-4）
+        let empty = display_state_dto(&state);
+        assert_eq!(empty.kind, "idle");
+        assert_eq!(empty.agent, "");
+
+        // 注入事件后返回合并显示状态 + 归属 agent
+        {
+            let mut st = state.lock().unwrap_or_else(|p| p.into_inner());
+            st.apply_event("claude-code", "cc-1", Kind::Working, Instant::now());
+        }
+        let dto = display_state_dto(&state);
+        assert_eq!(dto.kind, "working");
+        assert_eq!(dto.agent, "claude-code");
+    }
 
     #[test]
     fn claude_code_idle_never_queries_opencode_db() {
