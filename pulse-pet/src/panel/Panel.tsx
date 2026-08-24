@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import Todo from "./plugins/Todo";
-import MiniCat from "./MiniCat";
 import { usePanelStore, initPanelStore } from "./panelStore";
 import { buildTabs, resolveTabId, type PluginRenderMap, type TabDef } from "./registry";
 import { usePluginStore } from "../lib/plugin-store";
@@ -10,9 +9,10 @@ import { isTauriRuntime } from "../lib/token-stats";
 import { t, useLangStore } from "../lib/i18n";
 
 /**
- * 控制面板（v2 M2 面板壳重构，V2-DESIGN §2.4/§2.5）：
- * - 顶栏 = mini 猫（atlas 真实帧镜像）+「PulsePet · 控制面板」标题 +
- *   agent 状态芯片（`● {agent} · {kind}` 等宽字体，agent/kind 不翻译）；
+ * 控制面板（v2 M2 面板壳，V2-DESIGN §2.4/§2.5；2026-08-24 修订）：
+ * - 顶栏 = 「PulsePet · 控制面板」标题 + agent 状态芯片**两段布局**
+ *   （修订：mini 猫移除；芯片 `● {agent} · {kind}` 等宽字体，agent/kind
+ *   不翻译——P1-1 拉前的独立消费方，panelStore 供数）；
  * - tab 栏 = 注册表驱动（核心三静态 + 插件按 enabled 动态，禁用即隐藏；
  *   激活 tab 带 accent 硬阴影上浮）；`panel://tab` 直达保留，目标禁用回退
  *   首个可用；正查看的 tab 被禁用 → 立即切首个可用（hook 内处理）；
@@ -79,7 +79,6 @@ export default function Panel() {
   return (
     <div className="panel">
       <header className="panel-header">
-        <MiniCat />
         <h1 className="panel-title">{t("panel.title")}</h1>
         <span
           className="panel-status-chip"

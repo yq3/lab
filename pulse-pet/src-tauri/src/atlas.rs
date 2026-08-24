@@ -628,99 +628,18 @@ pub struct PetOptionDto {
     pub problem: Option<String>,
 }
 
-/// 受管状态：当前生效的 atlas 选择 + mini 猫 PNG dataURL 缓存（v2 M2）。
-///
-/// `generation` 在 init / 每次热替换（atlas_select）时前进，作为缓存的
-/// 代次标签：`png_cache = Some((gen, dataURL))` 仅当 gen == generation 时
-/// 命中——热替换天然失效（TC-UI-04）。
+/// 受管状态：当前生效的 atlas 选择。
+/// （2026-08-24 修订：mini 猫 PNG dataURL 缓存随 atlas_sheet_png 命令一并
+/// 回收删除——V2-DESIGN §2.4 修订，唯一消费方消失即回收，不留无消费方代码。）
 pub struct AtlasState {
     pub selection: Selection,
-    /// 代次（0 起，热替换 +1）。
-    pub generation: u64,
-    /// 重编码 PNG dataURL 缓存（(生成时代次, dataURL)）。
-    pub png_cache: Option<(u64, String)>,
 }
 
 impl AtlasState {
-    /// 从完整 Selection 构造（init_selection 用；generation=0、无缓存）。
+    /// 从完整 Selection 构造（init_selection 用）。
     pub fn new(selection: Selection) -> Self {
-        Self {
-            selection,
-            generation: 0,
-            png_cache: None,
-        }
+        Self { selection }
     }
-
-    /// 从 AtlasData 构造（测试便捷通道；release 无调用面）。
-    #[cfg(test)]
-    pub fn from_data(data: AtlasData) -> Self {
-        Self::new(Selection {
-            requested: None,
-            current_id: BUILTIN_ID.to_string(),
-            current_source: SOURCE_BUILTIN,
-            data,
-            notice: None,
-        })
-    }
-
-    /// 热替换推进（代次 +1 并丢缓存；atlas_select 内调用）。
-    fn advance(&mut self) {
-        self.generation += 1;
-        self.png_cache = None;
-    }
-
-    /// 缓存命中读取（gen 不匹配 = 已热替换 → None，不返回旧图）。
-    pub fn cached_png(&self) -> Option<String> {
-        self.png_cache
-            .as_ref()
-            .filter(|(g, _)| *g == self.generation)
-            .map(|(_, u)| u.clone())
-    }
-
-    /// 编码结果回写（仅当 gen 仍是当前代次——热替换竞态下丢弃过期结果）。
-    pub fn store_png(&mut self, gen: u64, url: String) {
-        if gen == self.generation {
-            self.png_cache = Some((gen, url));
-        }
-    }
-}
-
-// ---- v2 M2：PNG dataURL 重编码（mini 猫数据源，TC-UI-04） ----
-
-/// 标准 base64 编码（RFC 4648，含 padding；零依赖手写——包体积敏感）。
-pub fn base64_encode(data: &[u8]) -> String {
-    const TAB: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
-    for chunk in data.chunks(3) {
-        let b0 = chunk[0] as u32;
-        let b1 = *chunk.get(1).unwrap_or(&0) as u32;
-        let b2 = *chunk.get(2).unwrap_or(&0) as u32;
-        let n = (b0 << 16) | (b1 << 8) | b2;
-        out.push(TAB[(n >> 18) as usize & 63] as char);
-        out.push(TAB[(n >> 12) as usize & 63] as char);
-        out.push(if chunk.len() > 1 {
-            TAB[(n >> 6) as usize & 63] as char
-        } else {
-            '='
-        });
-        out.push(if chunk.len() > 2 {
-            TAB[n as usize & 63] as char
-        } else {
-            '='
-        });
-    }
-    out
-}
-
-/// 当前 atlas 解码图重编码为 PNG dataURL（None = 重编码失败，不缓存）。
-pub fn sheet_png_dataurl(data: &AtlasData) -> Option<String> {
-    let w = data.cols * data.frame_w;
-    let h = data.rows * data.frame_h;
-    let img = image::RgbaImage::from_raw(w, h, data.rgba.clone())?;
-    let mut png = Vec::new();
-    img.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
-        .ok()?;
-    Some(format!("data:image/png;base64,{}", base64_encode(&png)))
 }
 
 fn selection_dto(s: &Selection) -> AtlasMetaDto {
@@ -822,50 +741,9 @@ pub fn atlas_select<R: tauri::Runtime>(
         let st = app.state::<std::sync::Mutex<AtlasState>>();
         let mut guard = st.lock().map_err(|e| format!("lock: {e}"))?;
         guard.selection = selection;
-        guard.advance(); // 热替换：mini 猫 PNG 缓存失效重建（TC-UI-04）
     }
     let _ = app.emit("atlas://changed", dto.clone());
     Ok(dto)
-}
-
-/// 当前 atlas 的 PNG dataURL（v2 M2 mini 猫数据源，TC-UI-04）。
-///
-/// - AtlasState 内缓存：命中（代次未变）直接返回，不重编码；
-/// - 未命中：clone RGBA（锁内快取、立即释放）→ **spawn_blocking 重编码**
-///   （1536×1872 PNG 编码 ~50-200ms，不占主线程——M1 §1.5 线程纪律）→
-///   回写缓存（代次已变则丢弃，防热替换竞态写入旧图）。
-#[tauri::command]
-pub async fn atlas_sheet_png<R: tauri::Runtime>(
-    app: tauri::AppHandle<R>,
-) -> Result<Option<String>, String> {
-    use std::sync::Mutex;
-    let st = app.state::<Mutex<AtlasState>>();
-    // ① 缓存命中快速路径（锁内 µs 级）
-    {
-        let guard = st.lock().map_err(|e| format!("lock: {e}"))?;
-        if let Some(url) = guard.cached_png() {
-            return Ok(Some(url));
-        }
-    }
-    // ② 快照编码输入（锁内取数据 + 代次，随即释放锁）
-    let (gen, snapshot) = {
-        let guard = st.lock().map_err(|e| format!("lock: {e}"))?;
-        (guard.generation, guard.selection.data.clone())
-    };
-    // ③ 阻塞线程重编码
-    let url = tauri::async_runtime::spawn_blocking(move || sheet_png_dataurl(&snapshot))
-        .await
-        .map_err(|e| format!("encode task join: {e}"))?;
-    // ④ 回写缓存（代次竞态护栏）后返回
-    if let Some(u) = &url {
-        let mut guard = st.lock().map_err(|e| format!("lock: {e}"))?;
-        guard.store_png(gen, u.clone());
-    }
-    plog!(
-        "[pulsepet] atlas sheet png {}",
-        if url.is_some() { "encoded" } else { "encode failed" }
-    );
-    Ok(url)
 }
 
 // ---- 单测 ----
@@ -1396,116 +1274,6 @@ mod tests {
         fs::remove_dir_all(&home).ok();
     }
 
-    // ---- v2 M2：atlas_sheet_png（mini 猫数据源，TC-UI-04） ----
-
-    /// tests 内 mini base64 解码器（验证编码 roundtrip 用；字母表与编码器一致）。
-    fn base64_decode_test(s: &str) -> Vec<u8> {
-        let tab = |c: u8| -> u32 {
-            match c {
-                b'A'..=b'Z' => (c - b'A') as u32,
-                b'a'..=b'z' => (c - b'a' + 26) as u32,
-                b'0'..=b'9' => (c - b'0' + 52) as u32,
-                b'+' => 62,
-                b'/' => 63,
-                _ => panic!("bad b64 char {}", c as char),
-            }
-        };
-        let bytes: Vec<u8> = s.bytes().filter(|b| *b != b'=').collect();
-        let mut out = Vec::new();
-        for chunk in bytes.chunks(4) {
-            let mut n = 0u32;
-            for (i, b) in chunk.iter().enumerate() {
-                n |= tab(*b) << (18 - 6 * i);
-            }
-            out.push((n >> 16) as u8);
-            if chunk.len() > 2 {
-                out.push((n >> 8) as u8);
-            }
-            if chunk.len() > 3 {
-                out.push(n as u8);
-            }
-        }
-        out
-    }
-
-    #[test]
-    fn base64_encoder_is_standard_alphabet() {
-        // RFC 4648 测试向量（含 1/2/3 字节 padding 三态）
-        assert_eq!(base64_encode(b""), "");
-        assert_eq!(base64_encode(b"f"), "Zg==");
-        assert_eq!(base64_encode(b"fo"), "Zm8=");
-        assert_eq!(base64_encode(b"foo"), "Zm9v");
-        assert_eq!(base64_encode(b"foob"), "Zm9vYg==");
-        assert_eq!(base64_encode(b"fooba"), "Zm9vYmE=");
-        assert_eq!(base64_encode(b"foobar"), "Zm9vYmFy");
-        assert_eq!(base64_decode_test("Zm9vYmFy"), b"foobar");
-    }
-
-    #[test]
-    fn sheet_png_dataurl_roundtrips_builtin_sheet() {
-        let (_, data) = load_builtin().unwrap();
-        let url = sheet_png_dataurl(&data).unwrap();
-        assert!(url.starts_with("data:image/png;base64,"), "前 40 字符：{}", &url[..40.min(url.len())]);
-        assert!(url.len() > 1_000, "非空 dataURL（~30-50KB 量级）");
-        // roundtrip：base64 解回 → PNG 解码 → 尺寸一致（编码正确性）
-        let b64 = &url["data:image/png;base64,".len()..];
-        let bytes = base64_decode_test(b64);
-        let img = image::load_from_memory(&bytes).unwrap().to_rgba8();
-        assert_eq!(
-            img.dimensions(),
-            (data.cols * data.frame_w, data.rows * data.frame_h)
-        );
-        // 确定性：同输入同输出（缓存可比较、测试可断言）
-        assert_eq!(url, sheet_png_dataurl(&data).unwrap());
-    }
-
-    #[test]
-    fn atlas_state_png_cache_hit_miss_and_invalidation() {
-        // 命中：gen 匹配的缓存直接返回（不重编码——sentinel 原样透出）
-        let (_, data) = load_builtin().unwrap();
-        let mut st = AtlasState::from_data(data);
-        st.png_cache = Some((st.generation, "sentinel".to_string()));
-        assert_eq!(st.cached_png().as_deref(), Some("sentinel"));
-
-        // 失效：热替换（generation 前进）后缓存不再命中
-        st.generation += 1; // 模拟 atlas_select 推进代次
-        assert_eq!(st.cached_png(), None, "热替换后缓存失效");
-
-        // 回写护栏：旧代次的编码结果不写入新代次缓存
-        st.store_png(st.generation - 1, "stale".to_string());
-        assert_eq!(st.cached_png(), None);
-        // 当代次回写后可命中
-        st.store_png(st.generation, "fresh".to_string());
-        assert_eq!(st.cached_png().as_deref(), Some("fresh"));
-    }
-
-    #[test]
-    fn atlas_sheet_png_command_caches_and_rebuilds_on_hot_swap() {
-        use std::sync::Mutex as StdMutex;
-        let app = tauri::test::mock_app();
-        let handle = app.handle();
-        // atlas_select 需要 db（app_state 持久化 pet.selected）
-        let conn = Connection::open_in_memory().unwrap();
-        crate::db::migrate(&conn).unwrap();
-        handle.manage(StdMutex::new(conn));
-        let (_, data) = load_builtin().unwrap();
-        handle.manage(StdMutex::new(AtlasState::from_data(data)));
-
-        // 命令返回非空 PNG dataURL；重复调用同值（缓存）
-        let url1 = tauri::async_runtime::block_on(atlas_sheet_png(handle.clone()))
-            .unwrap()
-            .expect("内置 atlas 必有 sheet");
-        assert!(url1.starts_with("data:image/png;base64,"));
-        let url2 = tauri::async_runtime::block_on(atlas_sheet_png(handle.clone()))
-            .unwrap()
-            .expect("缓存路径同样返回 Some");
-        assert_eq!(url1, url2);
-
-        // 热替换（换狗）→ 缓存失效重建，dataURL 随新图变化
-        atlas_select(handle.clone(), Some("wagging-doggy".to_string())).unwrap();
-        let url3 = tauri::async_runtime::block_on(atlas_sheet_png(handle.clone()))
-            .unwrap()
-            .expect("热替换后重建");
-        assert_ne!(url1, url3, "换宠物后 mini 猫同步换装（TC-UI-05-2）");
-    }
+    // （v2 M2 atlas_sheet_png / base64 / PNG 缓存相关测试随命令一并回收删除
+    //  ——2026-08-24 修订：mini 猫移除，唯一消费方消失，V2-DESIGN §2.4。）
 }

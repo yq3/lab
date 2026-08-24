@@ -298,7 +298,6 @@ pub fn run() {
             atlas::atlas_pixels,
             atlas::atlas_list_pets,
             atlas::atlas_select,
-            atlas::atlas_sheet_png,
             token_stats::token_stats_opencode_path,
             token_stats::token_stats_query,
             token_stats::token_stats_current_session,

@@ -44,6 +44,27 @@ body,
   }
 }
 
+/* ---- v2 M2 控件规格基线（R1-supplement-2 打磨）----
+ * 三页（提醒/Todo/设置）控件历史上来自不同批次、规格发散；统一为：
+ * 输入类控件 32px 高（padding 5px 10px + 2px 边框 + 13px 字）；
+ * 行内小按钮 28px 高（5px 12px + 12px 字）；主按钮 32px 与输入框齐高；
+ * checkbox 16×16 + accent-color 主题化（原生控件随主题，深色勾选可见）。 */
+input[type="checkbox"],
+input[type="radio"] {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  accent-color: var(--accent);
+}
+
+input[type="text"],
+input[type="number"],
+input[type="date"],
+input[type="time"],
+select {
+  font-family: inherit;
+}
+
 /* 滚动条（深浅两主题可读，R7） */
 ::-webkit-scrollbar {
   width: 10px;
@@ -166,7 +187,7 @@ body,
   line-height: 1.8;
 }
 
-/* ---- 顶栏（v2 M2 面板壳：mini 猫 + 标题 + agent 状态芯片，§2.4） ---- */
+/* ---- 顶栏（v2 M2 面板壳：标题 + agent 状态芯片两段，§2.4 修订） ---- */
 .panel-header {
   display: flex;
   align-items: center;
@@ -183,20 +204,7 @@ body,
   color: var(--ink);
 }
 
-/* mini 猫：24×26 像素猫（atlas 真实帧，120ms 固定步进；MiniCat.tsx） */
-.mini-cat {
-  flex: none;
-  width: 24px;
-  height: 26px;
-  image-rendering: pixelated;
-}
-
-/* 占位方块（atlas 缺失/失败优雅降级，TC-UI-05-3） */
-.mini-cat-fallback {
-  display: inline-block;
-  background: var(--surface-2);
-  border: 2px solid var(--line);
-}
+/* （mini 猫样式随 MiniCat.tsx 移除一并回收——2026-08-24 修订，§2.4） */
 
 /* agent 状态芯片：● {agent} · {kind} 等宽（字面量不翻译，TC-UI-03） */
 .panel-status-chip {
@@ -310,6 +318,7 @@ body,
   border: none;
   background: transparent;
   padding: 5px 14px;
+  min-height: 32px;
   font-size: 13px;
   color: var(--ink-soft);
   cursor: pointer;
@@ -335,7 +344,7 @@ body,
   font-weight: 700;
   letter-spacing: 0.08em;
   color: var(--ink);
-  margin: 22px 0 10px;
+  margin: 26px 0 10px;
 }
 
 .panel-settings h2:first-child {
@@ -353,11 +362,13 @@ body,
   appearance: none;
   border: 2px solid var(--line);
   border-radius: 2px;
-  padding: 8px 12px;
+  padding: 5px 10px;
+  min-height: 32px;
   font-size: 13px;
   background: var(--surface);
   color: var(--ink);
   min-width: 320px;
+  max-width: 480px;
 }
 
 .panel-settings select:disabled {
@@ -376,8 +387,11 @@ body,
 
 .settings-current {
   margin-top: 10px;
+  margin-bottom: 2px;
   font-size: 12px;
+  line-height: 1.7;
   color: var(--ink-faint);
+  max-width: 640px;
 }
 
 .settings-problems {
@@ -391,16 +405,16 @@ body,
 .settings-check {
   display: flex;
   align-items: flex-start;
-  gap: 8px;
+  gap: 10px;
   font-size: 13px;
   color: var(--ink-soft);
-  line-height: 1.6;
+  line-height: 1.7;
   max-width: 640px;
   cursor: pointer;
 }
 
 .settings-check input {
-  margin-top: 3px;
+  margin-top: 4px;
 }
 
 .settings-error {
@@ -429,13 +443,13 @@ body,
 .intg-row {
   border: 2px solid var(--line);
   background: var(--surface);
-  padding: 10px 12px;
+  padding: 12px 14px;
 }
 
 .intg-row-head {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
 
 .intg-name {
@@ -459,7 +473,8 @@ body,
 
 .intg-row-actions button {
   font-size: 12px;
-  padding: 4px 10px;
+  padding: 5px 12px;
+  min-height: 28px;
   border: 2px solid var(--line);
   background: var(--surface);
   color: var(--ink-soft);
@@ -849,7 +864,7 @@ body,
 .reminder-check {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   font-size: 13px;
   color: var(--ink-soft);
   cursor: pointer;
@@ -862,21 +877,23 @@ body,
 }
 
 .reminder-paused-badge {
-  padding: 3px 10px;
+  padding: 4px 10px;
   background: var(--surface-2);
   border: 2px solid var(--accent);
   color: var(--accent-ink);
   font-size: 12px;
+  white-space: nowrap;
 }
 
 /* v2 M2：todo 派生行「已停用（插件关闭）」徽标（可见但惰性，TC-UI-07-3） */
 .reminder-plugin-off {
   flex: none;
-  padding: 1px 6px;
+  padding: 2px 8px;
   font-size: 11px;
   background: var(--surface-2);
   border: 1px solid var(--line);
   color: var(--ink-faint);
+  white-space: nowrap;
 }
 
 .reminder-list {
@@ -885,11 +902,12 @@ body,
   padding: 0;
 }
 
+/* 列表行：10px 8px 行距节奏 + 中线对齐（label 弹性吸收宽度波动） */
 .reminder-item {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 6px;
+  gap: 10px 12px;
+  padding: 10px 8px;
   border-bottom: 1px dashed var(--line);
   font-size: 13px;
 }
@@ -899,12 +917,15 @@ body,
 }
 
 .reminder-kind {
-  min-width: 64px;
+  flex: none;
+  min-width: 76px;
   color: var(--ink-soft);
+  white-space: nowrap;
 }
 
 .reminder-label {
   flex: 1;
+  min-width: 120px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -921,12 +942,16 @@ body,
 
 .reminder-actions {
   display: inline-flex;
-  gap: 6px;
+  gap: 8px;
+  margin-left: auto;
+  flex: none;
 }
 
+/* 行内小按钮：28px 高（5px 12px + 12px 字），统一三页操作组规格 */
 .reminder-actions .seg,
 .reminder-templates .seg {
-  padding: 4px 10px;
+  padding: 5px 12px;
+  min-height: 28px;
   border: 2px solid var(--line);
   background: var(--surface);
   font-size: 12px;
@@ -946,7 +971,7 @@ body,
 .reminder-form {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
 }
 
 .reminder-templates {
@@ -959,13 +984,13 @@ body,
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
-  gap: 12px;
+  gap: 12px 16px;
 }
 
 .reminder-form-row label {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
   font-size: 12px;
   color: var(--ink-soft);
 }
@@ -975,17 +1000,23 @@ body,
   min-width: 240px;
 }
 
+/* 行内 checkbox：与 32px 输入框底缘对齐（表单行 align-items: flex-end） */
 .reminder-form-row label.reminder-check {
   flex-direction: row;
   align-items: center;
-  padding-bottom: 6px;
+  gap: 8px;
+  padding-bottom: 7px;
+  white-space: nowrap;
 }
 
+/* 输入类控件统一 32px 高（控件规格基线） */
 .reminder-form input[type="text"],
 .reminder-form input[type="number"],
 .reminder-form input[type="time"],
+.reminder-form input[type="date"],
 .reminder-form select {
-  padding: 6px 8px;
+  padding: 5px 10px;
+  min-height: 32px;
   border: 2px solid var(--line);
   border-radius: 2px;
   font-size: 13px;
@@ -1000,10 +1031,11 @@ body,
 .reminder-hint {
   margin: 0;
   font-size: 12px;
+  line-height: 1.7;
   color: var(--accent-ink);
   background: var(--surface-2);
   border: 1px dashed var(--line);
-  padding: 6px 10px;
+  padding: 8px 12px;
 }
 
 .reminder-form-error {
@@ -1017,10 +1049,19 @@ body,
   gap: 8px;
 }
 
+/* 主按钮：32px 与输入框齐高（视觉权重对齐表单） */
+.reminder-form-actions .seg,
+.reminder-form-actions .primary {
+  min-height: 32px;
+  padding: 5px 16px;
+  font-size: 13px;
+}
+
 .reminder-form-actions .primary {
   background: var(--ink);
   color: var(--bg);
-  border-color: var(--ink);
+  border: 2px solid var(--ink);
+  cursor: pointer;
 }
 
 .reminder-stats {
@@ -1033,8 +1074,8 @@ body,
 .reminder-stats li {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 4px 0;
+  gap: 16px;
+  padding: 8px 4px;
   border-bottom: 1px dashed var(--line);
 }
 
@@ -1052,10 +1093,11 @@ body,
 /* ---- M7 Todo 插件 ---- */
 .todo-plugin-meta {
   font-size: 12px;
+  line-height: 1.7;
   color: var(--ink-faint);
-  padding: 4px 2px 10px;
+  padding: 2px 2px 12px;
   border-bottom: 1px dashed var(--line);
-  margin-bottom: 8px;
+  margin-bottom: 14px;
 }
 
 .todo-list {
@@ -1064,11 +1106,12 @@ body,
   padding: 0;
 }
 
+/* 列表行与提醒页同节奏（10px 8px）；操作组贴右 */
 .todo-item {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 6px;
+  gap: 12px;
+  padding: 10px 8px;
   border-bottom: 1px dashed var(--line);
   font-size: 13px;
 }
@@ -1082,17 +1125,12 @@ body,
   opacity: 0.7;
 }
 
-.todo-check input {
-  width: 16px;
-  height: 16px;
-}
-
 .todo-main {
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 4px;
 }
 
 .todo-title {
@@ -1114,16 +1152,18 @@ body,
 .todo-meta {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 4px 12px;
   color: var(--ink-faint);
   font-size: 12px;
   flex-wrap: wrap;
 }
 
 .todo-priority {
-  padding: 1px 6px;
+  padding: 2px 8px;
+  font-size: 11px;
   background: var(--surface-2);
   color: var(--ink-soft);
+  white-space: nowrap;
 }
 
 .todo-priority.p2 {
@@ -1139,7 +1179,7 @@ body,
 
 .todo-tags code {
   margin-right: 4px;
-  padding: 1px 5px;
+  padding: 2px 6px;
   background: var(--surface-2);
   border: 1px solid var(--line);
   color: var(--ink-soft);
@@ -1149,11 +1189,15 @@ body,
 
 .todo-actions {
   display: inline-flex;
-  gap: 6px;
+  gap: 8px;
+  margin-left: auto;
+  flex: none;
 }
 
+/* 行内小按钮：28px 高（与提醒页操作组同规格） */
 .todo-actions .seg {
-  padding: 4px 10px;
+  padding: 5px 12px;
+  min-height: 28px;
   border: 2px solid var(--line);
   background: var(--surface);
   font-size: 12px;
