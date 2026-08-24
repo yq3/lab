@@ -495,6 +495,7 @@ select {
 
 .intg-row-head {
   display: flex;
+  flex-wrap: wrap; /* R1-supplement-4：spinner + 双按钮 + 长路径态的收敛保护 */
   align-items: center;
   gap: 10px;
 }
@@ -949,9 +950,13 @@ select {
   padding: 0;
 }
 
-/* 列表行：10px 8px 行距节奏 + 中线对齐（label 弹性吸收宽度波动） */
+/* 列表行：10px 8px 行距节奏 + 中线对齐（label 弹性吸收宽度波动）。
+ * R1-supplement-4：wrap 允许——固定内容（kind/meta/checkbox/操作组）总宽
+ * 逼近容器时（实测 ~818/824px），操作组整组折行到第二行右贴（margin-left:
+ * auto 在折行后仍生效），信息零丢失、规格零缩小；空间充足时仍单行。 */
 .reminder-item {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px 12px;
   padding: 10px 8px;
@@ -1143,11 +1148,13 @@ select {
   padding: 0;
 }
 
-/* 列表行与提醒页同节奏（10px 8px）；操作组贴右 */
+/* 列表行与提醒页同节奏（10px 8px）；操作组贴右；wrap 同 reminder-item
+ * （R1-supplement-4：四按钮操作组在窄内容下整组折行，不溢出）。 */
 .todo-item {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 12px;
+  gap: 10px 12px;
   padding: 10px 8px;
   border-bottom: 1px dashed var(--line);
   font-size: 13px;
