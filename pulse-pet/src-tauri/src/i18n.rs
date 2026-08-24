@@ -179,6 +179,72 @@ impl Lang {
             Lang::En => "both spritesheet.webp / .png missing",
         }
     }
+
+    // ---- v2 M1 接入管理 doctor 文案（V2-DESIGN §1.7/§1.8；组装在 integrations.rs）----
+
+    pub fn intg_installed(&self) -> String {
+        match self {
+            Lang::Zh => format!("已安装 · v{}", env!("CARGO_PKG_VERSION")),
+            Lang::En => format!("Installed · v{}", env!("CARGO_PKG_VERSION")),
+        }
+    }
+
+    pub fn intg_not_installed(&self) -> &'static str {
+        match self {
+            Lang::Zh => "未安装",
+            Lang::En => "Not installed",
+        }
+    }
+
+    pub fn intg_stale(&self) -> &'static str {
+        match self {
+            Lang::Zh => "需更新（一键重装修复）",
+            Lang::En => "Needs update (reinstall to fix)",
+        }
+    }
+
+    pub fn intg_error(&self, reason: &str) -> String {
+        match self {
+            Lang::Zh => format!("检测失败：{reason}"),
+            Lang::En => format!("Check failed: {reason}"),
+        }
+    }
+
+    pub fn intg_node_ready(&self) -> &'static str {
+        match self {
+            Lang::Zh => "node 已就绪",
+            Lang::En => "node ready",
+        }
+    }
+
+    pub fn intg_node_missing(&self) -> &'static str {
+        match self {
+            Lang::Zh => "未检测到 node（CC 接入需要）",
+            Lang::En => "node not found (required for claude-code)",
+        }
+    }
+
+    pub fn intg_last_event(&self) -> &'static str {
+        match self {
+            Lang::Zh => "事件正常",
+            Lang::En => "Receiving events",
+        }
+    }
+
+    pub fn intg_no_event(&self) -> &'static str {
+        match self {
+            Lang::Zh => "最近无事件",
+            Lang::En => "No recent events",
+        }
+    }
+
+    /// 卸载后建议新开 CC 会话（§1.4.4：Windows 字面路径无逐事件自愈，TC-INT-07-5）。
+    pub fn intg_uninstall_hint(&self) -> &'static str {
+        match self {
+            Lang::Zh => "已卸载；如 CC 会话仍在运行，建议新开会话使其生效",
+            Lang::En => "Uninstalled; restart your CC session for this to take effect",
+        }
+    }
 }
 
 /// setup 时恢复持久化语言（无值 / 非法值保持默认 zh，由前端按系统语言接管）。
@@ -291,5 +357,26 @@ mod tests {
         restore_from_db(&conn);
         assert_eq!(current(), Lang::En);
         set(Lang::Zh); // 恢复默认
+    }
+
+    #[test]
+    fn integration_texts_bilingual() {
+        // v2 M1：doctor 文案 zh/en 均非空且互不相同（防粘贴错语言）
+        for (zh, en) in [
+            (Lang::Zh.intg_not_installed(), Lang::En.intg_not_installed()),
+            (Lang::Zh.intg_stale(), Lang::En.intg_stale()),
+            (Lang::Zh.intg_node_ready(), Lang::En.intg_node_ready()),
+            (Lang::Zh.intg_node_missing(), Lang::En.intg_node_missing()),
+            (Lang::Zh.intg_last_event(), Lang::En.intg_last_event()),
+            (Lang::Zh.intg_no_event(), Lang::En.intg_no_event()),
+            (Lang::Zh.intg_uninstall_hint(), Lang::En.intg_uninstall_hint()),
+        ] {
+            assert!(!zh.is_empty() && !en.is_empty());
+            assert_ne!(zh, en);
+        }
+        assert!(Lang::Zh.intg_installed().contains("已安装"));
+        assert!(Lang::En.intg_installed().contains("Installed"));
+        assert!(Lang::Zh.intg_error("boom").contains("boom"));
+        assert!(Lang::En.intg_error("boom").starts_with("Check failed"));
     }
 }

@@ -24,7 +24,9 @@ tauri-plugin-global-shortcut = "2"
 rusqlite = { version = "0.40", features = ["bundled"] }
 tiny_http = "0.12"
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# v2 M1（V2-DESIGN §1.4.1）：preserve_order——settings.json 结构化改写保键序
+# （用户 env 等键顺序不被重排，对齐四家「stringify 重写」做法）。
+serde_json = { version = "1", features = ["preserve_order"] }
 rand = "0.8"
 # M4：调度器 interval + MissedTickBehavior（tokio 已在依赖图中，仅显式引 time feature）
 tokio = { version = "1", features = ["time"] }

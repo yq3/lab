@@ -7,6 +7,15 @@ import {
 } from "../lib/atlas";
 import { isTauriRuntime } from "../lib/token-stats";
 import { setPassThrough, PANEL_TAB_EVENT, normalizeTab } from "../lib/interaction";
+import {
+  fetchIntegrations,
+  installIntegration,
+  uninstallIntegration,
+  uiStateOf,
+  type IntegrationId,
+  type IntegrationStatus,
+  type IntegrationUiState,
+} from "../lib/integrations";
 import { usePetStore } from "../pet/petStore";
 import { changeLanguage, t, useLangStore, type Lang } from "../lib/i18n";
 
@@ -35,6 +44,14 @@ function sourceLabel(source: string): string {
   return source;
 }
 
+/** v2 M1 接入管理：状态点四态 → 文案键（§1.7/§1.8）。 */
+const INTG_STATE_KEYS: Record<IntegrationUiState, string> = {
+  installed: "integrations.installed",
+  notInstalled: "integrations.notInstalled",
+  stale: "integrations.stale",
+  error: "integrations.error",
+};
+
 export default function Settings() {
   const [options, setOptions] = useState<PetOption[] | null>(null);
   const [current, setCurrent] = useState<AtlasMeta | null>(null);
@@ -44,6 +61,10 @@ export default function Settings() {
   /** M6 P2 ②（M7 清偿）：穿透失败单独持有——成功时只清它，不动 atlas 错误横幅。 */
   const [passThroughError, setPassThroughError] = useState<string | null>(null);
   const [langBusy, setLangBusy] = useState(false);
+  /** v2 M1 接入管理：doctor 快照 + 操作中的接入 id + 每接入操作错误。 */
+  const [intg, setIntg] = useState<IntegrationStatus[] | null>(null);
+  const [intgBusy, setIntgBusy] = useState<IntegrationId | null>(null);
+  const [intgErrors, setIntgErrors] = useState<Record<string, string>>({});
   const passThrough = usePetStore((s) => s.passThrough);
   const lang = useLangStore((s) => s.lang); // M8 i18n：语言变化时本页文案重渲染
 
@@ -65,9 +86,31 @@ export default function Settings() {
     }
   }, []);
 
+  /** v2 M1 接入管理刷新（§1.7：进入设置页 + tauri://focus 双触发，doctor
+   * message 组装在 Rust 侧随语言变化，故切语言后同样重拉）。 */
+  const loadIntegrations = useCallback(async () => {
+    if (!isTauriRuntime()) return;
+    try {
+      const list = await fetchIntegrations();
+      setIntg(list);
+    } catch (e) {
+      // doctor 拉取失败：保持已有快照，行级错误提示
+      setIntgErrors((prev) => ({
+        ...prev,
+        __load: e instanceof Error ? e.message : String(e),
+      }));
+    }
+  }, []);
+
   useEffect(() => {
     void load();
   }, [load]);
+
+  // 接入管理刷新：挂载 + 语言切换（doctor message 在 Rust 侧随语言组装）。
+  // focus/tab 双触发见下方自动刷新 effect（与 load 同一触发源）。
+  useEffect(() => {
+    void loadIntegrations();
+  }, [loadIntegrations, lang]);
 
   /**
    * v0.1.3 四-1（TC-APP-14）：宠物下拉自动刷新。面板窗口为隐藏/显示复用，
@@ -86,13 +129,17 @@ export default function Settings() {
         const { getCurrentWindow } = await import("@tauri-apps/api/window");
         unlisteners.push(
           await getCurrentWindow().onFocusChanged(({ payload: focused }) => {
-            if (focused) void load();
+            if (focused) {
+              void load();
+              void loadIntegrations();
+            }
           }),
         );
         unlisteners.push(
           await listen(PANEL_TAB_EVENT, (event) => {
             if (normalizeTab((event.payload as { tab?: unknown })?.tab) === "settings") {
               void load();
+              void loadIntegrations();
             }
           }),
         );
@@ -101,7 +148,7 @@ export default function Settings() {
       }
     })();
     return () => unlisteners.forEach((u) => u());
-  }, [load]);
+  }, [load, loadIntegrations]);
 
   const onSwitch = async (value: string) => {
     setSwitching(true);
@@ -149,6 +196,27 @@ export default function Settings() {
       setError(t("settings.languageFail", { msg: e instanceof Error ? e.message : String(e) }));
     } finally {
       setLangBusy(false);
+    }
+  };
+
+  /** v2 M1 接入管理动作（安装/重装/卸载）：完成后刷新 doctor；失败行级提示。 */
+  const onIntegrationAction = async (id: IntegrationId, action: "install" | "uninstall") => {
+    setIntgBusy(id);
+    try {
+      await (action === "install" ? installIntegration(id) : uninstallIntegration(id));
+      setIntgErrors((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+    } catch (e) {
+      setIntgErrors((prev) => ({
+        ...prev,
+        [id]: t("integrations.fail", { msg: e instanceof Error ? e.message : String(e) }),
+      }));
+    } finally {
+      setIntgBusy(null);
+      await loadIntegrations();
     }
   };
 
@@ -247,6 +315,50 @@ export default function Settings() {
         <option value="zh">{t("settings.languageZh")}</option>
         <option value="en">{t("settings.languageEn")}</option>
       </select>
+
+      {/* v2 M1：接入管理（V2-DESIGN §1.7，TC-INT-09） */}
+      <h2>{t("integrations.title")}</h2>
+      {intgErrors.__load && <p className="settings-error">⚠️ {intgErrors.__load}</p>}
+      <div className="intg-list">
+        {(intg ?? []).map((s) => {
+          const ui = uiStateOf(s);
+          const busy = intgBusy === s.id;
+          const nameKey = s.id === "opencode" ? "integrations.opencodeDesc" : "integrations.claudeDesc";
+          return (
+            <div className="intg-row" key={s.id}>
+              <div className="intg-row-head">
+                <span className={ui === "notInstalled" ? "intg-dot" : `intg-dot intg-dot-${ui}`} />
+                <span className="intg-name">{t(nameKey)}</span>
+                <span className="intg-state-label">
+                  {t(INTG_STATE_KEYS[ui])} · v{s.version}
+                </span>
+                <span className="intg-row-actions">
+                  {busy && <span className="intg-spinner" aria-label={t("integrations.installing")} />}
+                  {ui === "notInstalled" && (
+                    <button disabled={busy || !isTauriRuntime()} onClick={() => void onIntegrationAction(s.id as IntegrationId, "install")}>
+                      {t("integrations.install")}
+                    </button>
+                  )}
+                  {(ui === "stale" || ui === "error") && (
+                    <button disabled={busy || !isTauriRuntime()} onClick={() => void onIntegrationAction(s.id as IntegrationId, "install")}>
+                      {t("integrations.reinstall")}
+                    </button>
+                  )}
+                  {(ui === "installed" || ui === "stale") && (
+                    <button disabled={busy || !isTauriRuntime()} onClick={() => void onIntegrationAction(s.id as IntegrationId, "uninstall")}>
+                      {t("integrations.uninstall")}
+                    </button>
+                  )}
+                </span>
+              </div>
+              <p className="intg-path">{s.configPath}</p>
+              <p className="intg-message">{s.message}</p>
+              {intgErrors[s.id] && <p className="intg-row-error">⚠️ {intgErrors[s.id]}</p>}
+              <p className="intg-note">{t("integrations.backupNote")}</p>
+            </div>
+          );
+        })}
+      </div>
     </section>
   );
 }
