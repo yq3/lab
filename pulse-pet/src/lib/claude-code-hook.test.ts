@@ -1,5 +1,11 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  cpSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readFileSync } from "node:fs";
@@ -277,5 +283,36 @@ describe("TC-INT-02：CC hook 行为契约（零阻塞）", () => {
     const msg = `ENOENT: no such file ${home}/.pulsepet/runtime/endpoint`;
     expect(sanitizeMessage(msg, home)).not.toContain(home);
     expect(sanitizeMessage(msg, home)).toContain("~/.pulsepet/runtime/endpoint");
+  });
+
+  it("CLI 入口判定用 realpath（/tmp symlink 目录下主流程不被静默跳过）", async () => {
+    // 2026-08-24 修复回归钉子：macOS /tmp 是 /private/tmp 的 symlink，字面
+    // pathToFileURL(argv[1]) 与 node realpath 后的 import.meta.url 不等 →
+    // isMain false → 主流程空跑（exit 0 假阳性）。经子进程真实执行验证。
+    const { spawnSync } = await import("node:child_process");
+    const tmp = mkdtempSync(join(tmpdir(), "pulsepet-ismain-"));
+    try {
+      // 人为构造一层 symlink 指向真实目录，模拟 /tmp → /private/tmp 场景
+      mkdirSync(join(tmp, "real"), { recursive: true });
+      const link = join(tmp, "link");
+      const { symlinkSync } = await import("node:fs");
+      symlinkSync(join(tmp, "real"), link);
+      cpSync(new URL("../../opencode-plugin/claude-code-hook.js", import.meta.url).pathname, join(link, "claude-code-hook.js"));
+      writeFileSync(join(link, "package.json"), '{"type":"module"}');
+      const res = spawnSync(
+        process.execPath,
+        [join(link, "claude-code-hook.js")],
+        {
+          input: '{"hook_event_name":"Stop","session_id":"smoke"}',
+          env: { ...process.env, PULSEPET_HOOK_DEBUG: "1", HOME: join(tmp, "nohome") },
+        },
+      );
+      expect(res.status).toBe(0);
+      // 主流程真的执行过（经 symlink 路径调用仍进入 isMain 分支；
+      // debugLog 走 stderr）
+      expect(res.stderr.toString()).toContain("outcome:");
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
   });
 });

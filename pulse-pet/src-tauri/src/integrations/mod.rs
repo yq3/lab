@@ -412,26 +412,56 @@ fn read_settings_object(settings: &Path) -> Result<Option<serde_json::Value>, St
 
 /// 安装 claude-code 接入（§1.4.3：移除全部特征条目 → 逐事件追加 canonical →
 /// 序列化写回；用户条目永不触碰）。路径注入，测试用 tempdir。
+/// 每步动作与结果落 plog!（排障口径：日志末行 = 死前最后完成步骤）。
 pub fn install_cc(settings: &Path, hooks_dir: &Path) -> Result<(), String> {
-    assert_not_symlink(settings)?;
+    plog!(
+        "[pulsepet] integrations cc install: begin (settings={}, exists={}, hooks_dir={})",
+        settings.display(),
+        settings.is_file(),
+        hooks_dir.display()
+    );
+    let existed = settings.is_file();
+    assert_not_symlink(settings).inspect_err(|e| {
+        plog!("[pulsepet] integrations cc install: refuse symlink: {e}");
+    })?;
     // 解析失败/结构非法 → 报 error 不落笔
-    let mut root = read_settings_object(settings)?.unwrap_or_else(|| serde_json::json!({}));
+    let mut root = match read_settings_object(settings) {
+        Ok(v) => v,
+        Err(e) => {
+            plog!("[pulsepet] integrations cc install: settings unusable, abort (no write): {e}");
+            return Err(e);
+        }
+    };
+    if !existed {
+        plog!("[pulsepet] integrations cc install: settings missing → creating fresh {{}}");
+    }
+    let mut root = root.unwrap_or_else(|| serde_json::json!({}));
     {
         let obj = root
             .as_object_mut()
             .ok_or_else(|| "顶层不是对象".to_string())?;
         if let Some(h) = obj.get("hooks") {
             if !h.is_object() {
-                return Err("hooks 不是对象".to_string());
+                let e = "hooks 不是对象".to_string();
+                plog!("[pulsepet] integrations cc install: {e}, abort (no write)");
+                return Err(e);
             }
         }
         // 1) 移除全部特征条目（所有事件键，含 matcher 组内递归——升级即重装）
+        let mut removed_total = 0usize;
         if let Some(hooks) = obj.get_mut("hooks").and_then(|h| h.as_object_mut()) {
-            for (_k, v) in hooks.iter_mut() {
+            for (k, v) in hooks.iter_mut() {
                 if let Some(arr) = v.as_array_mut() {
-                    remove_feature_entries(arr);
+                    let n = remove_feature_entries(arr);
+                    if n > 0 {
+                        plog!("[pulsepet] integrations cc install: removed {n} feature entr{y} under hooks.{k}", y = if n > 1 { "ies" } else { "y" });
+                    }
+                    removed_total += n;
                 }
             }
+        }
+        if removed_total == 0 {
+            plog!("[pulsepet] integrations cc install: no existing feature entries (fresh install)");
         }
         // 2) 逐事件追加 canonical 条目（事件数组缺失则建；非数组 → 不落笔）
         let entry = canonical_cc_entry(cfg!(windows), hooks_dir);
@@ -444,29 +474,65 @@ pub fn install_cc(settings: &Path, hooks_dir: &Path) -> Result<(), String> {
         let hooks_obj = hooks
             .as_object_mut()
             .ok_or_else(|| "hooks 不是对象".to_string())?;
+        let mut created_keys = 0usize;
         for ev in CC_EVENTS {
             let arr = hooks_obj
                 .entry(ev)
-                .or_insert_with(|| serde_json::json!([]));
-            let arr = arr
-                .as_array_mut()
-                .ok_or_else(|| format!("hooks.{ev} 不是数组"))?;
+                .or_insert_with(|| {
+                    created_keys += 1;
+                    serde_json::json!([])
+                });
+            let arr = match arr.as_array_mut() {
+                Some(a) => a,
+                None => {
+                    let e = format!("hooks.{ev} 不是数组");
+                    plog!("[pulsepet] integrations cc install: {e}, abort (no write)");
+                    return Err(e);
+                }
+            };
             arr.push(entry.clone());
         }
+        plog!(
+            "[pulsepet] integrations cc install: appended canonical entries for {} events ({} event keys created)",
+            CC_EVENTS.len(),
+            created_keys
+        );
     }
     // 3) 脚本先行（settings 写失败时至多遗留无害脚本文件，doctor 钉住重装修复）
-    write_cc_hook_files(hooks_dir)?;
+    write_cc_hook_files(hooks_dir).inspect_err(|e| {
+        plog!("[pulsepet] integrations cc install: write hook files failed: {e}");
+    })?;
+    plog!(
+        "[pulsepet] integrations cc install: hook script written ({} bytes, matches bundled)",
+        BUNDLED_CC_HOOK.len()
+    );
     // 4) 备份 + 原子写（serde_json preserve_order：用户 env 等键序不变）
     let out = format!("{}\n", serde_json::to_string_pretty(&root).map_err(|e| e.to_string())?);
-    backup_file(settings)?;
-    atomic_write(settings, &out)?;
+    backup_file(settings).inspect_err(|e| {
+        plog!("[pulsepet] integrations cc install: backup failed: {e}");
+    })?;
+    atomic_write(settings, &out).inspect_err(|e| {
+        plog!("[pulsepet] integrations cc install: atomic write failed: {e}");
+    })?;
+    plog!(
+        "[pulsepet] integrations cc install: done ({} bytes → {}, backup kept: 1)",
+        out.len(),
+        settings.display()
+    );
     Ok(())
 }
 
 /// 卸载 claude-code 接入：移除全部特征条目（递归进 matcher 组）→ 事件数组空则
 /// 删事件键 → hooks 空则删 hooks 键；删除 hook 脚本；二次卸载 no-op。
 pub fn uninstall_cc(settings: &Path, hooks_dir: &Path) -> Result<(), String> {
-    assert_not_symlink(settings)?;
+    plog!(
+        "[pulsepet] integrations cc uninstall: begin (settings={}, exists={})",
+        settings.display(),
+        settings.is_file()
+    );
+    assert_not_symlink(settings).inspect_err(|e| {
+        plog!("[pulsepet] integrations cc uninstall: refuse symlink: {e}");
+    })?;
     if let Some(mut root) = read_settings_object(settings)? {
         let mut changed = false;
         {
@@ -475,31 +541,46 @@ pub fn uninstall_cc(settings: &Path, hooks_dir: &Path) -> Result<(), String> {
                 .ok_or_else(|| "顶层不是对象".to_string())?;
             if let Some(hooks) = obj.get_mut("hooks").and_then(|h| h.as_object_mut()) {
                 let mut empty_keys: Vec<String> = Vec::new();
+                let mut removed_total = 0usize;
                 for (k, v) in hooks.iter_mut() {
                     if let Some(arr) = v.as_array_mut() {
                         let removed = remove_feature_entries(arr);
                         if removed > 0 {
+                            plog!("[pulsepet] integrations cc uninstall: removed {removed} feature entries under hooks.{k}");
                             changed = true;
+                            removed_total += removed;
                             if arr.is_empty() {
                                 empty_keys.push(k.clone());
                             }
                         }
                     }
                 }
+                if removed_total == 0 {
+                    plog!("[pulsepet] integrations cc uninstall: no feature entries in settings (config already clean)");
+                }
                 for k in &empty_keys {
                     hooks.remove(k);
+                    plog!("[pulsepet] integrations cc uninstall: removed empty event key hooks.{k}");
                 }
                 if changed && hooks.is_empty() {
                     obj.remove("hooks");
+                    plog!("[pulsepet] integrations cc uninstall: hooks object empty → removed hooks key");
                 }
             }
         }
         if changed {
             let out =
                 format!("{}\n", serde_json::to_string_pretty(&root).map_err(|e| e.to_string())?);
-            backup_file(settings)?;
-            atomic_write(settings, &out)?;
+            backup_file(settings).inspect_err(|e| {
+                plog!("[pulsepet] integrations cc uninstall: backup failed: {e}");
+            })?;
+            atomic_write(settings, &out).inspect_err(|e| {
+                plog!("[pulsepet] integrations cc uninstall: atomic write failed: {e}");
+            })?;
+            plog!("[pulsepet] integrations cc uninstall: settings rewritten ({} bytes)", out.len());
         }
+    } else {
+        plog!("[pulsepet] integrations cc uninstall: settings missing → skip config rewrite");
     }
     // 删除脚本 + 我们落的 package.json（内容校验，用户手改过则保留）
     let _ = std::fs::remove_file(hooks_dir.join("claude-code-hook.js"));
@@ -509,6 +590,10 @@ pub fn uninstall_cc(settings: &Path, hooks_dir: &Path) -> Result<(), String> {
             let _ = std::fs::remove_file(&pkg);
         }
     }
+    plog!(
+        "[pulsepet] integrations cc uninstall: done (hook file removed: {})",
+        !hooks_dir.join("claude-code-hook.js").exists()
+    );
     Ok(())
 }
 
@@ -732,7 +817,18 @@ fn detect_node() -> bool {
         .unwrap_or(false)
 }
 
+/// 状态名（日志用；与 ConfigState 三态对应）。
+fn state_name(s: ConfigState) -> &'static str {
+    match s {
+        ConfigState::NotInstalled => "not-installed",
+        ConfigState::Installed => "installed",
+        ConfigState::Stale => "stale",
+    }
+}
+
 /// 真实环境探测 + 组装（阻塞 I/O：调用方须在 spawn_blocking 内）。
+/// 关键探测结论落 plog!（configPath 存在性 / 三态判定 / node 探测耗时 /
+/// hookFile 对账）——doctor 是排障第一入口。
 fn status_for(id: &str, activity_last: Option<u64>, lang: Lang) -> IntegrationStatus {
     let now_ms = epoch_ms(SystemTime::now());
     let version = env!("CARGO_PKG_VERSION").to_string();
@@ -741,6 +837,7 @@ fn status_for(id: &str, activity_last: Option<u64>, lang: Lang) -> IntegrationSt
         let (state, cfg) = match opencode_config_state(&dir) {
             Ok(x) => x,
             Err(e) => {
+                plog!("[pulsepet] integrations status opencode: probe failed: {e}");
                 return IntegrationStatus {
                     id: id.to_string(),
                     installed: false,
@@ -761,6 +858,7 @@ fn status_for(id: &str, activity_last: Option<u64>, lang: Lang) -> IntegrationSt
         let hook = match hook_file_status(&opencode_plugin_file(&dir), BUNDLED_OPENCODE_HOOK) {
             Ok(h) => h,
             Err(e) => {
+                plog!("[pulsepet] integrations status opencode: hook file probe failed: {e}");
                 return IntegrationStatus {
                     id: id.to_string(),
                     installed: false,
@@ -778,6 +876,15 @@ fn status_for(id: &str, activity_last: Option<u64>, lang: Lang) -> IntegrationSt
                 };
             }
         };
+        plog!(
+            "[pulsepet] integrations status opencode: cfg={} (exists={}) marker={} plugin file (exists={}, matches_bundled={}) → {}",
+            cfg.display(),
+            cfg.is_file(),
+            state != ConfigState::NotInstalled,
+            hook.exists,
+            hook.matches_bundled,
+            state_name(state)
+        );
         let mut st = build_status(
             id,
             StatusInputs {
@@ -795,13 +902,25 @@ fn status_for(id: &str, activity_last: Option<u64>, lang: Lang) -> IntegrationSt
         let settings = claude_settings_path();
         let hooks_dir = cc_hooks_dir();
         let canonical = canonical_cc_command(cfg!(windows), &hooks_dir);
-        let (state, hook, node) = (
+        let node_probe_start = std::time::Instant::now();
+        let node = detect_node();
+        let node_probe_ms = node_probe_start.elapsed().as_millis();
+        let (state, hook) = (
             cc_config_state(&settings, &canonical),
             hook_file_status(&hooks_dir.join("claude-code-hook.js"), BUNDLED_CC_HOOK),
-            detect_node(),
         );
         match (state, hook) {
             (Ok(state), Ok(hook)) => {
+                plog!(
+                    "[pulsepet] integrations status claude-code: settings={} (exists={}) → {} · hook file (exists={}, matches_bundled={}) · node={} (probe {}ms)",
+                    settings.display(),
+                    settings.is_file(),
+                    state_name(state),
+                    hook.exists,
+                    hook.matches_bundled,
+                    node,
+                    node_probe_ms
+                );
                 let mut st = build_status(
                     id,
                     StatusInputs {
@@ -816,21 +935,28 @@ fn status_for(id: &str, activity_last: Option<u64>, lang: Lang) -> IntegrationSt
                 st.config_path = settings.display().to_string();
                 st
             }
-            (Err(e), _) | (_, Err(e)) => IntegrationStatus {
-                id: id.to_string(),
-                installed: false,
-                stale: false,
-                version,
-                config_path: settings.display().to_string(),
-                hook_file: HookFileStatus {
-                    exists: false,
-                    matches_bundled: false,
-                },
-                node_available: Some(node),
-                last_event_at: activity_last,
-                message: lang.intg_error(&e),
-                error: Some(e),
-            },
+            (Err(e), _) | (_, Err(e)) => {
+                plog!(
+                    "[pulsepet] integrations status claude-code: probe failed: {e} · node={} (probe {}ms)",
+                    node,
+                    node_probe_ms
+                );
+                IntegrationStatus {
+                    id: id.to_string(),
+                    installed: false,
+                    stale: false,
+                    version,
+                    config_path: settings.display().to_string(),
+                    hook_file: HookFileStatus {
+                        exists: false,
+                        matches_bundled: false,
+                    },
+                    node_available: Some(node),
+                    last_event_at: activity_last,
+                    message: lang.intg_error(&e),
+                    error: Some(e),
+                }
+            }
         }
     }
 }

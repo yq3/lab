@@ -428,6 +428,13 @@ fn handle_incoming(
         max_body,
     ) {
         HandleOutcome::Respond { status, body } => {
+            // 拒绝类必记（v2 M1：agent 白名单 400 等；错误串含原因与非法值，
+            // 如 "invalid agent: claude"）。正常 200 事件路径不逐条打日志
+            //（高频，防冲刷 1MB 轮转日志）；401/429 属客户端异常行为也记，
+            // 便于发现误配插件/扫描。
+            if status == 400 || status == 401 || status == 413 {
+                plog!("[pulsepet] {method} {path} rejected ({status}): {body}");
+            }
             let _ = request.respond(json_response(status, &body));
         }
         HandleOutcome::State(ev) => {
@@ -436,10 +443,20 @@ fn handle_incoming(
                 let mut st = state.lock().unwrap_or_else(|p| p.into_inner());
                 st.apply_event(&ev.agent, &ev.session_id, ev.kind, Instant::now());
             }
-            // AgentActivity 更新 per-agent 最近事件时刻（lastEventAt 数据源，P2-3）
-            {
+            // AgentActivity 更新 per-agent 最近事件时刻（lastEventAt 数据源，P2-3）；
+            // 首次见到新 agent 记一条（一次性事件，排障时确认接入打通的第一信号）
+            let first_seen_agent = {
                 let mut act = activity.lock().unwrap_or_else(|p| p.into_inner());
+                let first = !act.contains_key(&ev.agent);
                 act.insert(ev.agent.clone(), SystemTime::now());
+                first
+            };
+            if first_seen_agent {
+                plog!(
+                    "[pulsepet] first event from agent '{}' (session {}), activity tracking started",
+                    ev.agent,
+                    ev.session_id
+                );
             }
             // M3 token 汇报（TC-TK-10/11/12）：idle 时先让 hook（按 agent 分流，
             // TC-INT-11）查库并可能注入 success 状态，再统一 notify——前端只收到

@@ -20,7 +20,7 @@
 // ~/.pulsepet/hooks/ 时会同时落一份 {"type":"module"} 的 package.json，使
 // `node claude-code-hook.js` 以 ESM 加载。
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { pathToFileURL } from "node:url";
@@ -146,6 +146,10 @@ function readRuntimeFile(dir, name) {
  * 返回结果码（测试断言用；运行时只写 debug 日志）：
  * dropped:oversize | skipped:killswitch | dropped:parse | dropped:classify |
  * dropped:session | skipped:no-endpoint | posted | post-failed
+ *
+ * debug 覆盖（PULSEPET_HOOK_DEBUG=1，文案经 sanitizeMessage 净化路径）：
+ * 每个决策点（拒收/跳过/丢弃原因、分类结果、POST 目标与状态码）各一条
+ * ——排障时 stderr 即完整决策链。
  */
 export async function processHookInput({
   input = "",
@@ -153,22 +157,49 @@ export async function processHookInput({
   dir = runtimeDir(),
 } = {}) {
   try {
-    if (isPayloadTooLarge(Buffer.byteLength(input))) return "dropped:oversize";
-    if (killswitchActive(dir)) return "skipped:killswitch";
+    if (isPayloadTooLarge(Buffer.byteLength(input))) {
+      debugLog(`drop: stdin ${Buffer.byteLength(input)} bytes > ${MAX_STDIN_BYTES} limit`);
+      return "dropped:oversize";
+    }
+    if (killswitchActive(dir)) {
+      debugLog("skip: killswitch file present (hooks-disabled)");
+      return "skipped:killswitch";
+    }
     let json;
     try {
       json = JSON.parse(input);
     } catch {
+      debugLog("drop: stdin is not valid JSON");
       return "dropped:parse";
     }
     const kind = classifyHookInput(json);
-    if (!kind) return "dropped:classify";
+    if (!kind) {
+      // json 可能为 null/原始值（JSON.parse("null") 等），安全取事件名
+      debugLog(`drop: event '${json?.hook_event_name ?? "(none)"}' not registered`);
+      return "dropped:classify";
+    }
     // §1.3.2：CC 侧全事件缺号丢弃（session_id 是 hook input 里唯一可靠会话标识，
     // 较 opencode 侧「仅流式心跳缺号丢弃」更严，不落 default）。
-    if (typeof json.session_id !== "string" || !json.session_id) return "dropped:session";
+    if (typeof json.session_id !== "string" || !json.session_id) {
+      debugLog(`drop: '${json.hook_event_name}' event missing session_id`);
+      return "dropped:session";
+    }
     const endpoint = readRuntimeFile(dir, "endpoint");
     const token = readRuntimeFile(dir, "update-token");
-    if (!endpoint || !token) return "skipped:no-endpoint"; // App 未运行：快速跳过
+    if (!endpoint || !token) {
+      // App 未运行：快速跳过（非错误）。记录哪个文件缺失便于区分
+      // 「App 退出」与「runtime 目录被清」。
+      const missing = !endpoint && !token
+        ? "endpoint + update-token"
+        : !endpoint
+          ? "endpoint"
+          : "update-token";
+      debugLog(`skip: runtime file(s) missing (${missing}) → app not running`);
+      return "skipped:no-endpoint";
+    }
+    debugLog(
+      `event ${json.hook_event_name} → kind=${kind} session=${json.session_id} → POST http://${endpoint}/state`,
+    );
     const res = await fetchImpl(`http://${endpoint}/state`, {
       method: "POST",
       headers: {
@@ -178,7 +209,10 @@ export async function processHookInput({
       body: JSON.stringify({ sessionId: json.session_id, kind, agent: "claude-code" }),
       signal: AbortSignal.timeout(POST_TIMEOUT_MS),
     });
-    if (res.status >= 400) return "post-failed";
+    if (res.status >= 400) {
+      debugLog(`post failed: http ${res.status}`);
+      return "post-failed";
+    }
     return "posted";
   } catch (err) {
     // catch-all：静默失败（debug 模式下净化路径后写 stderr）
@@ -188,6 +222,22 @@ export async function processHookInput({
 }
 
 // ---- CLI 入口（被 CC 的 shell 包装 exec 调起） ----
+//
+// isMain 判定用 realpath 后比对：macOS 上 /tmp 是 /private/tmp 的 symlink、
+// macOS/Windows 传参可能经别名目录——node 生成 import.meta.url 前会 resolve
+// 真实路径，字面 pathToFileURL(argv[1]) 与之不等 → 主流程被静默跳过
+//（2026-08-24 补日志时发现并修复；此前落点烟测的 exit=0 是空跑假阳性，
+// 行为逻辑由 vitest 直调 processHookInput 覆盖钉住）。
+function isMainModule() {
+  if (typeof process === "undefined" || process.argv[1] == null) return false;
+  try {
+    return import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href;
+  } catch {
+    return false;
+  }
+}
+
+const isMain = isMainModule();
 
 function readStdinCapped(maxBytes) {
   return new Promise((resolve) => {
@@ -213,11 +263,6 @@ function readStdinCapped(maxBytes) {
     process.stdin.on("error", finish);
   });
 }
-
-const isMain =
-  typeof process !== "undefined" &&
-  process.argv[1] != null &&
-  import.meta.url === pathToFileURL(process.argv[1]).href;
 
 if (isMain) {
   try {

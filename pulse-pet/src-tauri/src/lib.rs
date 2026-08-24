@@ -73,6 +73,9 @@ fn idle_hook_body(
 ) {
     // TC-INT-11：claude-code 的 idle 不触发任何 opencode.db 查询
     if agent != "opencode" {
+        // 分流决策记录（低频：每 CC 轮次结束一条；排障时区分「CC idle 被
+        // 正常分流跳过」与「事件没到达」）
+        plog!("[pulsepet] idle hook: skip token report (agent={agent}, opencode-only)");
         return;
     }
     let now = token_stats::now_ms();
