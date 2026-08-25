@@ -82,11 +82,15 @@ fn get_display_state(state: tauri::State<'_, Arc<Mutex<SessionStateMachine>>>) -
 /// 任一环节失败（无库/无记录/数字陈旧/全零）都静默跳过——不出气泡、不显示 0 或
 /// 陈旧数字（TC-TK-12）。
 ///
+/// v2 M3（V2-DESIGN §3.2）：气泡末尾追加「 · 今日 {format_tokens_k(total)}」——
+/// total = in + out + cache_read（reasoning 不计，与 token_stats_today 同口径）；
+/// 今日聚合失败（today=None）时静默省略追加段、本期文案照常（TC-M3-09-3）。
+///
 /// 查询与气泡下发以闭包注入（`idle_hook_body` 单测断言 CC idle 零查询）。
 fn idle_hook_body(
     state: &Arc<Mutex<SessionStateMachine>>,
     emit_bubble: &dyn Fn(String),
-    query_report: &dyn Fn(&str, i64) -> Option<String>,
+    query_report: &dyn Fn(&str, i64) -> Option<(String, Option<i64>)>,
     agent: &str,
     session_id: &str,
 ) {
@@ -98,12 +102,20 @@ fn idle_hook_body(
         return;
     }
     let now = token_stats::now_ms();
-    if let Some(text) = query_report(session_id, now) {
+    if let Some((text, today)) = query_report(session_id, now) {
+        let full = match today {
+            Some(total) => {
+                let seg = crate::i18n::current().token_report_today(&token_stats::format_tokens_k(total));
+                format!("{text}{seg}")
+            }
+            // 今日聚合失败（跨午夜竞态等）→ 静默省略追加段（TC-M3-09-3）
+            None => text,
+        };
         {
             let mut st = state.lock().unwrap_or_else(|p| p.into_inner());
             st.apply_event("opencode", session_id, Kind::Success, Instant::now());
         }
-        emit_bubble(text);
+        emit_bubble(full);
     }
 }
 
@@ -121,13 +133,25 @@ fn make_idle_hook(
             },
             &|sid, now| {
                 let data_dir = token_stats::opencode_data_dir();
-                token_stats::build_idle_report(&data_dir, sid, now, token_stats::report_max_lag_ms())
+                // M3 §3.2：同连接一次查询（本期行 + 当日 SUM；失败时 today=None）
+                token_stats::build_idle_report_with_today(
+                    &data_dir,
+                    sid,
+                    now,
+                    token_stats::report_max_lag_ms(),
+                )
             },
             agent,
             session_id,
         )
     })
 }
+
+// ---------------------------------------------------------------------------
+// v2 M3（V2-DESIGN §3.7.2）：工具播报开关——命令与持久化在 `interaction.rs`
+// （跨窗口开关机制与穿透同款：app_state 键 + 定向广播；泛型命令需在子模块
+// 定义，crate root 下 tauri::command 宏与 generate_handler 裸名冲突）。
+// ---------------------------------------------------------------------------
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -199,6 +223,18 @@ pub fn run() {
                 state.clone(),
                 notifier.clone(),
                 make_idle_hook(&state, app.handle()),
+                // v2 M3（§3.7.2，N8）：含非空 detail 的状态事件 → 定向 pet 窗
+                // 透传字符串（不解析不判开关——App 侧过滤）
+                {
+                    let emit_handle = app.handle().clone();
+                    Arc::new(move |detail: &str| {
+                        let _ = emit_handle.emit_to(
+                            "pet",
+                            "pulsepet://tool-bubble",
+                            serde_json::json!({ "detail": detail }),
+                        );
+                    })
+                },
                 token,
                 activity.clone(),
                 http_server::HttpConfig::default(),
@@ -301,6 +337,9 @@ pub fn run() {
             token_stats::token_stats_opencode_path,
             token_stats::token_stats_query,
             token_stats::token_stats_current_session,
+            token_stats::token_stats_today,
+            interaction::tool_broadcast_get,
+            interaction::tool_broadcast_set,
             reminder_scheduler::reminders_list,
             reminder_scheduler::reminders_upsert,
             reminder_scheduler::reminders_delete,
@@ -405,7 +444,7 @@ mod tests {
             },
             &|_sid, _now| {
                 queries.fetch_add(1, Ordering::SeqCst);
-                Some("本期用了 1k input / 0 output / $0".to_string())
+                Some(("本期用了 1k input / 0 output / $0".to_string(), None))
             },
             "claude-code",
             "cc-uuid-1",
@@ -439,7 +478,10 @@ mod tests {
             &|sid, _now| {
                 queries.fetch_add(1, Ordering::SeqCst);
                 assert_eq!(sid, "ses_a");
-                Some("本期用了 58.3k input / 910 output / $0.05".to_string())
+                Some((
+                    "本期用了 58.3k input / 910 output / $0.05".to_string(),
+                    Some(42_000_000),
+                ))
             },
             "opencode",
             "ses_a",
@@ -447,7 +489,8 @@ mod tests {
         assert_eq!(queries.load(Ordering::SeqCst), 1, "opencode idle 查一次库");
         assert_eq!(
             bubbles.lock().unwrap().as_slice(),
-            ["本期用了 58.3k input / 910 output / $0.05"]
+            ["本期用了 58.3k input / 910 output / $0.05 · 今日 42.0M"],
+            "M3：气泡末尾追加「 · 今日 42.0M」（format_tokens_k 同口径，TC-M3-09-1 逐字）"
         );
         // success 注入到状态机（复合键 opencode:ses_a）
         let st = state.lock().unwrap_or_else(|p| p.into_inner());
@@ -474,6 +517,47 @@ mod tests {
         let st = state.lock().unwrap_or_else(|p| p.into_inner());
         assert_eq!(st.display().kind, Kind::Idle, "无汇报不注入 success");
     }
+
+    #[test]
+    fn opencode_idle_today_failure_omits_segment_silently() {
+        // TC-M3-09-3（P2-6）：今日聚合失败（today=None，如跨午夜边界竞态）→
+        // 静默省略追加段，本期数字照常显示
+        let state = Arc::new(Mutex::new(SessionStateMachine::new()));
+        let bubbles = Mutex::new(Vec::<String>::new());
+        idle_hook_body(
+            &state,
+            &|text| bubbles.lock().unwrap().push(text),
+            &|_sid, _now| {
+                Some(("本期用了 58.3k input / 910 output / $0.05".to_string(), None))
+            },
+            "opencode",
+            "ses_a",
+        );
+        assert_eq!(
+            bubbles.lock().unwrap().as_slice(),
+            ["本期用了 58.3k input / 910 output / $0.05"],
+            "失败省略追加段——本期文案原样，无多余分隔符"
+        );
+    }
+
+    #[test]
+    fn opencode_idle_today_total_excludes_reasoning() {
+        // 追加段 total = in + out + cache_read（reasoning 不计，SCOPE D 口径）；
+        // 999_999_999 + 1 + 0 = 1000.0M
+        let state = Arc::new(Mutex::new(SessionStateMachine::new()));
+        let bubbles = Mutex::new(Vec::<String>::new());
+        idle_hook_body(
+            &state,
+            &|text| bubbles.lock().unwrap().push(text),
+            &|_sid, _now| Some(("本期用了 1 input / 0 output / $0".to_string(), Some(999_999_999 + 1))),
+            "opencode",
+            "ses_a",
+        );
+        let text = bubbles.lock().unwrap()[0].clone();
+        assert!(text.ends_with(" · 今日 1000.0M"), "actual: {text}");
+    }
+
+    // ---- v2 M3：工具播报开关命令测试在 interaction.rs（命令随模块移驻） ----
 }
 
 #[cfg(test)]

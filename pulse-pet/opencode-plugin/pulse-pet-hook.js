@@ -120,6 +120,108 @@ export function classifyToolBefore(tool, args, command) {
   return "working";
 }
 
+// ---- v2 M3 工具级气泡：detail 模板 ID 协议（V2-DESIGN §3.7.1，TC-M3-13）----
+//
+// detail = "<tplId>:<param>"（复用 /state 既有字段；App 白名单校验 + i18n 渲染）。
+// 仅 tool.execute.before 携带（args = output?.args，与 classifyToolBefore 同源）；
+// TC-SEC 净化口径：绝不携带路径/参数/URL 原文——param 提取后只剩 basename /
+// 首词 / hostname / ≤40 字符 pattern。
+
+/** 工具族 → 模板 ID（白名单五模板；文档 §3.7.1 表为唯一权威，R4）。 */
+export const DETAIL_TPLS = Object.freeze({
+  read: new Set(["read", "listfile", "listfiles", "readfile"]),
+  edit: EDIT_TOOLS,
+  bash: SHELL_TOOLS,
+  search: new Set(["grep", "glob"]),
+  web: new Set(["webfetch", "websearch"]),
+});
+
+/** 工具 → 模板 ID（白名单五模板；文档 §3.7.1 表为唯一权威，R4）。 */
+export function detailTplOf(tool) {
+  for (const [id, set] of Object.entries(DETAIL_TPLS)) {
+    if (set.has(tool)) return id;
+  }
+  return null;
+}
+
+/** 路径 basename：按 / 与 \ 切分取末段非空（跨平台；无分隔符原样）。 */
+export function basenameOf(s) {
+  const parts = String(s ?? "").split(/[\\/]+/).filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : "";
+}
+
+/** detail param 上限（与 App 桥侧 sanitizeToolParam 同口径）。 */
+export const DETAIL_PARAM_MAX = 40;
+
+function clip(s, max = DETAIL_PARAM_MAX) {
+  return [...String(s)].slice(0, max).join("");
+}
+
+/**
+ * 提取 detail param（纯函数，单测覆盖 P1-4 净化强化）：
+ * - read/edit：file path → basename；
+ * - bash：先剥离行首连续 KEY=value 赋值段，再取首词；首词含 / 或 \ 时取
+ *   basename（绝对路径命令 `/opt/homebrew/bin/npm test` → npm；env 赋值
+ *   `FOO=secret npm test` → npm）；
+ * - search：pattern 净化后原样 ≤40 字符（含 / 或 \ 取末段）；
+ * - web：URL → hostname（websearch 无 URL 时 query 按 search 同款净化）。
+ * 无参 / 提取失败 / 白名单外工具 → null（不携带 detail）。
+ */
+export function extractDetailParam(tool, args) {
+  if (!tool || isSelfTool(tool)) return null;
+  const a = args ?? {};
+  const tpl = detailTplOf(tool);
+  if (!tpl) return null;
+
+  if (tpl === "read" || tpl === "edit") {
+    const path = a.filePath ?? a.path ?? a.file_path ?? null;
+    if (typeof path !== "string" || !path.trim()) return null;
+    return basenameOf(path) || null;
+  }
+  if (tpl === "bash") {
+    const command = a.command ?? a.cmd ?? null;
+    if (typeof command !== "string" || !command.trim()) return null;
+    // 先剥离行首连续 KEY=value 赋值段（env 前缀），再取首词
+    const stripped = command.replace(/^(?:\w+=\S*\s+)+/, "").trim();
+    const firstWord = stripped.split(/\s+/)[0] ?? "";
+    if (!firstWord) return null;
+    // 首词含路径分隔符 → basename（绝对路径命令净化，P1-4）
+    return /[\\/]/.test(firstWord) ? basenameOf(firstWord) : firstWord;
+  }
+  if (tpl === "search") {
+    const pattern = a.pattern ?? a.query ?? null;
+    if (typeof pattern !== "string" || !pattern.trim()) return null;
+    const clean = clip(pattern.trim());
+    // 含路径分隔符时取末段（与 read/edit 同口径）
+    return /[\\/]/.test(clean) ? basenameOf(clean) : clean;
+  }
+  // web
+  if (typeof a.url === "string" && a.url.trim()) {
+    try {
+      const hostname = new URL(a.url).hostname;
+      if (hostname) return hostname;
+    } catch {
+      // 非 URL 形态（如裸域名）：按 basename 兜底
+      return basenameOf(a.url) || null;
+    }
+    return null;
+  }
+  // websearch：query 按 search 同款净化（无 URL 可提）
+  if (typeof a.query === "string" && a.query.trim()) {
+    const clean = clip(a.query.trim());
+    return /[\\/]/.test(clean) ? basenameOf(clean) : clean;
+  }
+  return null;
+}
+
+/** detail = "<tplId>:<param>"（param 提取失败 → null 不携带）。 */
+export function buildDetail(tool, args) {
+  const param = extractDetailParam(tool, args);
+  if (param == null) return null;
+  const tpl = detailTplOf(tool);
+  return tpl ? `${tpl}:${param}` : null;
+}
+
 // ---- 节流（TC-EV-18，三类互不干扰 + 同桶升级放行） ----
 
 const SPEECH_KINDS = new Set(["thinking", "success", "error"]);
@@ -236,6 +338,28 @@ export class ThinkingSticky {
 
 const BACKOFF_DELAYS = [0, 1000, 2000, 5000, 30000];
 
+// ---- v2 M3：detail 独立 20s 节流桶（§3.7.1 澄清-1：全局单桶、与 speech 桶
+//      同参数非复用——防刷屏；消耗时机在 deliver 内 reaction 检查之后） ----
+
+export const DETAIL_COOLDOWN_MS = 20000;
+
+export class DetailThrottle {
+  constructor(now = () => Date.now()) {
+    this.now = now;
+    this.last = -Infinity;
+  }
+
+  /** true = 放行并消耗冷却（网络成败不回滚，N7）；false = 冷却期内。 */
+  shouldSend() {
+    const t = this.now();
+    if (t - this.last >= DETAIL_COOLDOWN_MS) {
+      this.last = t;
+      return true;
+    }
+    return false;
+  }
+}
+
 export class Backoff {
   constructor(sleepFn = (ms) => new Promise((r) => setTimeout(r, ms))) {
     this.sleep = sleepFn;
@@ -348,17 +472,21 @@ export async function postState(
   agent = "opencode",
   fetchImpl = fetch,
   dir = runtimeDir(),
+  detail = null,
 ) {
   const endpoint = readRuntimeFile(dir, "endpoint");
   const token = readRuntimeFile(dir, "update-token");
   if (!endpoint || !token) return null; // App 未运行：快速跳过（非错误）
+  const body = { sessionId, kind, agent };
+  // v2 M3：仅 tool.execute.before 路径会带 detail（"<tplId>:<param>"）
+  if (detail) body.detail = detail;
   const res = await fetchImpl(`http://${endpoint}/state`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
       "x-pulsepet-token": token,
     },
-    body: JSON.stringify({ sessionId, kind, agent }),
+    body: JSON.stringify(body),
     signal: AbortSignal.timeout(3000),
   });
   if (res.status === 401 || res.status >= 400) {
@@ -386,6 +514,7 @@ export function createDeliverer({
   killswitch = killswitchActive,
   agent = "opencode",
   sticky = new ThinkingSticky(),
+  detailThrottle = new DetailThrottle(),
 } = {}) {
   let queue = Promise.resolve();
   const enqueue = (fn) => {
@@ -397,7 +526,13 @@ export function createDeliverer({
     );
     return run;
   };
-  async function deliver(kind, sessionId) {
+  /**
+   * v2 M3：可选 detail（"<tplId>:<param>"）。**冷却消耗时机在 reaction 检查
+   * 之后**——状态事件被节流桶吞掉时 detail 桶不消耗；状态放行且 detail 桶
+   * 放行时才附加 detail 并消耗冷却（网络成败不回滚，N7）。detail 桶独立于
+   * 状态节流桶（互不影响）。
+   */
+  async function deliver(kind, sessionId, detail = null) {
     if (!kind) return;
     if (killswitch()) return; // TC-EV-10：killswitch 整体跳过
     const sid = sessionId ?? "default";
@@ -405,14 +540,16 @@ export function createDeliverer({
     // 窗口内 working/idle 静默丢弃（不占节流桶、不重置冷却，编辑/测试/权限照常穿透）
     if (kind === "thinking") sticky.arm(sid);
     if (sticky.swallows(kind, sid)) return;
-    if (!throttle.shouldSend(kind)) return; // TC-EV-18：节流
+    if (!throttle.shouldSend(kind)) return; // TC-EV-18：节流（detail 桶不消耗）
+    const detailToSend =
+      detail != null && detailThrottle.shouldSend() ? detail : null;
     await enqueue(async () => {
       try {
-        const res = await postStateImpl(kind, sid, agent);
+        const res = await postStateImpl(kind, sid, agent, undefined, undefined, detailToSend);
         if (res == null) return; // App 未运行：静默跳过（不 reset、不退避）
         backoff.reset(); // 恢复后下次立即投递
       } catch {
-        // TC-EV-07：静默跳过（不打日志不报错）+ 指数退避
+        // TC-EV-07：静默跳过（不打日志不报错）+ 指数退避（detail 冷却不回滚，N7）
         await backoff.wait();
       }
     });
@@ -443,9 +580,14 @@ const STREAM_HEARTBEAT_TYPES = new Set([
 ]);
 
 export function buildHooks(deliverer = createDeliverer()) {
-  const fire = (kind, sessionId) => {
+  const fire = (kind, sessionId, detail = null) => {
     try {
-      void deliverer.deliver(kind, sessionId).catch(() => {});
+      // detail 非 null 才传第三参（保持 v1 两参调用形态，既有断言/契约不动）
+      const p =
+        detail != null
+          ? deliverer.deliver(kind, sessionId, detail)
+          : deliverer.deliver(kind, sessionId);
+      void p.catch(() => {});
     } catch {
       // deliver 为 async 函数不会同步抛错；防御性吞掉，钩子永不向宿主抛错
     }
@@ -466,10 +608,16 @@ export function buildHooks(deliverer = createDeliverer()) {
       fire("waiting-permission", input?.sessionID);
     },
     "tool.execute.before": (input, output) => {
-      fire(classifyToolBefore(input?.tool, output?.args), input?.sessionID);
+      // v2 M3（§3.7.1 澄清-3）：detail 仅 before 携带（工具开始 = 播报正当时）；
+      // args 来源 = output?.args（与 classifyToolBefore 同源）
+      fire(
+        classifyToolBefore(input?.tool, output?.args),
+        input?.sessionID,
+        buildDetail(input?.tool, output?.args),
+      );
     },
     "tool.execute.after": (input) => {
-      // TC-EV-05：主复位信号（把 editing/testing 拉回 working）
+      // TC-EV-05：主复位信号（把 editing/testing 拉回 working）；不携带 detail
       if (isSelfTool(input?.tool)) return; // 自忽略
       fire("working", input?.sessionID);
     },

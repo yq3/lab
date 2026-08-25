@@ -60,6 +60,37 @@ describe("字典完备性", () => {
       }
     }
   });
+
+  // v2 M3（§3.9 键名清单 + 实施细项增补，TC-M3-17）：新键双语齐备
+  it("M3 新键 zh/en 均存在（含实施细项微调键）", async () => {
+    const { DICT } = await import("./i18n");
+    const m3Keys = [
+      "token.preset.today",
+      "token.kpi.total",
+      "token.kpi.totalSub",
+      "token.col.model",
+      "token.model.unknown",
+      "token.project.global",
+      "token.project.unknown",
+      "token.todayUnavailable",
+      "token.chart.tip",
+      "token.chart.tipRow",
+      "token.chart.noModels",
+      "menu.todayToken",
+      "toolb.read",
+      "toolb.edit",
+      "toolb.bash",
+      "toolb.search",
+      "toolb.web",
+      "settings.sectionPet",
+      "settings.toolBroadcast",
+      "settings.toolBroadcastFail",
+    ];
+    for (const k of m3Keys) {
+      expect(DICT.zh[k], `zh 缺键 ${k}`).toBeTruthy();
+      expect(DICT.en[k], `en 缺键 ${k}`).toBeTruthy();
+    }
+  });
 });
 
 describe("systemLangSafe：默认语言跟随系统", () => {

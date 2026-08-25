@@ -69,6 +69,11 @@ interface PetState {
   passThrough: boolean;
   /** M6：右键菜单坐标（null = 关闭；穿透态恒 null，TC-WIN-04）。 */
   contextMenu: { x: number; y: number } | null;
+  /**
+   * v2 M3（§3.4 ②）：指针当前是否悬停在宠物上（PetCanvas onPointerEnter/
+   * Leave 写入；HoverToday 据此驱动 500ms 防抖定时器）。穿透态恒 false。
+   */
+  hoverEntered: boolean;
   /** M7：完成庆祝（waving 挥手覆盖期；null = 无）。 */
   celebration: CelebrationState | null;
   setRaw: (raw: NormalizedState) => void;
@@ -83,6 +88,8 @@ interface PetState {
   openContextMenu: (x: number, y: number) => void;
   /** M6：关闭右键菜单（菜单项动作 / 点击外部 / 窗口失焦）。 */
   closeContextMenu: () => void;
+  /** v2 M3：指针进入/离开宠物（PetCanvas 写入；HoverToday 消费）。 */
+  setHoverEntered: (entered: boolean) => void;
   /** M7：开始完成庆祝（todo 完成 → waving + 气泡，TC-TD-04/05）。 */
   startCelebration: (durationMs?: number) => void;
   /**
@@ -167,13 +174,22 @@ export const usePetStore = create<PetState>((set, get) => ({
   atlasMeta: null,
   passThrough: false,
   contextMenu: null,
+  hoverEntered: false,
   celebration: null,
   setAtlas: (meta, pixels) => set({ atlasMeta: meta, atlas: pixels }),
   setPassThrough: (enabled) =>
-    // 切到穿透时已打开的右键菜单一并关闭（穿透态菜单不可达，TC-WIN-04）
-    set((s) => ({ passThrough: enabled, contextMenu: enabled ? null : s.contextMenu })),
+    // 切到穿透时已打开的右键菜单一并关闭（穿透态菜单不可达，TC-WIN-04）；
+    // v2 M3：悬停位同清（穿透下 pointer 事件透出，无 leave 信号——N14 兜底）
+    set((s) => ({
+      passThrough: enabled,
+      contextMenu: enabled ? null : s.contextMenu,
+      hoverEntered: enabled ? false : s.hoverEntered,
+    })),
   openContextMenu: (x, y) => set({ contextMenu: { x, y } }),
   closeContextMenu: () => set({ contextMenu: null }),
+  // 穿透开启（热键/托盘通道）时指针语义失效——悬停位一并清零（N14 兜底之一，
+  // HoverToday 另订阅 passThrough 变化做取消计时器/隐藏/解除冻结）
+  setHoverEntered: (entered) => set({ hoverEntered: entered }),
   startCelebration: (durationMs = CELEBRATION_DEFAULT_MS) => {
     celebrationSeq += 1;
     set({ celebration: { id: celebrationSeq, until: Date.now() + durationMs } });

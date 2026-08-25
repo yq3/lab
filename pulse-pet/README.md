@@ -65,6 +65,10 @@ cd pulse-pet/opencode-plugin
 .\install.ps1
 ```
 
+> **升级提醒**：更新 PulsePet 后若插件侧有行为变化（如 v2 M3 的工具级气泡
+> detail 携带），请**重跑一次安装脚本**覆盖 `~/.config/opencode/plugins/`
+> 里的旧 hook 文件——已运行的 opencode 会话仍加载旧版，新开会话生效。
+
 安装脚本做两件事（来源：`install.sh` / `install.ps1` / `opencode-config.mjs`）：
 
 1. 拷贝 `pulse-pet-hook.js` 到 `~/.config/opencode/plugins/`（Windows：`%APPDATA%\opencode\plugins\`，目录不存在时回退 `~/.config/opencode`）；

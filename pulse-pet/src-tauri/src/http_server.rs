@@ -150,18 +150,24 @@ impl Default for RateLimiter {
 }
 
 /// 一条合法 `/state` 事件（apply 到状态机）。
-/// `project/detail` 为可选元数据：v1 校验通过但不落盘（M3 token 统计用 project、
-/// M4 气泡用 detail），故标注 allow(dead_code)。`agent` v2 M1 起为白名单消费值。
+/// `project/detail` 为可选元数据。v2 M3 起 `detail` 透传回调（`DetailHook`，
+/// N8：仅字符串非空校验、不落盘不解析——tpl 合法性与再净化在前端桥层）。
+/// `agent` v2 M1 起为白名单消费值。
 #[derive(Debug, Clone)]
 pub struct StateEvent {
     pub session_id: String,
     pub kind: Kind,
     pub agent: String,
+    /// v1 起校验不落盘（未来元数据扩展位）。
     #[allow(dead_code)]
     pub project: Option<String>,
-    #[allow(dead_code)]
     pub detail: Option<String>,
 }
+
+/// v2 M3（V2-DESIGN §3.7.2）：状态事件携带非空 detail 时的透传回调
+/// （lib.rs 接 `emit_to("pet", "pulsepet://tool-bubble")`；App 侧过滤，
+/// Rust 不判开关）。
+pub type DetailHook = Arc<dyn Fn(&str) + Send + Sync>;
 
 /// 路由处理结果：要么直接响应，要么是一条待 apply 的合法事件。
 pub enum HandleOutcome {
@@ -329,6 +335,7 @@ pub fn start(
     state: Arc<Mutex<SessionStateMachine>>,
     notifier: Arc<DisplayNotifier>,
     idle_hook: IdleHook,
+    detail_hook: DetailHook,
     token: String,
     activity: AgentActivity,
     config: HttpConfig,
@@ -375,6 +382,7 @@ pub fn start(
                         &state,
                         &notifier,
                         &idle_hook,
+                        &detail_hook,
                         &activity,
                         config.max_body,
                     );
@@ -400,6 +408,7 @@ fn handle_incoming(
     state: &Arc<Mutex<SessionStateMachine>>,
     notifier: &Arc<DisplayNotifier>,
     idle_hook: &IdleHook,
+    detail_hook: &DetailHook,
     activity: &AgentActivity,
     max_body: usize,
 ) {
@@ -464,6 +473,14 @@ fn handle_incoming(
             // 一次合并后的状态事件，避免 idle→success 抖动。
             if ev.kind == Kind::Idle {
                 idle_hook(&ev.agent, &ev.session_id);
+            }
+            // v2 M3（§3.7.2，N8）：含非空 detail 的状态事件 → 透传回调（lib.rs
+            // emit_to("pet", "pulsepet://tool-bubble")）。仅字符串非空校验，
+            // 不解析不落盘；App 侧过滤（Rust 不判开关）。
+            if let Some(d) = ev.detail.as_deref() {
+                if !d.trim().is_empty() {
+                    detail_hook(d);
+                }
             }
             notifier.notify(state);
             let _ = request.respond(json_response(200, r#"{"action":null}"#));
@@ -623,6 +640,7 @@ mod tests {
         let state = Arc::new(Mutex::new(SessionStateMachine::new()));
         let notifier = Arc::new(DisplayNotifier::new(Arc::new(|_, _| {})));
         let idle_hook: IdleHook = Arc::new(|_, _| {});
+        let detail_hook: DetailHook = Arc::new(|_| {});
         let activity = new_agent_activity();
         let cfg = HttpConfig {
             runtime_dir: tmp,
@@ -636,6 +654,7 @@ mod tests {
             state.clone(),
             notifier,
             idle_hook,
+            detail_hook,
             TOKEN.to_string(),
             activity.clone(),
             cfg,
@@ -838,6 +857,7 @@ mod tests {
             state,
             notifier,
             idle_hook,
+            Arc::new(|_| {}),
             TOKEN.to_string(),
             new_agent_activity(),
             cfg,
@@ -862,6 +882,61 @@ mod tests {
             seen.lock().unwrap().as_slice(),
             [("opencode".to_string(), "ses_a".to_string())],
             "idle 事件应以 (agent, sessionId) 触发 idle hook"
+        );
+        h.shutdown();
+    }
+
+    /// v2 M3（§3.7.2，N8/TC-M3-14-4）：含非空 detail 的状态事件 → detail_hook
+    /// 原样透传字符串（不解析——含 `:` 的 tpl 协议串照传）；无/空 detail 不触发。
+    #[test]
+    fn integration_state_detail_forwards_to_detail_hook() {
+        let tmp = std::env::temp_dir().join(format!("pulsepet-http-det-{}", std::process::id()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let state = Arc::new(Mutex::new(SessionStateMachine::new()));
+        let notifier = Arc::new(DisplayNotifier::new(Arc::new(|_, _| {})));
+        let seen = Arc::new(Mutex::new(Vec::<String>::new()));
+        let seen_hook = seen.clone();
+        let detail_hook: DetailHook = Arc::new(move |d: &str| {
+            seen_hook
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .push(d.to_string());
+        });
+        let cfg = HttpConfig {
+            runtime_dir: tmp,
+            preferred_port: 0,
+            max_body: 16 * 1024,
+            rate_limit: 1000,
+            rate_window: Duration::from_secs(1),
+            accept_timeout: Duration::from_millis(200),
+        };
+        let h = start(
+            state,
+            notifier,
+            Arc::new(|_, _| {}),
+            detail_hook,
+            TOKEN.to_string(),
+            new_agent_activity(),
+            cfg,
+        )
+        .unwrap();
+        // 带 detail 的状态事件（任意 kind——工具播报挂在 tool.execute.before →
+        // editing/working/testing）→ 原样透传（含 ":" 不解析）
+        post_state(h.port, TOKEN, r#"{"sessionId":"ses_a","kind":"editing","agent":"opencode","detail":"edit:V2-DESIGN.md"}"#);
+        // 无 detail / 空 detail / 纯空白 detail → 不触发
+        post_state(h.port, TOKEN, r#"{"sessionId":"ses_a","kind":"working","agent":"opencode"}"#);
+        post_state(h.port, TOKEN, r#"{"sessionId":"ses_a","kind":"working","agent":"opencode","detail":""}"#);
+        post_state(h.port, TOKEN, r#"{"sessionId":"ses_a","kind":"working","agent":"opencode","detail":"   "}"#);
+        for _ in 0..50 {
+            if !seen.lock().unwrap().is_empty() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(
+            seen.lock().unwrap().as_slice(),
+            ["edit:V2-DESIGN.md".to_string()],
+            "仅非空 detail 触发且原样透传"
         );
         h.shutdown();
     }

@@ -65,6 +65,8 @@ impl fmt::Display for StatsError {
 impl std::error::Error for StatsError {}
 
 /// token 统计行（by session 为完整行；day/week/range 聚合行无 session_id/时间列）。
+/// M3（V2-DESIGN §3.2）：+model_id（仅按 id 归并）/project_name（basename）/
+/// title（by-session 独有，聚合行 None）。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TokenRow {
     pub session_id: Option<String>,
@@ -79,7 +81,37 @@ pub struct TokenRow {
     pub tokens_cache_write: i64,
     pub time_created: Option<i64>,
     pub time_updated: Option<i64>,
+    /// `json_extract(model,'$.id')`；NULL/JSON 损坏 → None（前端「未知模型」合并）。
+    pub model_id: Option<String>,
+    /// `basename(project.worktree)`；`/`（global）或 JOIN 未命中 → None（前端回退标签）。
+    pub project_name: Option<String>,
+    /// 会话标题（by-session 独有；day/week/range 聚合行 None）。
+    pub title: Option<String>,
 }
+
+/// 今日 token 聚合（M3 §3.2 `token_stats_today`；三层快捷查看共享单一数据源）。
+/// reasoning 不计（SCOPE D 裁定，与 GLM 官方展示同口径）。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct TodayStats {
+    pub input: i64,
+    pub output: i64,
+    pub cache_read: i64,
+    pub cost: f64,
+}
+
+/// S4 裁定（2026-08-23）：`providerID='mock'` 的探测行（probe-model，token 全 0）
+/// 在**全部查询**中过滤——统计零影响、模型列表更干净、口径统一防漂移。
+///
+/// 注（R1 实测修正）：SQLite `json_extract` 对**非 JSON 文本**抛 "malformed JSON"
+/// 错（仅路径缺失才返回 NULL）——设计 R1「天然降级」需 `json_valid` 守卫：
+/// model 为 NULL / 损坏 JSON 时 providerID 视为空串 ≠ 'mock'（保留行）。
+pub const MOCK_FILTER_SQL: &str =
+    "COALESCE(CASE WHEN json_valid(model) THEN json_extract(model,'$.providerID') END,'') <> 'mock'";
+
+/// `model -> $.id`（仅按 id 归并，S2）；NULL / 损坏 JSON → NULL（「未知模型」合并）。
+/// 同 MOCK_FILTER_SQL 的 json_valid 守卫理由。
+pub const MODEL_ID_SQL: &str =
+    "CASE WHEN json_valid(model) THEN json_extract(model,'$.id') END";
 
 /// opencode 数据目录（平台区分；测试传自定义目录走 `detect_*` 纯函数）。
 pub fn opencode_data_dir() -> PathBuf {
@@ -115,9 +147,12 @@ pub fn detect_legacy_storage(data_dir: &Path) -> bool {
 }
 
 /// session 表字段白名单（DESIGN §4.1 查询涉及的全部列；缺任一 → schema-mismatch）。
+/// M3：+`model`（model_id 提取）/`title`（首列标题，S1/S5）。
 pub const SESSION_REQUIRED_COLUMNS: &[&str] = &[
     "id",
     "project_id",
+    "model",
+    "title",
     "cost",
     "tokens_input",
     "tokens_output",
@@ -168,9 +203,21 @@ pub fn open_readonly(path: &Path) -> Result<Connection, StatsError> {
     .map_err(|e| StatsError::new(ERR_NO_DATABASE, format!("数据库未运行/未初始化（{e}）")))
 }
 
+/// by-session 列集（M3 §3.2：+model_id/title +LEFT JOIN project 取 worktree；
+/// basename 在 Rust 侧切——`Path::file_name` 跨平台稳妥）。
 fn session_columns() -> &'static str {
-    "id AS session_id, project_id, cost, tokens_input, tokens_output, \
-     tokens_reasoning, tokens_cache_read, tokens_cache_write, time_created, time_updated"
+    "s.id AS session_id, s.project_id, s.cost, s.tokens_input, s.tokens_output, \
+     s.tokens_reasoning, s.tokens_cache_read, s.tokens_cache_write, \
+     s.time_created, s.time_updated"
+}
+
+/// worktree → basename（`/`（global）或 NULL → None；`Path::file_name` 对
+/// `/`、`/tmp/` 等无文件名成分的路径天然返回 None）。
+fn basename_of(worktree: Option<String>) -> Option<String> {
+    let w = worktree?;
+    Path::new(&w)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
 }
 
 fn read_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TokenRow> {
@@ -186,19 +233,28 @@ fn read_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TokenRow> {
         tokens_cache_write: row.get("tokens_cache_write")?,
         time_created: row.get("time_created")?,
         time_updated: row.get("time_updated")?,
+        model_id: row.get("model_id")?,
+        project_name: basename_of(row.get("project_worktree")?),
+        title: row.get("title")?,
     })
 }
 
-/// by session（DESIGN §4.1 原样语义，`WHERE time_updated` 范围 + `ORDER BY` 倒序）。
+/// by session（原样语义，`WHERE time_updated` 范围 + `ORDER BY` 倒序；
+/// M3：+model_id/title 列 + LEFT JOIN project + mock 过滤）。
 pub fn query_by_session(
     conn: &Connection,
     from_ms: i64,
     to_ms: i64,
 ) -> Result<Vec<TokenRow>, StatsError> {
     let sql = format!(
-        "SELECT {} FROM session WHERE time_updated >= ?1 AND time_updated <= ?2 \
-         ORDER BY time_updated DESC",
-        session_columns()
+        "SELECT {cols}, {model_id} AS model_id, s.title, \
+                p.worktree AS project_worktree \
+         FROM session s LEFT JOIN project p ON s.project_id = p.id \
+         WHERE s.time_updated >= ?1 AND s.time_updated <= ?2 AND {mock} \
+         ORDER BY s.time_updated DESC",
+        cols = session_columns(),
+        model_id = MODEL_ID_SQL,
+        mock = MOCK_FILTER_SQL,
     );
     let mut stmt = conn
         .prepare(&sql)
@@ -241,46 +297,14 @@ pub fn query_by_week(
     )
 }
 
-/// by range（任意跨度的按项目聚合，day 为 None；from/to 由前端传）。
+/// by range（任意跨度的按模型聚合，day 为 None；from/to 由前端传；
+/// M3 §3.2：GROUP BY model_id（口径与 day/week 统一），project_id 移除）。
 pub fn query_by_range(
     conn: &Connection,
     from_ms: i64,
     to_ms: i64,
 ) -> Result<Vec<TokenRow>, StatsError> {
-    let sql = "\
-        SELECT NULL AS day, project_id, \
-               SUM(cost) AS cost, \
-               SUM(tokens_input) AS tokens_input, SUM(tokens_output) AS tokens_output, \
-               SUM(tokens_reasoning) AS tokens_reasoning, \
-               SUM(tokens_cache_read) AS tokens_cache_read, \
-               SUM(tokens_cache_write) AS tokens_cache_write \
-        FROM session WHERE time_updated >= ?1 AND time_updated <= ?2 \
-        GROUP BY project_id";
-    let mut stmt = conn
-        .prepare(sql)
-        .map_err(|e| StatsError::new(ERR_QUERY, format!("prepare 失败：{e}")))?;
-    let rows = stmt
-        .query_map([from_ms, to_ms], |row| {
-            Ok(TokenRow {
-                session_id: None,
-                project_id: row.get("project_id")?,
-                day: None,
-                cost: row.get("cost")?,
-                tokens_input: row.get("tokens_input")?,
-                tokens_output: row.get("tokens_output")?,
-                tokens_reasoning: row.get("tokens_reasoning")?,
-                tokens_cache_read: row.get("tokens_cache_read")?,
-                tokens_cache_write: row.get("tokens_cache_write")?,
-                time_created: None,
-                time_updated: None,
-            })
-        })
-        .map_err(|e| StatsError::new(ERR_QUERY, format!("查询失败：{e}")))?;
-    let mut out = Vec::new();
-    for r in rows {
-        out.push(r.map_err(|e| StatsError::new(ERR_QUERY, format!("读取失败：{e}")))?);
-    }
-    Ok(out)
+    query_grouped(conn, from_ms, to_ms, "NULL")
 }
 
 fn query_grouped(
@@ -290,14 +314,16 @@ fn query_grouped(
     day_expr: &str,
 ) -> Result<Vec<TokenRow>, StatsError> {
     let sql = format!(
-        "SELECT {day_expr} AS day, project_id, \
+        "SELECT {day_expr} AS day, {model_id} AS model_id, \
                 SUM(cost) AS cost, \
                 SUM(tokens_input) AS tokens_input, SUM(tokens_output) AS tokens_output, \
                 SUM(tokens_reasoning) AS tokens_reasoning, \
                 SUM(tokens_cache_read) AS tokens_cache_read, \
                 SUM(tokens_cache_write) AS tokens_cache_write \
-         FROM session WHERE time_updated >= ?1 AND time_updated <= ?2 \
-         GROUP BY day, project_id ORDER BY day DESC"
+         FROM session WHERE time_updated >= ?1 AND time_updated <= ?2 AND {mock} \
+         GROUP BY day, model_id ORDER BY day DESC",
+        model_id = MODEL_ID_SQL,
+        mock = MOCK_FILTER_SQL,
     );
     let mut stmt = conn
         .prepare(&sql)
@@ -306,7 +332,7 @@ fn query_grouped(
         .query_map([from_ms, to_ms], |row| {
             Ok(TokenRow {
                 session_id: None,
-                project_id: row.get("project_id")?,
+                project_id: None, // 聚合行移除 project_id（M3：饼图已砍，按模型分组）
                 day: row.get("day")?,
                 cost: row.get("cost")?,
                 tokens_input: row.get("tokens_input")?,
@@ -316,6 +342,9 @@ fn query_grouped(
                 tokens_cache_write: row.get("tokens_cache_write")?,
                 time_created: None,
                 time_updated: None,
+                model_id: row.get("model_id")?,
+                project_name: None,
+                title: None,
             })
         })
         .map_err(|e| StatsError::new(ERR_QUERY, format!("查询失败：{e}")))?;
@@ -326,12 +355,21 @@ fn query_grouped(
     Ok(out)
 }
 
-/// 当前会话行（TC-TK-12：无记录返回 `Ok(None)`，由调用方决定不出气泡）。
+/// 当前会话行（TC-TK-12：无记录返回 `Ok(None)`，由调用方决定不出气泡；
+/// M3：+JOIN/model_id/title 列 + mock 过滤——仅加过滤，无 JOIN 外的分组变化）。
 pub fn query_current_session(
     conn: &Connection,
     session_id: &str,
 ) -> Result<Option<TokenRow>, StatsError> {
-    let sql = format!("SELECT {} FROM session WHERE id = ?1", session_columns());
+    let sql = format!(
+        "SELECT {cols}, {model_id} AS model_id, s.title, \
+                p.worktree AS project_worktree \
+         FROM session s LEFT JOIN project p ON s.project_id = p.id \
+         WHERE s.id = ?1 AND {mock}",
+        cols = session_columns(),
+        model_id = MODEL_ID_SQL,
+        mock = MOCK_FILTER_SQL,
+    );
     let mut stmt = conn
         .prepare(&sql)
         .map_err(|e| StatsError::new(ERR_QUERY, format!("prepare 失败：{e}")))?;
@@ -354,6 +392,22 @@ pub fn query_stats(
     to_ms: i64,
     group_by: &str,
 ) -> Result<Vec<TokenRow>, StatsError> {
+    let conn = open_checked(data_dir)?;
+    match group_by {
+        "session" => query_by_session(&conn, from_ms, to_ms),
+        "day" => query_by_day(&conn, from_ms, to_ms),
+        "week" => query_by_week(&conn, from_ms, to_ms),
+        "range" => query_by_range(&conn, from_ms, to_ms),
+        other => Err(StatsError::new(
+            ERR_QUERY,
+            format!("invalid group_by: {other}（应为 session/day/week/range）"),
+        )),
+    }
+}
+
+/// 探测 → 只读连接 → schema 白名单（M3 抽出供 query_stats/today/current 复用；
+/// 数据库不存在时区分 no-database / legacy-storage）。
+pub fn open_checked(data_dir: &Path) -> Result<Connection, StatsError> {
     let path = match detect_db_path(data_dir) {
         Some(p) => p,
         None => {
@@ -369,16 +423,7 @@ pub fn query_stats(
     };
     let conn = open_readonly(&path)?;
     check_session_schema(&conn)?;
-    match group_by {
-        "session" => query_by_session(&conn, from_ms, to_ms),
-        "day" => query_by_day(&conn, from_ms, to_ms),
-        "week" => query_by_week(&conn, from_ms, to_ms),
-        "range" => query_by_range(&conn, from_ms, to_ms),
-        other => Err(StatsError::new(
-            ERR_QUERY,
-            format!("invalid group_by: {other}（应为 session/day/week/range）"),
-        )),
-    }
+    Ok(conn)
 }
 
 /// 当前会话查询编排（命令层用）。
@@ -386,12 +431,59 @@ pub fn current_session(
     data_dir: &Path,
     session_id: &str,
 ) -> Result<Option<TokenRow>, StatsError> {
-    let path = detect_db_path(data_dir).ok_or_else(|| {
-        StatsError::new(ERR_NO_DATABASE, "数据库未运行/未初始化")
-    })?;
-    let conn = open_readonly(&path)?;
-    check_session_schema(&conn)?;
+    let conn = open_checked(data_dir)?;
     query_current_session(&conn, session_id)
+}
+
+// ---------------------------------------------------------------------------
+// M3：今日聚合（V2-DESIGN §3.2 `token_stats_today`；三层快捷查看单一数据源）
+// ---------------------------------------------------------------------------
+
+/// 本地今天 0 点（chrono::Local；注入 now_ms 供边界单测）。
+pub fn local_today_start_ms(now_ms: i64) -> i64 {
+    use chrono::TimeZone;
+    let Some(local_now) = chrono::Local.timestamp_millis_opt(now_ms).single() else {
+        return now_ms; // 防御（不发生）：保持窗口非空
+    };
+    let midnight = local_now
+        .date_naive()
+        .and_hms_opt(0, 0, 0)
+        .unwrap_or(local_now.naive_local());
+    chrono::Local
+        .from_local_datetime(&midnight)
+        .single()
+        .map(|d| d.timestamp_millis())
+        .unwrap_or(now_ms) // DST 空缺等极端边界：退化为 now（窗口最小化，不崩）
+}
+
+/// 今日聚合核心（已开连接上执行；含 mock 过滤）。
+pub fn query_today_on(
+    conn: &Connection,
+    from_ms: i64,
+    to_ms: i64,
+) -> Result<TodayStats, StatsError> {
+    let sql = format!(
+        "SELECT IFNULL(SUM(tokens_input),0), IFNULL(SUM(tokens_output),0), \
+                IFNULL(SUM(tokens_cache_read),0), IFNULL(SUM(cost),0.0) \
+         FROM session WHERE time_updated >= ?1 AND time_updated <= ?2 AND {mock}",
+        mock = MOCK_FILTER_SQL,
+    );
+    conn.query_row(&sql, [from_ms, to_ms], |r| {
+        Ok(TodayStats {
+            input: r.get(0)?,
+            output: r.get(1)?,
+            cache_read: r.get(2)?,
+            cost: r.get(3)?,
+        })
+    })
+    .map_err(|e| StatsError::new(ERR_QUERY, format!("查询失败：{e}")))
+}
+
+/// 今日聚合编排：from = 本地今天 0 点、to = now；全套错误处理原样透传
+/// （no-database / legacy-storage / schema-mismatch）。
+pub fn today_stats(data_dir: &Path, now_ms: i64) -> Result<TodayStats, StatsError> {
+    let conn = open_checked(data_dir)?;
+    query_today_on(&conn, local_today_start_ms(now_ms), now_ms)
 }
 
 // ---------------------------------------------------------------------------
@@ -446,18 +538,29 @@ pub fn should_report(row: &TokenRow, now_ms: i64, max_lag_ms: i64) -> bool {
     has_usage && fresh
 }
 
-/// idle 事件 → 气泡文案（任一环节不满足/出错都返回 `None` = 不出气泡，静默不崩）。
-pub fn build_idle_report(
+/// v2 M3 §3.2：idle 汇报（本期文案）+ 今日累计总量——**同连接一次查询**
+/// （本期行查完后，同一只读连接上顺带 SUM 当日聚合；取代 v1 `build_idle_report`
+/// 的单行查询路径，本期数字逻辑不变：should_report / format_session_report 均复用）。
+///
+/// 返回 `(本期文案, 今日总量)`；今日总量 = in + out + cache_read（reasoning
+/// 不计）；今日聚合失败（如跨午夜边界竞态、SQL 报错）→ `None`（静默省略
+/// 追加段，本期文案照常——拼接与 i18n 渲染在 lib.rs idle hook，TC-M3-09-3）。
+pub fn build_idle_report_with_today(
     data_dir: &Path,
     session_id: &str,
     now_ms: i64,
     max_lag_ms: i64,
-) -> Option<String> {
-    let row = current_session(data_dir, session_id).ok()??;
+) -> Option<(String, Option<i64>)> {
+    let conn = open_checked(data_dir).ok()?;
+    let row = query_current_session(&conn, session_id).ok()??;
     if !should_report(&row, now_ms, max_lag_ms) {
         return None;
     }
-    Some(format_session_report(&row))
+    let text = format_session_report(&row);
+    let today = query_today_on(&conn, local_today_start_ms(now_ms), now_ms)
+        .ok()
+        .map(|t| t.input + t.output + t.cache_read);
+    Some((text, today))
 }
 
 /// 气泡新鲜度阈值（默认 60s，`PULSEPET_TOKEN_REPORT_MAX_LAG_MS` 可配）。
@@ -497,6 +600,19 @@ pub fn token_stats_current_session(session_id: String) -> Result<Option<TokenRow
     current_session(&opencode_data_dir(), &session_id).map_err(|e| e.to_string())
 }
 
+/// 今日 token 聚合（M3 §3.2；悬停卡/右键菜单/面板今日 preset 三层共享）。
+/// async fn + spawn_blocking（沿 M1 §1.5 线程纪律；sqlite 查询 ~ms 级但保持纪律）；
+/// 错误序列化 "code: message"（no-database/legacy-storage/schema-mismatch 原样透传）。
+#[tauri::command]
+pub async fn token_stats_today() -> Result<TodayStats, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        today_stats(&opencode_data_dir(), now_ms())
+    })
+    .await
+    .map_err(|e| format!("join: {e}"))?
+    .map_err(|e| e.to_string())
+}
+
 /// 当前系统毫秒时间戳（气泡新鲜度比较用）。
 pub fn now_ms() -> i64 {
     std::time::SystemTime::now()
@@ -516,17 +632,20 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     /// 与真实 opencode.db 一致的 session 表建表语句（白名单列 + 少量真实存在的
-    /// 其它列，模拟 opencode 1.18.x schema）。
+    /// 其它列，模拟 opencode 1.18.x schema；M3 起 model 列入白名单，S1/S2）。
     const CREATE_SESSION: &str = "\
         CREATE TABLE session (\
             id TEXT PRIMARY KEY, project_id TEXT NOT NULL, directory TEXT NOT NULL, \
-            title TEXT NOT NULL, cost REAL NOT NULL DEFAULT 0, \
+            title TEXT NOT NULL, model TEXT, cost REAL NOT NULL DEFAULT 0, \
             tokens_input INTEGER NOT NULL DEFAULT 0, \
             tokens_output INTEGER NOT NULL DEFAULT 0, \
             tokens_reasoning INTEGER NOT NULL DEFAULT 0, \
             tokens_cache_read INTEGER NOT NULL DEFAULT 0, \
             tokens_cache_write INTEGER NOT NULL DEFAULT 0, \
             time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL)";
+
+    /// project 表（S1：路径列名 = worktree；global 行 id='global'、worktree='/'）。
+    const CREATE_PROJECT: &str = "CREATE TABLE project (id TEXT PRIMARY KEY, worktree TEXT NOT NULL)";
 
     /// 旧 schema（缺 tokens_* 列）建表语句（TC-TK-13）。
     const CREATE_SESSION_OLD: &str = "\
@@ -551,12 +670,13 @@ mod tests {
         dir
     }
 
-    /// 建一个临时 opencode 数据目录 + 指定 schema 的 opencode.db。
+    /// 建一个临时 opencode 数据目录 + 指定 schema 的 opencode.db（含 project 表）。
     fn make_db(tag: &str, create_sql: &str) -> PathBuf {
         let dir = temp_dir(tag);
         let db = dir.join("opencode.db");
         let conn = Connection::open(&db).unwrap();
         conn.execute_batch(create_sql).unwrap();
+        conn.execute_batch(CREATE_PROJECT).unwrap();
         conn.execute_batch("PRAGMA journal_mode=WAL;").unwrap();
         conn.close().unwrap();
         dir
@@ -571,14 +691,32 @@ mod tests {
         created: i64,
         updated: i64,
     ) {
+        insert_session_model(dir, id, project, cost, tokens, created, updated, None, None);
+    }
+
+    /// M3 扩展插数：可带 model JSON / title 覆盖（默认 title='t'）。
+    #[allow(clippy::too_many_arguments)]
+    fn insert_session_model(
+        dir: &Path,
+        id: &str,
+        project: &str,
+        cost: f64,
+        tokens: (i64, i64, i64, i64, i64),
+        created: i64,
+        updated: i64,
+        model: Option<&str>,
+        title: Option<&str>,
+    ) {
         let conn = open_readonly_unchecked(dir);
         conn.execute(
-            "INSERT INTO session (id, project_id, directory, title, cost, tokens_input, \
+            "INSERT INTO session (id, project_id, directory, title, model, cost, tokens_input, \
              tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, \
-             time_created, time_updated) VALUES (?1,?2,'/tmp','t',?3,?4,?5,?6,?7,?8,?9,?10)",
+             time_created, time_updated) VALUES (?1,?2,'/tmp',?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
             rusqlite::params![
                 id,
                 project,
+                title.unwrap_or("t"),
+                model,
                 cost,
                 tokens.0,
                 tokens.1,
@@ -590,6 +728,21 @@ mod tests {
             ],
         )
         .unwrap();
+    }
+
+    /// 插一行 project（id → worktree）。
+    fn insert_project(dir: &Path, id: &str, worktree: &str) {
+        let conn = open_readonly_unchecked(dir);
+        conn.execute(
+            "INSERT INTO project (id, worktree) VALUES (?1, ?2)",
+            [id, worktree],
+        )
+        .unwrap();
+    }
+
+    /// model JSON（{id, providerID}）。
+    fn model_json(id: &str, provider: &str) -> String {
+        format!(r#"{{"id":"{id}","providerID":"{provider}","variant":null}}"#)
     }
 
     /// 测试插数用的读写连接（业务代码本身仍走 open_readonly）。
@@ -689,60 +842,70 @@ mod tests {
     }
 
     #[test]
-    fn query_by_day_groups_by_local_day_and_project() {
+    fn query_by_day_groups_by_local_day_and_model() {
         let dir = make_db("day", CREATE_SESSION);
-        // 同一天两个 session 同项目 → SUM 聚合；另一天另一项目 → 分组
-        // 2026-08-16 00:00:00 本地时间的毫秒时间戳（测试环境时区无关地取当天零点）
-        let day0 = local_midnight_ms(2026, 8, 16);
-        insert_session(&dir, "s1", "p1", 0.10, (100, 20, 0, 0, 0), day0, day0 + ms(3600));
-        insert_session(&dir, "s2", "p1", 0.20, (200, 30, 0, 0, 0), day0, day0 + ms(7200));
-        let day1 = local_midnight_ms(2026, 8, 15);
-        insert_session(&dir, "s3", "p2", 0.40, (400, 60, 0, 0, 0), day1, day1 + ms(3600));
+        // 同一天两个 session 同模型 → SUM 聚合；另一天另一模型 → 分组
+        // （M3 §3.2：GROUP BY day, model_id——取代 v1 的 day, project_id）
+        let day0 = chrono_local_midnight(2026, 8, 16);
+        insert_session_model(&dir, "s1", "p1", 0.10, (100, 20, 0, 0, 0), day0, day0 + ms(3600),
+            Some(&model_json("glm-5.3", "zhipuai")), None);
+        insert_session_model(&dir, "s2", "p1", 0.20, (200, 30, 0, 0, 0), day0, day0 + ms(7200),
+            Some(&model_json("glm-5.3", "zhipuai")), None);
+        let day1 = chrono_local_midnight(2026, 8, 15);
+        insert_session_model(&dir, "s3", "p2", 0.40, (400, 60, 0, 0, 0), day1, day1 + ms(3600),
+            Some(&model_json("kimi-k2", "moonshot")), None);
         let conn = open_readonly(&dir.join("opencode.db")).unwrap();
         let rows = query_by_day(&conn, 0, day0 + ms(86_400)).unwrap();
-        assert_eq!(rows.len(), 2, "两个 (day, project) 分组");
-        // ORDER BY day DESC：首行是 2026-08-16 的 p1 聚合
+        assert_eq!(rows.len(), 2, "两个 (day, model) 分组");
+        // ORDER BY day DESC：首行是 2026-08-16 的 glm-5.3 聚合
         let r = &rows[0];
         assert_eq!(r.day.as_deref(), Some("2026-08-16"));
-        assert_eq!(r.project_id.as_deref(), Some("p1"));
+        assert_eq!(r.model_id.as_deref(), Some("glm-5.3"));
         assert!((r.cost - 0.30).abs() < 1e-9); // 浮点 SUM 用近似比较
         assert_eq!(r.tokens_input, 300);
         assert_eq!(r.tokens_output, 50);
         assert_eq!(rows[1].day.as_deref(), Some("2026-08-15"));
-        assert_eq!(rows[1].project_id.as_deref(), Some("p2"));
+        assert_eq!(rows[1].model_id.as_deref(), Some("kimi-k2"));
     }
 
     #[test]
     fn query_by_week_labels_and_aggregates() {
         let dir = make_db("week", CREATE_SESSION);
-        let d = local_midnight_ms(2026, 8, 11); // 周一（2026-08-10 为 ISO 周一）
-        insert_session(&dir, "s1", "p1", 0.1, (10, 1, 0, 0, 0), d, d + ms(3600));
-        let d2 = local_midnight_ms(2026, 8, 13);
-        insert_session(&dir, "s2", "p1", 0.2, (20, 2, 0, 0, 0), d2, d2 + ms(3600));
+        let d = chrono_local_midnight(2026, 8, 11); // 周一（2026-08-10 为 ISO 周一）
+        insert_session_model(&dir, "s1", "p1", 0.1, (10, 1, 0, 0, 0), d, d + ms(3600),
+            Some(&model_json("glm-5.3", "zhipuai")), None);
+        let d2 = chrono_local_midnight(2026, 8, 13);
+        insert_session_model(&dir, "s2", "p1", 0.2, (20, 2, 0, 0, 0), d2, d2 + ms(3600),
+            Some(&model_json("glm-5.3", "zhipuai")), None);
         let conn = open_readonly(&dir.join("opencode.db")).unwrap();
         let rows = query_by_week(&conn, 0, d2 + ms(86_400)).unwrap();
-        assert_eq!(rows.len(), 1, "同一周同项目 → 单行聚合");
+        assert_eq!(rows.len(), 1, "同一周同模型 → 单行聚合");
         assert_eq!(rows[0].day.as_deref(), Some("2026-W32"));
         assert!((rows[0].cost - 0.30).abs() < 1e-9);
         assert_eq!(rows[0].tokens_input, 30);
     }
 
     #[test]
-    fn query_by_range_aggregates_per_project_without_day() {
+    fn query_by_range_aggregates_per_model_without_day() {
         let dir = make_db("range", CREATE_SESSION);
-        let d = local_midnight_ms(2026, 8, 16);
-        insert_session(&dir, "s1", "p1", 0.1, (10, 1, 0, 0, 0), d, d + ms(1));
-        insert_session(&dir, "s2", "p1", 0.2, (20, 2, 0, 0, 0), d, d + ms(2));
-        insert_session(&dir, "s3", "p2", 0.4, (40, 4, 0, 0, 0), d, d + ms(3));
+        let d = chrono_local_midnight(2026, 8, 16);
+        // p1 两行同模型 → 单组；p2 一行另一模型 → 另一组（M3：GROUP BY model_id）
+        insert_session_model(&dir, "s1", "p1", 0.1, (10, 1, 0, 0, 0), d, d + ms(1),
+            Some(&model_json("glm-5.3", "zhipuai")), None);
+        insert_session_model(&dir, "s2", "p1", 0.2, (20, 2, 0, 0, 0), d, d + ms(2),
+            Some(&model_json("glm-5.3", "zhipuai")), None);
+        insert_session_model(&dir, "s3", "p2", 0.4, (40, 4, 0, 0, 0), d, d + ms(3),
+            Some(&model_json("kimi-k2", "moonshot")), None);
         let conn = open_readonly(&dir.join("opencode.db")).unwrap();
         let mut rows = query_by_range(&conn, 0, d + ms(10)).unwrap();
-        rows.sort_by(|a, b| a.project_id.cmp(&b.project_id));
+        rows.sort_by(|a, b| a.model_id.cmp(&b.model_id));
         assert_eq!(rows.len(), 2);
-        assert_eq!(rows[0].project_id.as_deref(), Some("p1"));
+        assert_eq!(rows[0].model_id.as_deref(), Some("glm-5.3"));
         assert!((rows[0].cost - 0.30).abs() < 1e-9);
         assert_eq!(rows[0].day, None);
         assert_eq!(rows[0].session_id, None);
-        assert_eq!(rows[1].project_id.as_deref(), Some("p2"));
+        assert_eq!(rows[0].project_id, None, "range 聚合行不含 project_id");
+        assert_eq!(rows[1].model_id.as_deref(), Some("kimi-k2"));
     }
 
     #[test]
@@ -833,6 +996,9 @@ mod tests {
             tokens_cache_write: 0,
             time_created: None,
             time_updated: None,
+            model_id: None,
+            project_name: None,
+            title: None,
         };
         let text = format_session_report(&row);
         assert_eq!(text, "本期用了 58.3k input / 910 output / $0.05");
@@ -854,6 +1020,9 @@ mod tests {
             tokens_cache_write: 0,
             time_created: None,
             time_updated: Some(updated),
+            model_id: None,
+            project_name: None,
+            title: None,
         };
         let now = ms(10_000);
         let lag = 60_000;
@@ -873,9 +1042,11 @@ mod tests {
 
     #[test]
     fn build_idle_report_end_to_end() {
+        // v2 M3：v1 build_idle_report 场景由 with_today 全覆盖（陈旧/无记录分支
+        // 在 m3_build_idle_report_with_today_silent_on_no_report；此处保留核心
+        // e2e：新鲜 + 有用量 → 文案）
         let dir = make_db("report", CREATE_SESSION);
         let now = ms(1_000_000);
-        // 新鲜 + 有用量 → Some(文案)
         insert_session(
             &dir,
             "ses_live",
@@ -885,26 +1056,12 @@ mod tests {
             now - ms(600),
             now - ms(2),
         );
-        assert_eq!(
-            build_idle_report(&dir, "ses_live", now, 60_000),
-            Some("本期用了 58.3k input / 910 output / $0.05".to_string())
-        );
-        // 陈旧 → None
-        insert_session(
-            &dir,
-            "ses_stale",
-            "p1",
-            0.05,
-            (1000, 100, 0, 0, 0),
-            now - ms(3600),
-            now - ms(3600),
-        );
-        assert_eq!(build_idle_report(&dir, "ses_stale", now, 60_000), None);
-        // TC-TK-12：无记录 → None（不出气泡、不显示 0/陈旧数字）
-        assert_eq!(build_idle_report(&dir, "ses_none", now, 60_000), None);
+        let (text, today) = build_idle_report_with_today(&dir, "ses_live", now, 60_000).unwrap();
+        assert_eq!(text, "本期用了 58.3k input / 910 output / $0.05");
+        assert_eq!(today, Some(58_263 + 910), "今日 = 本会话行（窗口内唯一）");
         // 数据库不存在 → None（静默，不崩）
         let nodir = temp_dir("report-nodb");
-        assert_eq!(build_idle_report(&nodir, "ses_x", now, 60_000), None);
+        assert_eq!(build_idle_report_with_today(&nodir, "ses_x", now, 60_000), None);
     }
 
     /// 指定本地日期零点的毫秒时间戳（时区无关地构造，供 day/week 分组测试）。
@@ -917,6 +1074,264 @@ mod tests {
             |r| r.get::<_, i64>(0),
         )
         .unwrap()
+    }
+
+    /// 指定本地日期零点（chrono 语义——与 `local_today_start_ms` 同一时区口径；
+    /// M3 测试用：SQLite 版是 UTC 零点，与 chrono 本地零点在非零时区相差时区偏移）。
+    fn chrono_local_midnight(y: i32, m: u32, d: u32) -> i64 {
+        use chrono::TimeZone;
+        chrono::Local
+            .with_ymd_and_hms(y, m, d, 0, 0, 0)
+            .single()
+            .map(|dt| dt.timestamp_millis())
+            .unwrap_or(0)
+    }
+
+    // ---- M3：数据层字段扩展（V2-DESIGN §3.2，TC-M3-01） ----
+
+    #[test]
+    fn m3_by_session_row_has_model_id_title_project_name() {
+        let dir = make_db("m3-sess", CREATE_SESSION);
+        insert_project(&dir, "p1", "/Users/youqi/develop/lab");
+        insert_project(&dir, "global", "/");
+        let d = chrono_local_midnight(2026, 8, 25);
+        // 普通行：model JSON → id；JOIN 命中 → basename(lab)；title 原样
+        insert_session_model(
+            &dir, "s1", "p1", 0.1, (10, 1, 0, 0, 0), d, d + ms(1),
+            Some(&model_json("glm-5.3", "zhipuai")), Some("修个 bug"),
+        );
+        // global 行：worktree='/' → project_name None
+        insert_session_model(
+            &dir, "s2", "global", 0.0, (5, 0, 0, 0, 0), d, d + ms(2),
+            Some(&model_json("deepseek-v4-flash@max", "deepseek")), None, // title 缺省 't'
+        );
+        // JOIN 未命中（无 project 行）→ project_name None；model NULL → None
+        insert_session(&dir, "s3", "p-missing", 0.0, (7, 0, 0, 0, 0), d, d + ms(3));
+        // JSON 损坏 → model_id None（json_extract 返回 NULL，天然降级不崩，R1）
+        insert_session_model(
+            &dir, "s4", "p1", 0.0, (8, 0, 0, 0, 0), d, d + ms(4),
+            Some("not-json"), None,
+        );
+
+        let conn = open_readonly(&dir.join("opencode.db")).unwrap();
+        let rows = query_by_session(&conn, 0, d + ms(10)).unwrap();
+        let by_id = |k: &str| rows.iter().find(|r| r.session_id.as_deref() == Some(k)).unwrap();
+
+        let s1 = by_id("s1");
+        assert_eq!(s1.model_id.as_deref(), Some("glm-5.3"));
+        assert_eq!(s1.project_name.as_deref(), Some("lab"));
+        assert_eq!(s1.title.as_deref(), Some("修个 bug"));
+        assert_eq!(s1.project_id.as_deref(), Some("p1")); // project_id 保留（前端 global 判定）
+
+        // 带后缀 id 原样归并（S2 裁定）；global → project_name None
+        let s2 = by_id("s2");
+        assert_eq!(s2.model_id.as_deref(), Some("deepseek-v4-flash@max"));
+        assert_eq!(s2.project_name, None, "worktree='/' → None（global 回退标签）");
+        assert_eq!(s2.title.as_deref(), Some("t"));
+
+        // 未命中 + model NULL → 双 None
+        let s3 = by_id("s3");
+        assert_eq!(s3.model_id, None);
+        assert_eq!(s3.project_name, None, "JOIN 未命中 → None（unknown 回退标签）");
+
+        // JSON 损坏 → model_id None
+        assert_eq!(by_id("s4").model_id, None);
+    }
+
+    #[test]
+    fn m3_grouped_rows_have_model_id_without_project_id() {
+        let dir = make_db("m3-grouped", CREATE_SESSION);
+        let d = chrono_local_midnight(2026, 8, 25);
+        // 同日同模型两行 → 单 (day, model_id) 分组聚合；另一模型 → 另一分组
+        insert_session_model(&dir, "s1", "p1", 0.10, (100, 20, 0, 30, 0), d, d + ms(3600),
+            Some(&model_json("glm-5.3", "zhipuai")), None);
+        insert_session_model(&dir, "s2", "p2", 0.20, (200, 30, 0, 40, 0), d, d + ms(7200),
+            Some(&model_json("glm-5.3", "zhipuai")), None);
+        insert_session_model(&dir, "s3", "p1", 0.40, (400, 60, 0, 50, 0), d, d + ms(8000),
+            Some(&model_json("kimi-k2", "moonshot")), None);
+        let conn = open_readonly(&dir.join("opencode.db")).unwrap();
+
+        let mut rows = query_by_day(&conn, 0, d + ms(86_400)).unwrap();
+        rows.sort_by(|a, b| a.model_id.cmp(&b.model_id));
+        assert_eq!(rows.len(), 2, "GROUP BY day, model_id → 两行");
+        for r in &rows {
+            assert_eq!(r.project_id, None, "聚合行不含 project_id");
+            assert_eq!(r.project_name, None);
+            assert_eq!(r.title, None, "title 为 by-session 独有");
+            assert_eq!(r.day.as_deref(), Some("2026-08-25"));
+        }
+        let glm = rows.iter().find(|r| r.model_id.as_deref() == Some("glm-5.3")).unwrap();
+        assert_eq!(glm.tokens_input, 300);
+        assert_eq!(glm.tokens_cache_read, 70);
+        assert!((glm.cost - 0.30).abs() < 1e-9);
+        let kimi = rows.iter().find(|r| r.model_id.as_deref() == Some("kimi-k2")).unwrap();
+        assert_eq!(kimi.tokens_input, 400);
+
+        // week 维同口径
+        let rows = query_by_week(&conn, 0, d + ms(86_400)).unwrap();
+        assert!(rows.iter().all(|r| r.project_id.is_none() && r.model_id.is_some()));
+
+        // range 维：GROUP BY model_id（口径统一），project_id 移除
+        let mut rows = query_by_range(&conn, 0, d + ms(86_400)).unwrap();
+        rows.sort_by(|a, b| a.model_id.cmp(&b.model_id));
+        assert_eq!(rows.len(), 2);
+        for r in &rows {
+            assert_eq!(r.project_id, None, "range 聚合同口径不含 project_id");
+        }
+    }
+
+    #[test]
+    fn m3_grouped_null_model_buckets_into_unknown_group() {
+        // model NULL/损坏 → model_id NULL 自成一组（前端「未知模型」合并，S3 防御）
+        let dir = make_db("m3-nullmodel", CREATE_SESSION);
+        let d = chrono_local_midnight(2026, 8, 25);
+        insert_session(&dir, "s1", "p1", 0.1, (10, 1, 0, 0, 0), d, d + ms(1));
+        insert_session(&dir, "s2", "p1", 0.1, (20, 2, 0, 0, 0), d, d + ms(2));
+        insert_session_model(&dir, "s3", "p1", 0.1, (30, 3, 0, 0, 0), d, d + ms(3),
+            Some("broken"), None);
+        let conn = open_readonly(&dir.join("opencode.db")).unwrap();
+        let rows = query_by_day(&conn, 0, d + ms(10)).unwrap();
+        assert_eq!(rows.len(), 1, "NULL model_id 单组聚合");
+        assert_eq!(rows[0].model_id, None);
+        assert_eq!(rows[0].tokens_input, 60);
+    }
+
+    #[test]
+    fn m3_schema_whitelist_requires_model_and_title() {
+        // 白名单 +model+title：缺任一 → schema-mismatch（TC-M3-01-4）
+        let sql_no_title = "CREATE TABLE session (\
+            id TEXT PRIMARY KEY, project_id TEXT NOT NULL, directory TEXT NOT NULL, \
+            model TEXT, cost REAL NOT NULL DEFAULT 0, \
+            tokens_input INTEGER NOT NULL DEFAULT 0, tokens_output INTEGER NOT NULL DEFAULT 0, \
+            tokens_reasoning INTEGER NOT NULL DEFAULT 0, tokens_cache_read INTEGER NOT NULL DEFAULT 0, \
+            tokens_cache_write INTEGER NOT NULL DEFAULT 0, time_created INTEGER NOT NULL, \
+            time_updated INTEGER NOT NULL)";
+        let dir = make_db("m3-schema", sql_no_title);
+        let err = query_stats(&dir, 0, i64::MAX, "session").unwrap_err();
+        assert_eq!(err.code, ERR_SCHEMA_MISMATCH);
+        assert!(err.message.contains("title"), "缺列提示点名 title：{}", err.message);
+    }
+
+    // ---- M3：mock 过滤口径（S4 裁定，TC-M3-02） ----
+
+    #[test]
+    fn m3_mock_provider_rows_filtered_everywhere() {
+        let dir = make_db("m3-mock", CREATE_SESSION);
+        insert_project(&dir, "p1", "/tmp/proj");
+        let d = chrono_local_midnight(2026, 8, 25);
+        let mock = model_json("probe-model", "mock");
+        insert_session_model(&dir, "s_mock", "p1", 0.0, (999, 999, 0, 999, 0), d, d + ms(1), Some(&mock), None);
+        insert_session_model(&dir, "s_real", "p1", 0.1, (100, 20, 0, 30, 0), d, d + ms(2),
+            Some(&model_json("glm-5.3", "zhipuai")), None);
+        let conn = open_readonly(&dir.join("opencode.db")).unwrap();
+
+        // by-session：mock 行不出现
+        let rows = query_by_session(&conn, 0, d + ms(10)).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].session_id.as_deref(), Some("s_real"));
+
+        // day/week/range：统计零影响
+        for rows in [
+            query_by_day(&conn, 0, d + ms(10)).unwrap(),
+            query_by_week(&conn, 0, d + ms(10)).unwrap(),
+            query_by_range(&conn, 0, d + ms(10)).unwrap(),
+        ] {
+            assert_eq!(rows.len(), 1);
+            assert_eq!(rows[0].model_id.as_deref(), Some("glm-5.3"));
+            assert_eq!(rows[0].tokens_input, 100);
+        }
+
+        // current_session：mock 会话查不到（Ok(None)，口径统一防漂移）
+        assert!(query_current_session(&conn, "s_mock").unwrap().is_none());
+        assert!(query_current_session(&conn, "s_real").unwrap().is_some());
+
+        // token_stats_today：mock 的 999 不计入
+        let stats = query_today_on(&conn, d, d + ms(10)).unwrap();
+        assert_eq!(stats.input, 100);
+        assert_eq!(stats.output, 20);
+        assert_eq!(stats.cache_read, 30);
+        assert!((stats.cost - 0.1).abs() < 1e-9);
+    }
+
+    // ---- M3：token_stats_today（TC-M3-03） ----
+
+    #[test]
+    fn m3_local_today_start_is_midnight() {
+        // 注入固定时刻：0 点边界（无论中午还是午夜前 1ms，起点都是当天 00:00）
+        let noon = chrono_local_midnight(2026, 8, 25) + 12 * 3600 * 1000;
+        assert_eq!(local_today_start_ms(noon), chrono_local_midnight(2026, 8, 25));
+        let before_midnight = chrono_local_midnight(2026, 8, 26) - 1; // 23:59:59.999
+        assert_eq!(local_today_start_ms(before_midnight), chrono_local_midnight(2026, 8, 25));
+        // 跨午夜后：起点翻到次日 0 点
+        let next_day = chrono_local_midnight(2026, 8, 26);
+        assert_eq!(local_today_start_ms(next_day), next_day);
+    }
+
+    #[test]
+    fn m3_today_stats_window_and_error_paths() {
+        // 无库 → no-database 原样透传
+        let nodir = temp_dir("m3-today-nodb");
+        let err = today_stats(&nodir, ms(1000)).unwrap_err();
+        assert_eq!(err.code, ERR_NO_DATABASE);
+        // legacy → legacy-storage
+        let dir = temp_dir("m3-today-legacy");
+        let s = dir.join("storage").join("session");
+        std::fs::create_dir_all(&s).unwrap();
+        std::fs::write(s.join("x.json"), b"{}").unwrap();
+        let err = today_stats(&dir, ms(1000)).unwrap_err();
+        assert_eq!(err.code, ERR_LEGACY_STORAGE);
+        // schema 缺列 → schema-mismatch
+        let dir = make_db("m3-today-schema", CREATE_SESSION_OLD);
+        let err = today_stats(&dir, ms(1000)).unwrap_err();
+        assert_eq!(err.code, ERR_SCHEMA_MISMATCH);
+
+        // 窗口：只聚合今天 0 点起的行（昨天的行不计）
+        let dir = make_db("m3-today", CREATE_SESSION);
+        let d = chrono_local_midnight(2026, 8, 25);
+        let now = d + 10 * 3600 * 1000;
+        insert_session_model(&dir, "s_today", "p1", 0.2, (1000, 200, 50, 3000, 0), now - ms(10), now - ms(5),
+            Some(&model_json("glm-5.3", "zhipuai")), None);
+        insert_session_model(&dir, "s_yesterday", "p1", 9.9, (90000, 900, 0, 0, 0),
+            d - ms(3600), d - ms(1800), Some(&model_json("glm-5.3", "zhipuai")), None);
+        let stats = today_stats(&dir, now).unwrap();
+        assert_eq!(stats.input, 1000);
+        assert_eq!(stats.output, 200);
+        assert_eq!(stats.cache_read, 3000);
+        assert!((stats.cost - 0.2).abs() < 1e-9);
+    }
+
+    // ---- M3：idle 汇报追加今日累计（TC-M3-09 Rust 侧数据） ----
+
+    #[test]
+    fn m3_build_idle_report_with_today_appends_total() {
+        let dir = make_db("m3-idle", CREATE_SESSION);
+        let d = chrono_local_midnight(2026, 8, 25);
+        let now = d + 9 * 3600 * 1000;
+        // 本会话（新鲜有用量）
+        insert_session_model(&dir, "ses_live", "p1", 0.05, (58_263, 910, 0, 0, 0), now - ms(600), now - ms(2),
+            Some(&model_json("glm-5.3", "zhipuai")), None);
+        // 今日另一会话（计入今日累计：in 1M + out 40k + cache 2M）
+        insert_session_model(&dir, "ses_other", "p1", 0.1, (1_000_000, 40_000, 0, 2_000_000, 0),
+            now - ms(7200), now - ms(3600), Some(&model_json("glm-5.3", "zhipuai")), None);
+        let (text, today) = build_idle_report_with_today(&dir, "ses_live", now, 60_000).unwrap();
+        assert_eq!(text, "本期用了 58.3k input / 910 output / $0.05");
+        // total = in + out + cache_read（reasoning 不计）：1058263 + 40910 + 2000000
+        assert_eq!(today, Some(1_058_263 + 40_910 + 2_000_000));
+    }
+
+    #[test]
+    fn m3_build_idle_report_with_today_silent_on_no_report() {
+        let dir = make_db("m3-idle2", CREATE_SESSION);
+        let now = chrono_local_midnight(2026, 8, 25) + ms(1000);
+        // 无记录 → None
+        assert_eq!(build_idle_report_with_today(&dir, "ses_none", now, 60_000), None);
+        // 陈旧（time_updated 落后 > 60s 护栏）→ None（护栏沿用，TC-M3-09-2）
+        insert_session_model(&dir, "ses_stale", "p1", 0.05, (1000, 100, 0, 0, 0),
+            now - ms(3600), now - ms(3600), Some(&model_json("glm-5.3", "zhipuai")), None);
+        assert_eq!(build_idle_report_with_today(&dir, "ses_stale", now, 60_000), None);
+        // 数据库不存在 → None（静默，不崩）
+        let nodir = temp_dir("m3-idle-nodb");
+        assert_eq!(build_idle_report_with_today(&nodir, "x", now, 60_000), None);
     }
 
     // ---- 真实库对账（TC-TK-06；手动跑：--ignored --nocapture） ----

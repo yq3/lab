@@ -1,109 +1,136 @@
 /**
- * token-chart：自画 SVG 的纯几何计算（TC-TK-09：不引入重依赖库）。
+ * token-chart：堆叠柱状图纯计算（v2 M3 §3.5，TC-M3-05；取代 v1 computeBars/
+ * pieSlices——柱图/饼图唯一消费方均在 Token 页，随饼图砍除一并清退，R6）。
  *
- * 输入数值数组，输出柱状图 rect / 饼图 arc path，与 React 组件解耦便于单测。
+ * 输入 day/week 聚合行（含 model_id）+ 勾选模型集合，输出每日一柱、柱内三段
+ * 自底向上 **output → input → cache read**（SCOPE D 裁定；reasoning 不参与
+ * 任何汇总口径）。与 React 组件解耦便于 vitest(node) 单测。
  */
 
-export interface BarRect {
-  x: number;
+import type { TokenRow } from "./token-stats";
+
+/** 模型勾选键：model_id；NULL 模型行以 null 为键（chip 显示「未知模型」）。 */
+export type ModelKey = string | null;
+
+/** 柱内一段（自底向上顺序：output → input → cacheRead）。 */
+export interface StackedSegment {
+  /** 段语义键（渲染色与图例共用：--chart-output/input/cache）。 */
+  key: "output" | "input" | "cacheRead";
+  /** 数值（tooltip/占比用）。 */
+  value: number;
+  /** 段顶 y 坐标（SVG 坐标系，值越大越靠上）。 */
   y: number;
-  w: number;
+  /** 段高（0 值段高度 0）。 */
   h: number;
 }
 
-export interface BarOptions {
+/** 一根堆叠柱（一天）。 */
+export interface StackedBar {
+  /** 分组标签（day=`2026-08-16` / week=`2026-W33`）。 */
+  label: string;
+  /** 三值（勾选剔除后聚合；tooltip/图例用）。 */
+  output: number;
+  input: number;
+  cacheRead: number;
+  /** 柱总量 = output + input + cacheRead。 */
+  total: number;
+  x: number;
+  w: number;
+  /** 三段自底向上排列（segs[0] = 最底段 output）。 */
+  segs: StackedSegment[];
+}
+
+export interface StackedBarOptions {
   width: number;
   height: number;
   pad: number;
   /** 柱宽占每格宽度的比例（0-1，默认 0.6）。 */
   fill?: number;
+  /**
+   * **M5 预留参数位（N3/N12）**：agent 筛选——M3 声明类型不传值不实现；
+   * 「不传 = 不过滤」（等价全量）由钉子单测守住。M5 数据维度（TokenRow.agent
+   * 列）到来时在此填实现，签名与调用点均不变。
+   */
+  agentFilter?: ReadonlySet<string>;
 }
 
 /**
- * 柱状图几何：柱高与最大值成比例，基线在 `height - pad`，柱条在 `[pad, width-pad]`
- * 均分。全零输入返回高度 0 的条（不产生 NaN）。
+ * 堆叠柱计算：
+ * 1. 行按 `row.model_id`（null 为「未知模型」桶）过滤——未勾选的模型剔除后聚合；
+ * 2. 按行 day 标签分组 SUM（多模型行合并为一柱）；
+ * 3. 柱按标签升序排列；柱高与最大 total 成比例，三段自底向上 output → input
+ *    → cache read；全零/空输入不产生 NaN。
  */
-export function computeBars(values: number[], opts: BarOptions): BarRect[] {
+export function computeStackedBars(
+  rows: TokenRow[],
+  selectedModels: ReadonlySet<ModelKey>,
+  opts: StackedBarOptions,
+): StackedBar[] {
   const { width, height, pad } = opts;
   const fill = opts.fill ?? 0.6;
-  const n = values.length;
+  // 勾选剔除（M3 不实现 agentFilter——声明参数位，不传 = 不过滤，N12）
+  const kept = rows.filter((r) => selectedModels.has(r.model_id ?? null));
+  // 按 day 标签聚合（null 标签归 "—"，正常 grouped 行恒有 day）
+  const map = new Map<string, { output: number; input: number; cacheRead: number }>();
+  for (const r of kept) {
+    const k = r.day ?? "—";
+    const cur = map.get(k) ?? { output: 0, input: 0, cacheRead: 0 };
+    cur.output += r.tokens_output;
+    cur.input += r.tokens_input;
+    cur.cacheRead += r.tokens_cache_read;
+    map.set(k, cur);
+  }
+  const entries = [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  const n = entries.length;
   if (n === 0) return [];
   const plotW = Math.max(width - 2 * pad, 0);
   const plotH = Math.max(height - 2 * pad, 0);
-  const max = Math.max(...values, 0);
+  const max = Math.max(...entries.map(([, v]) => v.output + v.input + v.cacheRead), 0);
   const slot = plotW / n;
   const barW = slot * fill;
   const baseline = pad + plotH;
-  return values.map((v, i) => {
-    const h = max > 0 ? (Math.max(v, 0) / max) * plotH : 0;
+  return entries.map(([label, v], i) => {
+    const total = v.output + v.input + v.cacheRead;
+    const hOf = (x: number) => (max > 0 ? (Math.max(x, 0) / max) * plotH : 0);
+    const hOut = hOf(v.output);
+    const hIn = hOf(v.input);
+    const hCache = hOf(v.cacheRead);
+    // 自底向上：output 贴基线 → input 叠上 → cache read 顶段
+    const yOut = baseline - hOut;
+    const yIn = yOut - hIn;
+    const yCache = yIn - hCache;
     return {
+      label,
+      output: v.output,
+      input: v.input,
+      cacheRead: v.cacheRead,
+      total,
       x: pad + i * slot + (slot - barW) / 2,
-      y: baseline - h,
       w: barW,
-      h,
+      segs: [
+        { key: "output", value: v.output, y: yOut, h: hOut },
+        { key: "input", value: v.input, y: yIn, h: hIn },
+        { key: "cacheRead", value: v.cacheRead, y: yCache, h: hCache },
+      ],
     };
   });
 }
 
-export interface PieItem {
-  value: number;
-  label: string;
+/** 模型 chip 列表项：跨度内 distinct model_id 按总量（in+out+cache_read）降序。 */
+export interface ModelChip {
+  key: ModelKey;
+  /** 勾选状态由调用方持有，这里只出清单。 */
+  total: number;
 }
 
-export interface PieSlice {
-  /** SVG path `d`（圆心 (r,r)、半径 r，从 12 点方向顺时针）。 */
-  path: string;
-  /** 占比 0-100。 */
-  percent: number;
-  value: number;
-  label: string;
-}
-
-function arcPath(cx: number, cy: number, r: number, a0: number, a1: number): string {
-  // 角度（弧度）→ 坐标；12 点方向为 0，顺时针为正
-  const pt = (a: number) => [cx + r * Math.sin(a), cy - r * Math.cos(a)] as const;
-  const [x0, y0] = pt(a0);
-  const [x1, y1] = pt(a1);
-  const largeArc = a1 - a0 > Math.PI ? 1 : 0;
-  return `M ${cx} ${cy} L ${x0.toFixed(2)} ${y0.toFixed(2)} A ${r} ${r} 0 ${largeArc} 1 ${x1.toFixed(2)} ${y1.toFixed(2)} Z`;
-}
-
-/**
- * 饼图切片：数值 → 占比 + SVG 弧 path。单项 100% 生成两段半圆（完整圆）；
- * 空或全零输入返回空数组。
- */
-export function pieSlices(items: PieItem[], r: number): PieSlice[] {
-  const positive = items.filter((i) => i.value > 0);
-  const total = positive.reduce((acc, i) => acc + i.value, 0);
-  if (total <= 0) return [];
-  const cx = r;
-  const cy = r;
-  let angle = 0;
-  return positive.map((item) => {
-    const sweep = (item.value / total) * Math.PI * 2;
-    let path: string;
-    if (positive.length === 1) {
-      // 完整圆：从圆心出发两段 180° 弧拼合
-      const pt = (a: number) =>
-        [cx + r * Math.sin(a), cy - r * Math.cos(a)] as const;
-      const [x0, y0] = pt(0);
-      const [x1, y1] = pt(Math.PI);
-      const [x2, y2] = pt(Math.PI * 2);
-      const f = (n: number) => n.toFixed(2);
-      path =
-        `M ${f(cx)} ${f(cy)} L ${f(x0)} ${f(y0)} ` +
-        `A ${r} ${r} 0 0 1 ${f(x1)} ${f(y1)} ` +
-        `A ${r} ${r} 0 0 1 ${f(x2)} ${f(y2)} Z`;
-    } else {
-      path = arcPath(cx, cy, r, angle, angle + sweep);
-    }
-    const slice: PieSlice = {
-      path,
-      percent: (item.value / total) * 100,
-      value: item.value,
-      label: item.label,
-    };
-    angle += sweep;
-    return slice;
-  });
+/** 聚合行 → 模型 chip 清单（§3.5：distinct model_id、按总量降序、默认全勾）。 */
+export function computeModelChips(rows: TokenRow[]): ModelChip[] {
+  const map = new Map<ModelKey, number>();
+  for (const r of rows) {
+    const k: ModelKey = r.model_id ?? null;
+    map.set(k, (map.get(k) ?? 0) + r.tokens_input + r.tokens_output + r.tokens_cache_read);
+  }
+  return [...map.entries()]
+    .map(([key, total]) => ({ key, total }))
+    .sort((a, b) => b.total - a.total);
 }

@@ -24,6 +24,7 @@ import {
 } from "../lib/theme";
 import { setPluginEnabled, usePluginStore } from "../lib/plugin-store";
 import { usePetStore } from "../pet/petStore";
+import { fetchToolBroadcast, setToolBroadcast } from "../lib/tool-bubble-bridge";
 import { changeLanguage, t, useLangStore, type Lang } from "../lib/i18n";
 
 /**
@@ -82,6 +83,10 @@ export default function Settings() {
   const plugins = usePluginStore((s) => s.plugins); // v2 M2 功能管理
   const [themeError, setThemeError] = useState<string | null>(null);
   const [pluginBusy, setPluginBusy] = useState<string | null>(null);
+  /** v2 M3（§3.7.2）：工具播报开关（初始显示值经 get 初始化，N13）。 */
+  const [toolBroadcast, setToolBroadcastState] = useState<boolean>(true);
+  const [toolBroadcastBusy, setToolBroadcastBusy] = useState(false);
+  const [toolBroadcastError, setToolBroadcastError] = useState<string | null>(null);
 
   // L2：语言切换 → 旧语言的 notice（Rust message 无法前端重算）整组清除
   useEffect(() => {
@@ -125,6 +130,14 @@ export default function Settings() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // v2 M3（N13）：工具播报开关初始显示值经 get 初始化（Rust app_state 为权威）
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    fetchToolBroadcast()
+      .then(setToolBroadcastState)
+      .catch((e) => console.error("[pulsepet] tool broadcast init failed:", e));
+  }, []);
 
   // 接入管理刷新：挂载 + 语言切换（doctor message 在 Rust 侧随语言组装）。
   // focus/tab 双触发见下方自动刷新 effect（与 load 同一触发源）。
@@ -267,6 +280,25 @@ export default function Settings() {
     }
   };
 
+  /** v2 M3（§3.7.2）：工具播报开关——set 持久化 + Rust 定向 pet 窗广播（即时
+   * 静默/恢复无需重启）；本地乐观更新，失败回滚并提示。 */
+  const onToolBroadcast = async (enabled: boolean) => {
+    setToolBroadcastBusy(true);
+    setToolBroadcastError(null);
+    try {
+      await setToolBroadcast(enabled);
+      setToolBroadcastState(enabled);
+    } catch (e) {
+      setToolBroadcastError(
+        t("settings.toolBroadcastFail", {
+          msg: e instanceof Error ? e.message : String(e),
+        }),
+      );
+    } finally {
+      setToolBroadcastBusy(false);
+    }
+  };
+
   /** v2 M2 功能管理：插件开关（Rust 写列 + 调度器 reload；本 store 重拉驱动
    * tab 栏/徽标联动）。 */
   const onPluginToggle = async (id: string, enabled: boolean) => {
@@ -360,6 +392,20 @@ export default function Settings() {
         {t("settings.hotkeys")}
         {import.meta.env.DEV ? t("settings.hotkeys.debug") : ""}
       </p>
+
+      {/* v2 M3（§3.7.2，P2-4）：「宠物与播报」区——工具播报开关（settings-check
+          形态，与穿透同款；不放「功能管理」区——该区语义为插件启停） */}
+      <h2>{t("settings.sectionPet")}</h2>
+      {toolBroadcastError && <p className="settings-error">⚠️ {toolBroadcastError}</p>}
+      <label className="settings-check">
+        <input
+          type="checkbox"
+          checked={toolBroadcast}
+          disabled={toolBroadcastBusy || !isTauriRuntime()}
+          onChange={(e) => void onToolBroadcast(e.target.checked)}
+        />
+        <span>{t("settings.toolBroadcast")}</span>
+      </label>
 
       {/* M8：语言切换（v1 双语 zh/en） */}
       <h2>{t("settings.language")}</h2>

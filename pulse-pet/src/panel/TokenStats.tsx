@@ -12,21 +12,35 @@ import {
   type StatsError,
   type TokenRow,
 } from "../lib/token-stats";
-import { computeBars, pieSlices } from "../lib/token-chart";
+import {
+  computeModelChips,
+  computeStackedBars,
+  type ModelKey,
+  type StackedBar,
+} from "../lib/token-chart";
 import { t, useLangStore } from "../lib/i18n";
 
-/** 时间跨度预设（TC-TK-08：7d / 30d / 自定义；边界含当天）。 */
-type Preset = "7d" | "30d" | "custom";
+/**
+ * 时间跨度预设（TC-TK-08：today（v2 M3 §3.3，默认）/ 7d / 30d / 自定义）。
+ */
+type Preset = "today" | "7d" | "30d" | "custom";
 
-/** 统计维度（TC-TK-07：day/week/range 驱动时序与汇总；session 维度固定给会话列表）。 */
+/** 统计维度（TC-TK-07：day/week 驱动时序与汇总；session 维度固定给会话列表）。 */
 type Dimension = "day" | "week" | "range";
 
-/**
- * v2 M2：图表色 token 化（--chart-output/input/cache 三段循环；R8 硬编码
- * 色清零——SVG attribute 不支持 var()，色值走 CSS 类，见 global.css）。
- * M3 砍饼图改堆叠柱图后由三段语义直接对应。
- */
-const CHART_CLASSES = ["pie-c0", "pie-c1", "pie-c2"] as const;
+/** 三段语义 → CSS 类（色值 = M2 --chart-output/input/cache token，§3.5）。 */
+const SEG_CLASS: Record<string, string> = {
+  output: "stack-seg stack-seg-output",
+  input: "stack-seg stack-seg-input",
+  cacheRead: "stack-seg stack-seg-cache",
+};
+
+/** 图例三项（仅说明不可交互——与模型筛选语义隔离，§3.5）。 */
+const LEGEND: { key: "output" | "input" | "cacheRead"; label: string }[] = [
+  { key: "output", label: "output" },
+  { key: "input", label: "input" },
+  { key: "cacheRead", label: "cache read" },
+];
 
 /** 错误码 → 用户提示（TC-TK-03/04/13；M8 i18n 随当前语言）。 */
 function errorHint(err: StatsError): string {
@@ -43,9 +57,32 @@ function errorHint(err: StatsError): string {
   }
 }
 
+/** 首列标题：title 原样（含 `New session*` 回退行）；NULL → session id 前 8 位。 */
+function sessionTitle(s: TokenRow): string {
+  if (s.title) return s.title;
+  return s.session_id ? s.session_id.slice(0, 8) : "—";
+}
+
+/** title 属性 tooltip = 完整标题 + session id + 本地时间（TC-M3-08-2）。 */
+function sessionTitleTip(s: TokenRow): string {
+  const title = s.title ?? "(no title)";
+  return `${title}\n${s.session_id ?? ""}\n${formatTime(s.time_updated)}`;
+}
+
+/** 项目列：project_name basename；null → global/unknown 回退标签（前端判定）。 */
+function projectName(s: TokenRow): string {
+  if (s.project_name) return s.project_name;
+  // Rust 侧 "/"（global）与 JOIN 未命中均 → project_name=None；by-session 行
+  // 保留 project_id，global 行的 id 恒为字面量 "global"（spike S6 实测）
+  return s.project_id === "global"
+    ? t("token.project.global")
+    : t("token.project.unknown");
+}
+
 export default function TokenStats() {
-  const lang = useLangStore((s) => s.lang); // M8 i18n：语言变化时本页文案重渲染（projects useMemo 也依赖）
-  const [preset, setPreset] = useState<Preset>("7d");
+  // M8 i18n：语言变化时本页文案重渲染（projects 等 i18n 标签 useMemo 依赖）
+  useLangStore((s) => s.lang);
+  const [preset, setPreset] = useState<Preset>("today"); // v2 M3：默认今日（原 7d）
   const [fromStr, setFromStr] = useState(() => localDateStr());
   const [toStr, setToStr] = useState(() => localDateStr());
   const [dimension, setDimension] = useState<Dimension>("day");
@@ -54,6 +91,8 @@ export default function TokenStats() {
   const [error, setError] = useState<StatsError | null>(null);
   const [loading, setLoading] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
+  /** 模型筛选（作用域仅柱图，SCOPE E；null 键 = 「未知模型」桶）。 */
+  const [selectedModels, setSelectedModels] = useState<Set<ModelKey> | null>(null);
 
   // 跨度计算：预设含当天；自定义从/至均为整天边界（含当天）
   const range = useMemo(() => {
@@ -89,38 +128,32 @@ export default function TokenStats() {
     void load();
   }, [load]);
 
-  const kpi = useMemo(() => sumRows(rows ?? []), [rows]);
-
-  /** 时序桶：day/week 维度按 day 标签聚合 tokens；range 维度不画柱图。 */
-  const buckets = useMemo(() => {
-    if (!rows || dimension === "range") return [] as { label: string; tokens: number }[];
-    const map = new Map<string, number>();
-    for (const r of rows) {
-      const k = r.day ?? "—";
-      map.set(k, (map.get(k) ?? 0) + r.tokens_input + r.tokens_output + r.tokens_cache_read);
-    }
-    return [...map.entries()]
-      .map(([label, tokens]) => ({ label, tokens }))
-      .sort((a, b) => a.label.localeCompare(b.label));
+  // 数据/维度切换 → 模型筛选重置为全勾（新跨度 chip 集合变化）
+  useEffect(() => {
+    setSelectedModels(null);
   }, [rows, dimension]);
 
-  /** 项目分布（TC-TK-09 ③）：跨维度行按 project 聚合 cost。
-   * P3-2（R1 审查）：依赖补 lang——"（未知项目）"标签随语言切换即时刷新。 */
-  const projects = useMemo(() => {
-    if (!rows) return [] as { label: string; cost: number; tokens: number }[];
-    const map = new Map<string, { cost: number; tokens: number }>();
-    for (const r of rows) {
-      const k = r.project_id ?? t("token.project.unknown");
-      const cur = map.get(k) ?? { cost: 0, tokens: 0 };
-      cur.cost += r.cost;
-      cur.tokens += r.tokens_input + r.tokens_output + r.tokens_cache_read;
-      map.set(k, cur);
-    }
-    return [...map.entries()]
-      .map(([label, v]) => ({ label, ...v }))
-      .sort((a, b) => b.cost - a.cost || b.tokens - a.tokens);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- t 依赖 lang（store 订阅触发组件重渲染）
-  }, [rows, lang]);
+  const kpi = useMemo(() => sumRows(rows ?? []), [rows]);
+
+  /** 模型 chip 清单（distinct model_id 按总量降序；range 维无筛选区）。 */
+  const chips = useMemo(() => computeModelChips(rows ?? []), [rows]);
+
+  const effectiveSelected = useMemo<ReadonlySet<ModelKey>>(
+    () => selectedModels ?? new Set(chips.map((c) => c.key)),
+    [selectedModels, chips],
+  );
+
+  const bars = useMemo(
+    () =>
+      dimension === "range"
+        ? []
+        : computeStackedBars(rows ?? [], effectiveSelected, {
+            width: 640,
+            height: 190,
+            pad: 18,
+          }),
+    [rows, dimension, effectiveSelected],
+  );
 
   const sortedSessions = useMemo(() => {
     if (!sessions) return [] as TokenRow[];
@@ -131,12 +164,16 @@ export default function TokenStats() {
     );
   }, [sessions]);
 
+  const toggleModel = (key: ModelKey) => {
+    setSelectedModels(symmetricToggle(effectiveSelected, key));
+  };
+
   return (
     <div className="token-stats">
-      {/* 控制条：跨度 + 维度 + 刷新 */}
+      {/* 控制条：跨度 + 维度 + 刷新（v2 M3：首位「今日」+ 默认今日，§3.3） */}
       <div className="token-controls">
         <div className="token-seg" role="tablist" aria-label={t("token.aria.range")}>
-          {(["7d", "30d", "custom"] as Preset[]).map((p) => (
+          {(["today", "7d", "30d", "custom"] as Preset[]).map((p) => (
             <button
               key={p}
               className={preset === p ? "seg active" : "seg"}
@@ -184,9 +221,15 @@ export default function TokenStats() {
       {/* 错误态（TC-TK-03/04/13：不崩溃，给出可行动提示） */}
       {error && <div className="token-error">{errorHint(error)}</div>}
 
-      {/* ① KPI 卡（TC-TK-09） */}
+      {/* ① KPI 四卡（v2 M3 §3.5：总量/input/output/cost；cache read 降首卡副行） */}
       {rows && (
         <div className="token-kpis">
+          <div className="kpi kpi-total">
+            <div className="kpi-value">{formatTokens(kpi.total)}</div>
+            <div className="kpi-label">{t("token.kpi.total")}</div>
+            {/* 副行小字：含 cache read X */}
+            <div className="kpi-sub">{t("token.kpi.totalSub", { v: formatTokens(kpi.cacheRead) })}</div>
+          </div>
           <div className="kpi">
             <div className="kpi-value">{formatTokens(kpi.input)}</div>
             <div className="kpi-label">input tokens</div>
@@ -196,221 +239,244 @@ export default function TokenStats() {
             <div className="kpi-label">output tokens</div>
           </div>
           <div className="kpi">
-            <div className="kpi-value">{formatTokens(kpi.cacheRead)}</div>
-            <div className="kpi-label">cache read</div>
-          </div>
-          <div className="kpi">
             <div className="kpi-value">{formatCost(kpi.cost)}</div>
             <div className="kpi-label">cost</div>
           </div>
         </div>
       )}
 
-      {/* ② 时序图：自画 SVG 柱状图（TC-TK-09：不引入重依赖库） */}
-      {rows && dimension !== "range" && buckets.length > 0 && (
+      {/* ② 堆叠柱图 + 模型筛选（day/week 维度；range 维无柱图——隐藏柱图与
+          筛选区，仅 KPI + 会话列表，§3.5） */}
+      {rows && dimension !== "range" && (
         <section className="token-section">
-          {/* P2-1（R1 审查）：i18n 化时误删的标题补回——token.chart.title 双语 */}
           <h3>
             {t("token.chart.title", {
               dim: dimension === "day" ? t("token.dim.day") : t("token.dim.week"),
             })}
           </h3>
-          <TimeBarChart data={buckets} />
+
+          {/* 筛选 chip 行：可容纳多组筛选的容器（filter-row；M5 时 agent 组作为
+              第二组插入同一容器——预留位只落结构，不渲染空组，§3.5/P1-2） */}
+          <div className="filter-row">
+            <div className="filter-group" role="group" aria-label={t("token.col.model")}>
+              {chips.map((c) => (
+                <label key={String(c.key)} className="model-chip" title={c.key ?? t("token.model.unknown")}>
+                  <input
+                    type="checkbox"
+                    checked={effectiveSelected.has(c.key)}
+                    onChange={() => toggleModel(c.key)}
+                  />
+                  <span className="model-chip-name">{c.key ?? t("token.model.unknown")}</span>
+                  <span className="model-chip-total">{formatTokens(c.total)}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          {effectiveSelected.size === 0 ? (
+            <p className="token-empty">{t("token.chart.noModels")}</p>
+          ) : bars.length === 0 ? (
+            <p className="token-empty">{t("token.sessions.empty")}</p>
+          ) : (
+            <StackedBarChart bars={bars} />
+          )}
+
+          {/* 图例三项：仅说明不可交互（与模型筛选语义隔离） */}
+          <div className="chart-legend" aria-hidden="true">
+            {LEGEND.map((l) => (
+              <span key={l.key} className="legend-item">
+                <span className={`legend-dot legend-${l.key}`} />
+                {l.label}
+              </span>
+            ))}
+          </div>
         </section>
       )}
 
-      <div className="token-columns">
-        {/* ③ 项目分布：饼图 + 列表 */}
-        {rows && projects.length > 0 && (
-          <section className="token-section">
-            <h3>{t("token.pie.title")}</h3>
-            <ProjectPie projects={projects} />
-          </section>
-        )}
-
-        {/* ④ 会话列表：按 token 降序，可展开详情（TC-TK-09） */}
-        {sessions && (
-          <section className="token-section">
-            <h3>{t("token.sessions.title", { n: sortedSessions.length })}</h3>
-            {sortedSessions.length === 0 && (
-              <p className="token-empty">{t("token.sessions.empty")}</p>
-            )}
-            <ul className="token-sessions">
-              {sortedSessions.map((s) => {
-                const total = s.tokens_input + s.tokens_output + s.tokens_cache_read;
-                const open = expanded === s.session_id;
-                return (
-                  <li key={s.session_id}>
-                    <button
-                      className="session-row"
-                      onClick={() => setExpanded(open ? null : s.session_id)}
-                    >
-                      <span className="session-id" title={s.session_id ?? ""}>
-                        {shortId(s.session_id)}
-                      </span>
-                      <span className="session-project">{s.project_id ?? "—"}</span>
-                      <span className="session-tokens">{formatTokens(total)}</span>
-                      <span className="session-cost">{formatCost(s.cost)}</span>
-                      <span className="session-caret">{open ? "▾" : "▸"}</span>
-                    </button>
-                    {open && (
-                      <dl className="session-detail">
-                        <div>
-                          <dt>input</dt>
-                          <dd>{s.tokens_input.toLocaleString()}</dd>
-                        </div>
-                        <div>
-                          <dt>output</dt>
-                          <dd>{s.tokens_output.toLocaleString()}</dd>
-                        </div>
-                        <div>
-                          <dt>reasoning</dt>
-                          <dd>{s.tokens_reasoning.toLocaleString()}</dd>
-                        </div>
-                        <div>
-                          <dt>cache read</dt>
-                          <dd>{s.tokens_cache_read.toLocaleString()}</dd>
-                        </div>
-                        <div>
-                          <dt>cache write</dt>
-                          <dd>{s.tokens_cache_write.toLocaleString()}</dd>
-                        </div>
-                        <div>
-                          <dt>cost</dt>
-                          <dd>{formatCost(s.cost)}</dd>
-                        </div>
-                        <div className="detail-wide">
-                          <dt>{t("token.sessions.updated")}</dt>
-                          <dd>{formatTime(s.time_updated)}</dd>
-                        </div>
-                      </dl>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
-          </section>
-        )}
-      </div>
+      {/* ③ 会话列表：全宽（v2 M3 砍饼图双栏，§3.6） */}
+      {sessions && (
+        <section className="token-section">
+          <h3>{t("token.sessions.title", { n: sortedSessions.length })}</h3>
+          {sortedSessions.length === 0 && (
+            <p className="token-empty">{t("token.sessions.empty")}</p>
+          )}
+          <ul className="token-sessions">
+            {sortedSessions.map((s) => {
+              const total = s.tokens_input + s.tokens_output + s.tokens_cache_read;
+              const open = expanded === s.session_id;
+              return (
+                <li key={s.session_id}>
+                  <button
+                    className="session-row"
+                    onClick={() => setExpanded(open ? null : s.session_id)}
+                  >
+                    <span className="session-title" title={sessionTitleTip(s)}>
+                      {sessionTitle(s)}
+                    </span>
+                    <span className="session-project">{projectName(s)}</span>
+                    <span className="session-tokens">{formatTokens(total)}</span>
+                    <span className="session-cost">{formatCost(s.cost)}</span>
+                    <span className="session-caret">{open ? "▾" : "▸"}</span>
+                  </button>
+                  {open && (
+                    <dl className="session-detail">
+                      {/* v2 M3：展开详情追加「模型」行（model_id；None → 未知模型） */}
+                      <div className="detail-wide">
+                        <dt>{t("token.col.model")}</dt>
+                        <dd>{s.model_id ?? t("token.model.unknown")}</dd>
+                      </div>
+                      <div>
+                        <dt>input</dt>
+                        <dd>{s.tokens_input.toLocaleString()}</dd>
+                      </div>
+                      <div>
+                        <dt>output</dt>
+                        <dd>{s.tokens_output.toLocaleString()}</dd>
+                      </div>
+                      <div>
+                        <dt>reasoning</dt>
+                        <dd>{s.tokens_reasoning.toLocaleString()}</dd>
+                      </div>
+                      <div>
+                        <dt>cache read</dt>
+                        <dd>{s.tokens_cache_read.toLocaleString()}</dd>
+                      </div>
+                      <div>
+                        <dt>cache write</dt>
+                        <dd>{s.tokens_cache_write.toLocaleString()}</dd>
+                      </div>
+                      <div>
+                        <dt>cost</dt>
+                        <dd>{formatCost(s.cost)}</dd>
+                      </div>
+                      <div className="detail-wide">
+                        <dt>{t("token.sessions.updated")}</dt>
+                        <dd>{formatTime(s.time_updated)}</dd>
+                      </div>
+                    </dl>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
     </div>
   );
 }
 
-/** 自画 SVG 柱状图（几何来自纯函数 computeBars；色值走 CSS 类 = chart token）。 */
-function TimeBarChart({ data }: { data: { label: string; tokens: number }[] }) {
+/** 勾选切换纯逻辑（不可变更新）。 */
+function symmetricToggle(set: ReadonlySet<ModelKey>, key: ModelKey): Set<ModelKey> {
+  const next = new Set(set);
+  if (next.has(key)) next.delete(key);
+  else next.add(key);
+  return next;
+}
+
+/**
+ * 堆叠柱状图（几何来自 computeStackedBars；HTML tooltip = 日期 + 三值 +
+ * 占比 + 总量；图例在组件外仅说明）。悬浮 tooltip 用受控 state（非 <title>，
+ * §3.5「自定义 HTML tooltip」）。
+ */
+function StackedBarChart({ bars }: { bars: StackedBar[] }) {
   const W = 640;
-  const H = 180;
+  const H = 190;
   const PAD = 18;
-  const bars = computeBars(
-    data.map((d) => d.tokens),
-    { width: W, height: H, pad: PAD },
-  );
-  const max = Math.max(...data.map((d) => d.tokens), 0);
-  return (
-    <svg
-      className="token-chart"
-      viewBox={`0 0 ${W} ${H}`}
-      role="img"
-      aria-label={t("token.chart.aria")}
-    >
-      <line
-        className="chart-axis"
-        x1={PAD}
-        y1={H - PAD}
-        x2={W - PAD}
-        y2={H - PAD}
-        strokeWidth="1"
-      />
-      {bars.map((b, i) => (
-        <rect
-          key={data[i].label}
-          className="bar-fill"
-          x={b.x}
-          y={b.y}
-          width={b.w}
-          height={b.h}
-        >
-          <title>{t("token.chart.bar", { label: data[i].label, n: data[i].tokens.toLocaleString() })}</title>
-        </rect>
-      ))}
-      {/* 首尾标签（中间条 hover title 提供详情） */}
-      {data.length > 0 && (
-        <text className="chart-label" x={PAD} y={H - 4} fontSize="10">
-          {data[0].label}
-        </text>
-      )}
-      {data.length > 1 && (
-        <text
-          className="chart-label"
-          x={W - PAD}
-          y={H - 4}
-          fontSize="10"
-          textAnchor="end"
-        >
-          {data[data.length - 1].label}
-        </text>
-      )}
-      {max > 0 && (
-        <text className="chart-label faint" x={PAD} y={PAD - 4} fontSize="10">
-          {formatTokens(max)}
-        </text>
-      )}
-    </svg>
-  );
-}
+  const [tip, setTip] = useState<{ bar: StackedBar; x: number; y: number } | null>(null);
+  const max = Math.max(...bars.map((b) => b.total), 0);
 
-/** 项目占比饼图 + 列表（色 = chart token 三段循环，M3 砍饼图）。 */
-function ProjectPie({
-  projects,
-}: {
-  projects: { label: string; cost: number; tokens: number }[];
-}) {
-  const R = 60;
-  const slices = pieSlices(
-    projects.map((p) => ({ value: p.cost > 0 ? p.cost : p.tokens, label: p.label })),
-    R,
-  );
+  const nameOf: Record<string, string> = {
+    output: "output",
+    input: "input",
+    cacheRead: "cache read",
+  };
+
   return (
-    <div className="project-pie">
+    <div className="stack-chart-wrap">
       <svg
-        width={R * 2}
-        height={R * 2}
-        viewBox={`0 0 ${R * 2} ${R * 2}`}
+        className="token-chart"
+        viewBox={`0 0 ${W} ${H}`}
         role="img"
-        aria-label={t("token.pie.aria")}
+        aria-label={t("token.chart.aria")}
       >
-        {slices.map((s, i) => (
-          <path key={s.label} className={CHART_CLASSES[i % CHART_CLASSES.length]} d={s.path}>
-            <title>{t("token.pie.slice", { label: s.label, pct: s.percent.toFixed(1) })}</title>
-          </path>
+        <line
+          className="chart-axis"
+          x1={PAD}
+          y1={H - PAD}
+          x2={W - PAD}
+          y2={H - PAD}
+          strokeWidth="1"
+        />
+        {bars.map((b) => (
+          <g
+            key={b.label}
+            onMouseEnter={() => setTip({ bar: b, x: b.x + b.w / 2, y: b.segs[2].y })}
+            onMouseLeave={() => setTip(null)}
+          >
+            {b.segs.map((s) => (
+              <rect
+                key={s.key}
+                className={SEG_CLASS[s.key]}
+                x={b.x}
+                y={s.y}
+                width={b.w}
+                height={s.h}
+              />
+            ))}
+          </g>
         ))}
+        {/* 首尾标签 */}
+        {bars.length > 0 && (
+          <text className="chart-label" x={PAD} y={H - 4} fontSize="10">
+            {bars[0].label}
+          </text>
+        )}
+        {bars.length > 1 && (
+          <text
+            className="chart-label"
+            x={W - PAD}
+            y={H - 4}
+            fontSize="10"
+            textAnchor="end"
+          >
+            {bars[bars.length - 1].label}
+          </text>
+        )}
+        {max > 0 && (
+          <text className="chart-label faint" x={PAD} y={PAD - 4} fontSize="10">
+            {formatTokens(max)}
+          </text>
+        )}
       </svg>
-      <ul className="project-list">
-        {projects.map((p, i) => (
-          <li key={p.label}>
-            <span
-              className={`project-dot ${CHART_CLASSES[i % CHART_CLASSES.length]}`}
-            />
-            <span className="project-name" title={p.label}>
-              {p.label}
-            </span>
-            <span className="project-pct">
-              {(
-                (slices.find((s) => s.label === p.label)?.percent ?? 0)
-              ).toFixed(1)}
-              %
-            </span>
-            <span className="project-cost">{formatCost(p.cost)}</span>
-          </li>
-        ))}
-      </ul>
+      {tip && (
+        <div
+          className="chart-tip"
+          style={{
+            left: `${Math.min(Math.max((tip.x / W) * 100, 8), 92)}%`,
+            top: `${Math.max((tip.y / H) * 100 - 4, 2)}%`,
+          }}
+        >
+          <div className="chart-tip-title">
+            {t("token.chart.tip", { label: tip.bar.label, total: formatTokens(tip.bar.total) })}
+          </div>
+          {(["output", "input", "cacheRead"] as const).map((k) => {
+            const v =
+              k === "output" ? tip.bar.output : k === "input" ? tip.bar.input : tip.bar.cacheRead;
+            const pct = tip.bar.total > 0 ? (v / tip.bar.total) * 100 : 0;
+            return (
+              <div key={k} className="chart-tip-row">
+                {t("token.chart.tipRow", {
+                  name: nameOf[k],
+                  n: v.toLocaleString(),
+                  pct: pct.toFixed(1),
+                })}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
-}
-
-function shortId(id: string | null): string {
-  if (!id) return "—";
-  return id.length > 14 ? `${id.slice(0, 14)}…` : id;
 }
 
 function formatTime(ms: number | null): string {

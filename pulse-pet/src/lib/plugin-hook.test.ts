@@ -6,10 +6,14 @@ import {
   Backoff,
   BUBBLE_POOL,
   bucketFor,
+  buildDetail,
   buildHooks,
   classifyEvent,
   classifyToolBefore,
   createDeliverer,
+  DetailThrottle,
+  DETAIL_COOLDOWN_MS,
+  extractDetailParam,
   isSelfTool,
   pickBubble,
   postState,
@@ -598,5 +602,256 @@ describe("插件三机制联动时间线（v0.1.3 四-2/3/4 集成，TC-EV-27）
     for (let i = 1; i < times.length; i++) {
       expect(times[i] - times[i - 1]).toBeLessThan(30000);
     }
+  });
+});
+
+// ===========================================================================
+// v2 M3 工具级气泡：extractDetailParam 提取净化 + detail 独立 20s 节流桶
+//（V2-DESIGN §3.7.1，TC-M3-13；P1-4 bash 净化强化钉子）
+// ===========================================================================
+
+describe("M3 extractDetailParam：各工具族 param 提取（TC-M3-13-1）", () => {
+  it("read/edit：file path → basename（绝不携带路径原文）", () => {
+    expect(extractDetailParam("read", { filePath: "/Users/x/lab/V2-DESIGN.md" })).toBe(
+      "V2-DESIGN.md",
+    );
+    expect(extractDetailParam("edit", { filePath: "src/lib/bubble.ts" })).toBe("bubble.ts");
+    expect(extractDetailParam("write", { path: "/tmp/a b.md" })).toBe("a b.md");
+    expect(extractDetailParam("listfile", { path: "/Users/x/lab" })).toBe("lab");
+    // Windows 分隔符
+    expect(extractDetailParam("read", { filePath: "C:\\dev\\repo\\AGENTS.md" })).toBe("AGENTS.md");
+  });
+
+  it("bash：剥离行首 KEY=value 段后取首词；首词含 / 或 \\ 取 basename（P1-4）", () => {
+    expect(extractDetailParam("bash", { command: "npm test" })).toBe("npm");
+    // 绝对路径命令 → basename（不泄漏路径）
+    expect(extractDetailParam("bash", { command: "/opt/homebrew/bin/npm test" })).toBe("npm");
+    expect(extractDetailParam("bash", { command: "/usr/local/bin/rg pattern" })).toBe("rg");
+    // env 赋值命令（单个/连续）→ 剥离后首词
+    expect(extractDetailParam("bash", { command: "FOO=secret npm test" })).toBe("npm");
+    expect(extractDetailParam("bash", { command: "A=1 B=2 C=3 cargo build --release" })).toBe(
+      "cargo",
+    );
+    // 混合：env 前缀 + 绝对路径命令
+    expect(extractDetailParam("bash", { command: "PATH=/x:/y /opt/bin/node server.js" })).toBe(
+      "node",
+    );
+    // cmd 别名字段
+    expect(extractDetailParam("bash", { cmd: "git status" })).toBe("git");
+  });
+
+  it("search：pattern 净化后原样 ≤40 字符（含 / 或 \\ 取末段）", () => {
+    expect(extractDetailParam("grep", { pattern: "TODO|FIXME" })).toBe("TODO|FIXME");
+    expect(extractDetailParam("glob", { pattern: "src/lib/*.ts" })).toBe("*.ts");
+    expect(extractDetailParam("grep", { pattern: "a/b/c/needle" })).toBe("needle");
+    expect(extractDetailParam("grep", { pattern: "x".repeat(60) })).toHaveLength(40);
+  });
+
+  it("web：URL → hostname（不携带 URL 全文）", () => {
+    expect(extractDetailParam("webfetch", { url: "https://maven.aliyun.com/x?y=1" })).toBe(
+      "maven.aliyun.com",
+    );
+    expect(extractDetailParam("webfetch", { url: "http://localhost:1430/#/panel" })).toBe(
+      "localhost",
+    );
+    // websearch 无 url：query 按 search 同款净化
+    expect(extractDetailParam("websearch", { query: "tauri 2 docs" })).toBe("tauri 2 docs");
+  });
+
+  it("无参 / 提取失败 / 白名单外工具 / 自忽略工具 → null（不携带）", () => {
+    expect(extractDetailParam("read", {})).toBeNull();
+    expect(extractDetailParam("read", { filePath: "" })).toBeNull();
+    expect(extractDetailParam("bash", {})).toBeNull();
+    expect(extractDetailParam("bash", { command: "   " })).toBeNull();
+    expect(extractDetailParam(null, {})).toBeNull();
+    expect(extractDetailParam("unknown-tool", { filePath: "/x/y.md" })).toBeNull();
+    expect(extractDetailParam("pulsepet_say", { text: "hi" })).toBeNull();
+    expect(extractDetailParam(undefined, undefined)).toBeNull();
+  });
+
+  it("buildDetail：'<tplId>:<param>' 组装（TC-M3-13-4）", () => {
+    expect(buildDetail("edit", { filePath: "/x/V2-SCOPE.md" })).toBe("edit:V2-SCOPE.md");
+    expect(buildDetail("bash", { command: "FOO=x npm test" })).toBe("bash:npm");
+    expect(buildDetail("read", {})).toBeNull();
+  });
+
+  it("TC-SEC 口径：detail 不含路径原文 / 参数原文 / URL 全文", () => {
+    const cases = [
+      ["read", { filePath: "/Users/secret/path/token.txt" }, "token.txt"],
+      ["bash", { command: "/usr/local/bin/secret-cmd --password hunter2" }, "secret-cmd"],
+      ["webfetch", { url: "https://evil.example.com/a/b/c?token=xyz" }, "evil.example.com"],
+    ] as const;
+    for (const [tool, args, expectIncluded] of cases) {
+      const d = buildDetail(tool, args);
+      expect(d).toBeTruthy();
+      expect(d).toContain(expectIncluded);
+      // 原文中的敏感片段不出现在 detail
+      expect(d).not.toContain("/Users/secret");
+      expect(d).not.toContain("--password");
+      expect(d).not.toContain("token=xyz");
+    }
+  });
+});
+
+describe("M3 DetailThrottle：独立 20s 单桶（TC-M3-13-3）", () => {
+  it("首条放行；冷却期内拦截；20s 后恢复", () => {
+    let t = 0;
+    const dt = new DetailThrottle(() => t);
+    expect(dt.shouldSend()).toBe(true);
+    t = 10_000;
+    expect(dt.shouldSend(), "20s 冷却期内").toBe(false);
+    t = 20_000;
+    expect(dt.shouldSend(), "冷却窗结束").toBe(true);
+    expect(DETAIL_COOLDOWN_MS).toBe(20000);
+  });
+});
+
+describe("M3 deliver：detail 桶语义四条（reaction 后判定，TC-M3-13-3）", () => {
+  function makeRecorder() {
+    const posted: { kind: string; detail: string | null }[] = [];
+    const postStateImpl = (
+      kind: string,
+      _sid: string,
+      _agent?: string,
+      _f?: unknown,
+      _d?: unknown,
+      detail?: string | null,
+    ): Promise<{ ok: boolean }> => {
+      posted.push({ kind, detail: detail ?? null });
+      return Promise.resolve({ ok: true });
+    };
+    return { posted, postStateImpl };
+  }
+
+  it("冷却期内状态事件照发、detail 省略；detail 桶恢复后再携带", async () => {
+    let t = 0;
+    const rec = makeRecorder();
+    const deliverer = createDeliverer({
+      throttle: new Throttle(() => t),
+      detailThrottle: new DetailThrottle(() => t),
+      postStateImpl: rec.postStateImpl,
+      killswitch: () => false,
+    });
+    await deliverer.deliver("editing", "s1", "edit:a.md"); // 两桶均消耗
+    t = 5_000;
+    // speech 桶独立（error 不受 reaction 冷却约束）→ 状态照发；detail 桶冷却 → 省略
+    await deliverer.deliver("error", "s1", "bash:npm");
+    t = 21_000; // 两桶均出窗
+    await deliverer.deliver("editing", "s1", "edit:c.md");
+    expect(rec.posted).toEqual([
+      { kind: "editing", detail: "edit:a.md" },
+      { kind: "error", detail: null },
+      { kind: "editing", detail: "edit:c.md" },
+    ]);
+  });
+
+  it("状态事件被 reaction 桶吞掉时 detail 桶不消耗", async () => {
+    let t = 0;
+    const rec = makeRecorder();
+    const deliverer = createDeliverer({
+      throttle: new Throttle(() => t),
+      detailThrottle: new DetailThrottle(() => t),
+      postStateImpl: rec.postStateImpl,
+      killswitch: () => false,
+    });
+    // 先发 working 占 reaction 桶（不带 detail）
+    await deliverer.deliver("working", "s1");
+    t = 1_000;
+    // 同桶低优先级（working ≤ working）被节流吞 → 状态不发、detail 桶不消耗
+    await deliverer.deliver("working", "s1", "bash:npm");
+    expect(rec.posted.length, "状态被吞 → 无投递").toBe(1);
+    t = 9_000; // reaction 10s 已过（1s→9s 差 8s？未到）—— t=11_000
+    t = 11_000;
+    await deliverer.deliver("working", "s1", "bash:npm"); // 状态放行；detail 桶从未消耗 → 携带
+    expect(rec.posted[1]).toEqual({ kind: "working", detail: "bash:npm" });
+  });
+
+  it("detail 不影响状态节流桶（状态照常按自身冷却）", async () => {
+    let t = 0;
+    const rec = makeRecorder();
+    const deliverer = createDeliverer({
+      throttle: new Throttle(() => t),
+      detailThrottle: new DetailThrottle(() => t),
+      postStateImpl: rec.postStateImpl,
+      killswitch: () => false,
+    });
+    await deliverer.deliver("editing", "s1", "edit:a.md");
+    t = 5_000;
+    // editing(4) ≤ editing(4)：reaction 维持节流——状态与 detail 都不发
+    await deliverer.deliver("editing", "s1", "edit:b.md");
+    t = 8_000;
+    // error 走 speech 桶（独立）：状态照发；detail 桶仍在冷却（首条 0s 起 20s）→ 省略
+    await deliverer.deliver("error", "s1", "bash:x");
+    expect(rec.posted).toEqual([
+      { kind: "editing", detail: "edit:a.md" },
+      { kind: "error", detail: null },
+    ]);
+  });
+
+  it("detail 冷却消耗不因网络失败回滚（N7）", async () => {
+    let t = 0;
+    const calls: (string | null)[] = [];
+    let failFirst = true;
+    const deliverer = createDeliverer({
+      throttle: new Throttle(() => t),
+      detailThrottle: new DetailThrottle(() => t),
+      postStateImpl: (_k, _s, _a, _f, _d, detail) => {
+        calls.push(detail ?? null);
+        if (failFirst) {
+          failFirst = false;
+          return Promise.reject(new Error("network down"));
+        }
+        return Promise.resolve({ ok: true });
+      },
+      killswitch: () => false,
+      backoff: new Backoff(async () => 0), // 失败不真 sleep（测试加速）
+    });
+    await deliverer.deliver("editing", "s1", "edit:a.md"); // 网络失败
+    t = 1_000;
+    await deliverer.deliver("editing", "s1", "edit:b.md"); // 升级？同级被节流……
+    t = 15_000;
+    await deliverer.deliver("error", "s1", "edit:c.md"); // speech 桶放行；detail 仍冷却 → 省略
+    expect(calls, "失败后 20s 内不重发 detail（不回滚）").toEqual(["edit:a.md", null]);
+  });
+});
+
+describe("M3 buildHooks：仅 tool.execute.before 携带 detail（TC-M3-13-2）", () => {
+  it("before 的 args 提取 detail；after / command.execute.before / 其它钩子不带", async () => {
+    const posted: { kind: string; detail: string | null }[] = [];
+    const deliverer = {
+      deliver: (kind: string, _sid: string | null, detail: string | null = null) => {
+        posted.push({ kind, detail: detail ?? null });
+        return Promise.resolve();
+      },
+    };
+    const hooks = buildHooks(deliverer as never);
+    // before：edit 工具 → editing + detail
+    hooks["tool.execute.before"](
+      { tool: "edit", sessionID: "s1" },
+      { args: { filePath: "/x/pulse-pet-hook.js" } },
+    );
+    // after：working 复位，无 detail
+    hooks["tool.execute.after"]({ tool: "edit", sessionID: "s1" });
+    // command.execute.before：testing，无 detail
+    hooks["command.execute.before"]({ command: "npm test", sessionID: "s1" });
+    // chat.message：thinking，无 detail
+    hooks["chat.message"]({ sessionID: "s1" });
+    // 无 args 的 before（detail=null 不携带，状态照发）
+    hooks["tool.execute.before"]({ tool: "read", sessionID: "s1" }, {});
+    await Promise.resolve();
+    expect(posted).toEqual([
+      { kind: "editing", detail: "edit:pulse-pet-hook.js" },
+      { kind: "working", detail: null },
+      { kind: "testing", detail: null },
+      { kind: "thinking", detail: null },
+      { kind: "working", detail: null },
+    ]);
+  });
+
+  it("全部钩子仍返回 undefined：零阻塞契约不回归（fire-and-forget）", () => {
+    const hooks = buildHooks();
+    expect(hooks["tool.execute.before"]({ tool: "edit" }, { args: { filePath: "/x/a.md" } })).toBeUndefined();
+    expect(hooks["tool.execute.after"]({ tool: "edit" })).toBeUndefined();
+    expect(hooks["command.execute.before"]({ command: "npm test" })).toBeUndefined();
   });
 });

@@ -6,6 +6,7 @@ import { initReminderBridge } from "./lib/reminder-bridge";
 import { initAtlasBridge } from "./lib/atlas-bridge";
 import { initInteractionBridge } from "./lib/interaction";
 import { initTodoBridge } from "./lib/todo-bridge";
+import { initToolBubbleBridge } from "./lib/tool-bubble-bridge";
 import { initI18n } from "./lib/i18n";
 import "./styles/tokens.css"; // v2 M2 设计系统 token 层（先于组件层）
 import "./styles/global.css";
@@ -23,6 +24,9 @@ void initAtlasBridge();
 void initInteractionBridge();
 // M7：todo 完成联动（监听 todo://completed → waving + 气泡；仅 pet 路由生效）。
 void initTodoBridge();
+// v2 M3：工具级气泡链路（pet：get 初始化开关 store + 监听 pulsepet://tool-bubble
+// 透传与 pulsepet://tool-broadcast 开关广播；非 Tauri 环境直接返回）。
+void initToolBubbleBridge();
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
