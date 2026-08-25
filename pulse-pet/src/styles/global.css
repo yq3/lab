@@ -1,3 +1,14 @@
+/**
+ * global.css：v2 M2 组件层（消费 tokens.css 的 token，V2-DESIGN §2.2/§2.8）。
+ *
+ * - BEM 类名与 v1 一致（组件零改动面），值全部 token 化；
+ * - 例外（P2-3 修订）：pet 窗气泡/右键菜单走「宠物世界」固定色
+ *   `--pet-world-*`，不随 data-theme（§2.3 作用域边界）；
+ * - 像素语言四规则：2px 实线边框（分隔线 1px dashed）、位移式硬阴影、
+ *   直角为主、数字/技术字面量等宽（--font-mono）；
+ * - 字号阶 10/11/12/13/17/22（不再出现 14/15/16/20）。
+ */
+
 html,
 body,
 #root {
@@ -5,11 +16,103 @@ body,
   padding: 0;
   width: 100%;
   height: 100%;
-  background: transparent;
+  background: transparent; /* pet 窗透明不变（panel 底色在 .panel 上） */
 }
 
 * {
   box-sizing: border-box;
+}
+
+/* 键盘焦点环（craft-floor states：焦点可见且主题化；鼠标点击不显环） */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* 文本选中态（craft-floor browser surfaces：selection 属于设计面，从色板取） */
+.panel ::selection {
+  background: var(--accent);
+  color: var(--bg);
+}
+
+/* 减少动态偏好（craft-floor motion：spinner 转为静态强调，保状态可辨） */
+@media (prefers-reduced-motion: reduce) {
+  .intg-spinner {
+    animation: none;
+    border: 2px solid var(--line);
+    border-top-color: var(--accent);
+  }
+}
+
+/* ---- v2 M2 控件规格基线（R1-supplement-2 打磨）----
+ * 三页（提醒/Todo/设置）控件历史上来自不同批次、规格发散；统一为：
+ * 输入类控件 32px 高（padding 5px 10px + 2px 边框 + 13px 字）；
+ * 行内小按钮 28px 高（5px 12px + 12px 字）；主按钮 32px 与输入框齐高；
+ * checkbox 16×16 + accent-color 主题化（原生控件随主题，深色勾选可见）。 */
+input[type="checkbox"],
+input[type="radio"] {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  accent-color: var(--accent);
+}
+
+input[type="text"],
+input[type="number"],
+input[type="date"],
+input[type="time"],
+select {
+  font-family: inherit;
+}
+
+/* 行内按钮基类（R1-supplement-3：`.seg` 是三页共有的按钮模式，此前只有
+ * 各容器局部规则——裸用（Token 刷新 / 表单取消）落在 UA 默认渲染上，为
+ * 「组件大小粗糙」的系统性根源。基类 = 28px 规格；分段容器（token-seg /
+ * theme-seg）与主按钮由各自规则按特异性覆盖。 */
+.seg {
+  appearance: none;
+  padding: 5px 12px;
+  min-height: 28px;
+  border: 2px solid var(--line);
+  background: var(--surface);
+  font-size: 12px;
+  font-family: inherit;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+
+.seg:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+
+.seg.danger {
+  color: var(--danger);
+}
+
+/* 禁用态（craft-floor states：↑/↓ 到边界、加载中刷新等真实场景） */
+.seg:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.seg:disabled:hover {
+  background: var(--surface);
+}
+
+/* 滚动条（深浅两主题可读，R7） */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border: 2px solid var(--bg);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--ink-faint);
 }
 
 /* pet 窗口：220×220 透明画布 */
@@ -26,39 +129,59 @@ body,
   height: 220px;
 }
 
-/* 宠物气泡（M3 token 汇报；M4 复用）：窗口内顶部悬浮卡片，单行省略 */
+/* ---- 宠物气泡（v2 M2：宠物世界固定色，不随主题，§2.6.3） ---- */
 .pet-bubble {
   position: absolute;
   top: 2px;
   left: 50%;
   transform: translateX(-50%);
   max-width: 208px;
-  padding: 5px 10px;
-  background: rgba(255, 255, 255, 0.96);
-  border: 1px solid #e5e7eb;
-  border-radius: 10px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
-  color: #1f2937;
-  font-size: 12px;
+  padding: 7px 12px;
+  background: var(--pet-world-surface);
+  border: 2px solid var(--pet-world-line);
+  box-shadow: var(--pet-world-shadow);
+  color: #29241d; /* 墨字（pet-world 固定暖白面上的墨色，两主题同值） */
+  font-size: 13px;
   line-height: 1.4;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   z-index: 2;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", system-ui, sans-serif;
 }
 
-/* 宠物右键菜单（M6，TC-WIN-03）：220×220 窗口内 DOM 浮层（clamp 见 pet-menu.ts） */
+/* 像素尖角：45° 旋转小方块（样例所见） */
+.pet-bubble::after {
+  content: "";
+  position: absolute;
+  left: 24px;
+  bottom: -8px;
+  width: 8px;
+  height: 8px;
+  background: var(--pet-world-surface);
+  border-right: 2px solid var(--pet-world-line);
+  border-bottom: 2px solid var(--pet-world-line);
+  transform: rotate(45deg);
+}
+
+/* critical 级左侧 4px 蜜橘色条（可交互暗示；蜜橘恒定不随主题——§2.6.3，
+   值 = 浅色主题 --accent 同源 #d96c2c，pet-world 物件固定色） */
+.pet-bubble.level-critical {
+  border-left-width: 4px;
+  border-left-color: #d96c2c;
+}
+
+/* ---- 宠物右键菜单（v2 M2 同语言翻新：暖白 + 2px 墨边 + 硬阴影 + 直角项；
+   行为零改动，clamp/关闭逻辑在 pet-menu.ts / PetMenu.tsx） ---- */
 .pet-menu {
   position: absolute;
   z-index: 3;
   min-width: 168px;
   padding: 4px;
-  background: rgba(255, 255, 255, 0.97);
-  border: 1px solid #e5e7eb;
-  border-radius: 10px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.22);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  background: var(--pet-world-surface);
+  border: 2px solid var(--pet-world-line);
+  box-shadow: var(--pet-world-shadow);
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", system-ui, sans-serif;
 }
 
 .pet-menu-item {
@@ -69,83 +192,204 @@ body,
   background: transparent;
   padding: 6px 10px;
   font-size: 12px;
-  color: #1f2937;
-  border-radius: 6px;
+  color: #29241d; /* 墨字（pet-world 固定） */
+  border-radius: 0; /* 直角项 */
   cursor: pointer;
   white-space: nowrap;
 }
 
 .pet-menu-item:hover {
-  background: #f3f4f6;
+  background: rgba(23, 19, 15, 0.08); /* pet-world 墨系的低透明 hover（固定色族） */
 }
 
-/* panel 窗口：普通不透明控制面板 */
+/* ---- panel 窗口 ---- */
 .panel {
   min-height: 100%;
-  background: #f5f6f8;
-  color: #1f2937;
-  padding: 24px;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-}
-
-.panel h1 {
-  margin: 0 0 12px;
-  font-size: 22px;
+  background: var(--bg);
+  color: var(--ink);
+  padding: 20px 24px 24px;
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", system-ui, sans-serif;
 }
 
 .panel p {
-  color: #4b5563;
+  color: var(--ink-soft);
   line-height: 1.6;
 }
 
 .panel ul {
-  color: #4b5563;
+  color: var(--ink-soft);
   line-height: 1.8;
 }
 
-/* 面板 tab */
+/* ---- 顶栏（v2 M2 面板壳：标题 + agent 状态芯片两段，§2.4 修订） ---- */
+.panel-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 14px;
+  border-bottom: 2px solid var(--ink);
+}
+
+.panel-title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--ink);
+}
+
+/* （mini 猫样式随 MiniCat.tsx 移除一并回收——2026-08-24 修订，§2.4） */
+
+/* agent 状态芯片：● {agent} · {kind} 等宽（字面量不翻译，TC-UI-03） */
+.panel-status-chip {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 2px solid var(--ink);
+  background: var(--surface);
+  padding: 4px 10px;
+  box-shadow: var(--shadow-hard);
+  font-size: 12px;
+  color: var(--ink-soft);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+
+.chip-dot {
+  width: 8px;
+  height: 8px;
+  background: var(--accent);
+  flex: none;
+}
+
+/* ---- tab 栏（注册表驱动；激活 tab accent 硬阴影上浮，§2.4） ---- */
 .panel-tabs {
   display: flex;
-  gap: 4px;
-  border-bottom: 1px solid #e5e7eb;
-  margin-bottom: 16px;
+  gap: 8px;
+  border-bottom: 2px solid var(--line);
+  margin: 14px 0 16px;
+  padding-bottom: 10px;
 }
 
 .panel-tab {
   appearance: none;
-  border: none;
-  background: transparent;
-  padding: 8px 14px;
-  font-size: 14px;
-  color: #6b7280;
+  border: 2px solid var(--line);
+  background: var(--surface);
+  padding: 6px 16px;
+  font-size: 13px;
+  color: var(--ink-soft);
   cursor: pointer;
-  border-bottom: 2px solid transparent;
+  font-family: inherit;
 }
 
 .panel-tab.active {
-  color: #111827;
-  border-bottom-color: #6366f1;
-  font-weight: 600;
+  border-color: var(--ink);
+  color: var(--ink);
+  font-weight: 700;
+  background: var(--surface);
+  box-shadow: 2px 2px 0 var(--accent);
+  position: relative;
+  top: -1px;
+}
+
+/* 非激活 tab hover（craft-floor states）；按下时落回基线（位移阴影世界的
+ * 按压语汇：上浮 -1px 的逆动作） */
+.panel-tab:hover:not(.active) {
+  border-color: var(--ink-soft);
+  color: var(--ink);
+}
+
+.panel-tab.active:active {
+  top: 0;
 }
 
 .tab-milestone {
   margin-left: 6px;
   font-size: 10px;
-  color: #9ca3af;
+  color: var(--ink-faint);
 }
 
 .panel-placeholder {
   padding: 32px 0;
   text-align: center;
-  color: #9ca3af;
+  color: var(--ink-faint);
 }
 
-/* ---- 设置页（M5 选择宠物，TC-SP-11） ---- */
+/* ---- 深色主题组件覆盖（skill 审查 R1-supplement：对齐 b-cool 样例） ----
+ * 两份权威样例的边框系统在深色下系统性不同（b-cool 比 a 低调）：卡片/控件
+ * 用 --line 线框而非亮墨重边、芯片与分段容器用 --ink-faint、激活 tab 与
+ * KPI 首卡强调改走 --accent 边框（浅色 a 的「ink 边 + 首卡 accent 阴影」
+ * 直接映射深色会得到刺眼的亮白粗边）。覆盖只改边框引用，值仍全部来自
+ * tokens.css 既有 token（token 表零变更）。 */
+[data-theme="dark"] .panel-header {
+  border-bottom-color: var(--ink-faint); /* b-cool .hd */
+}
 
+[data-theme="dark"] .panel-status-chip {
+  border-color: var(--ink-faint); /* b-cool .hd-state */
+}
+
+[data-theme="dark"] .token-seg,
+[data-theme="dark"] .theme-seg {
+  border-color: var(--ink-faint); /* b-cool .seg */
+}
+
+[data-theme="dark"] .panel-tab.active {
+  border-color: var(--accent); /* b-cool .tab.on */
+}
+
+[data-theme="dark"] .kpi,
+[data-theme="dark"] .token-section {
+  border-color: var(--line); /* b-cool .kpi / .card */
+}
+
+[data-theme="dark"] .token-kpis .kpi:first-child {
+  border-color: var(--accent); /* b-cool .kpi.first：边框强调（非阴影） */
+  box-shadow: var(--shadow-hard-lg);
+}
+
+/* ---- 通用分段控件（时间跨度/维度/主题三档等） ---- */
+.token-seg,
+.theme-seg {
+  display: inline-flex;
+  border: 2px solid var(--ink);
+  background: var(--surface);
+}
+
+.token-seg .seg,
+.theme-seg .seg {
+  appearance: none;
+  border: none;
+  background: transparent;
+  padding: 5px 14px;
+  min-height: 32px;
+  font-size: 13px;
+  color: var(--ink-soft);
+  cursor: pointer;
+  font-family: inherit;
+  border-right: 1px solid var(--line);
+}
+
+.token-seg .seg:last-child,
+.theme-seg .seg:last-child {
+  border-right: none;
+}
+
+.token-seg .seg.active,
+.theme-seg .seg.active {
+  background: var(--ink);
+  color: var(--bg);
+  font-weight: 700;
+}
+
+/* ---- 设置页 ---- */
 .panel-settings h2 {
-  font-size: 15px;
-  color: #111827;
-  margin: 20px 0 10px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--ink);
+  margin: 26px 0 10px;
 }
 
 .panel-settings h2:first-child {
@@ -155,83 +399,87 @@ body,
 .settings-pet-label {
   display: block;
   font-size: 13px;
-  color: #6b7280;
+  color: var(--ink-soft);
   margin-bottom: 6px;
 }
 
 .panel-settings select {
-  appearance: none;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  padding: 8px 12px;
-  font-size: 14px;
-  background: #fff;
+  /* 不用 appearance:none——去掉原生外观会连下拉箭头一起消失（无箭头的
+   * select 缺少展开暗示，R1-supplement-3）；保留原生箭头，边框/底色/字色
+   * 仍走 token（与表单 select 同口径）。 */
+  border: 2px solid var(--line);
+  border-radius: 2px;
+  padding: 5px 10px;
+  min-height: 32px;
+  font-size: 13px;
+  background: var(--surface);
+  color: var(--ink);
   min-width: 320px;
-  color: #111827;
+  max-width: 480px;
 }
 
 .panel-settings select:disabled {
-  color: #9ca3af;
+  color: var(--ink-faint);
   cursor: wait;
 }
 
 .settings-notice {
   margin-top: 12px;
   padding: 8px 12px;
-  border-radius: 8px;
-  background: #fef3c7;
-  color: #92400e;
+  border: 2px solid var(--chart-cache);
+  background: var(--surface-2);
+  color: var(--ink-soft);
   font-size: 13px;
 }
 
 .settings-current {
   margin-top: 10px;
+  margin-bottom: 2px;
   font-size: 12px;
-  color: #6b7280;
+  line-height: 1.7;
+  color: var(--ink-faint);
+  max-width: 640px;
 }
 
 .settings-problems {
   margin-top: 8px;
   padding-left: 18px;
   font-size: 12px;
-  color: #b45309;
+  color: var(--accent-ink);
   line-height: 1.7;
 }
 
-/* M6 交互设置（点击穿透开关，TC-APP-12） */
 .settings-check {
   display: flex;
   align-items: flex-start;
-  gap: 8px;
+  gap: 10px;
   font-size: 13px;
-  color: #374151;
-  line-height: 1.6;
+  color: var(--ink-soft);
+  line-height: 1.7;
   max-width: 640px;
   cursor: pointer;
 }
 
 .settings-check input {
-  margin-top: 3px;
+  margin-top: 4px;
 }
 
 .settings-error {
   margin: 0 0 12px;
   padding: 8px 12px;
-  border-radius: 8px;
-  background: #fef2f2;
-  border: 1px solid #fecaca;
-  color: #b91c1c;
+  border: 2px solid var(--danger);
+  background: var(--surface);
+  color: var(--danger);
   font-size: 13px;
 }
 
 .settings-hotkey-hint {
   margin-top: 10px;
   font-size: 12px;
-  color: #9ca3af;
+  color: var(--ink-faint);
 }
 
-/* ---- v2 M1 接入管理（V2-DESIGN §1.7，TC-INT-09） ---- */
-
+/* ---- v2 M1 接入管理 / v2 M2 功能管理（同列表形态） ---- */
 .intg-list {
   display: flex;
   flex-direction: column;
@@ -240,26 +488,28 @@ body,
 }
 
 .intg-row {
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  padding: 10px 12px;
+  border: 2px solid var(--line);
+  background: var(--surface);
+  padding: 12px 14px;
 }
 
 .intg-row-head {
   display: flex;
+  flex-wrap: wrap; /* R1-supplement-4：spinner + 双按钮 + 长路径态的收敛保护 */
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
 
 .intg-name {
-  font-size: 14px;
-  font-weight: 600;
-  color: #111827;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink);
 }
 
 .intg-state-label {
   font-size: 12px;
-  color: #6b7280;
+  color: var(--ink-soft);
+  font-family: var(--font-mono);
 }
 
 .intg-row-actions {
@@ -271,85 +521,83 @@ body,
 
 .intg-row-actions button {
   font-size: 12px;
-  padding: 4px 10px;
-  border-radius: 6px;
-  border: 1px solid #d1d5db;
-  background: #fff;
-  color: #374151;
+  padding: 5px 12px;
+  min-height: 28px;
+  border: 2px solid var(--line);
+  background: var(--surface);
+  color: var(--ink-soft);
   cursor: pointer;
 }
 
 .intg-row-actions button:hover:not(:disabled) {
-  background: #f3f4f6;
+  background: var(--surface-2);
 }
 
 .intg-row-actions button:disabled {
-  color: #9ca3af;
+  color: var(--ink-faint);
   cursor: wait;
 }
 
 .intg-path {
   margin-top: 6px;
   font-size: 12px;
-  color: #9ca3af;
+  color: var(--ink-faint);
   word-break: break-all;
+  font-family: var(--font-mono);
 }
 
 .intg-message {
   margin-top: 2px;
   font-size: 12px;
-  color: #6b7280;
+  color: var(--ink-soft);
 }
 
 .intg-row-error {
   margin-top: 4px;
   font-size: 12px;
-  color: #b91c1c;
+  color: var(--danger);
 }
 
-/* tester P2-1（TC-INT-07-5）：操作结果成功提示条（与 .intg-row-error 红色
-   错误条对称的绿色提示条；展示 Rust 返回 message，含卸载后建议） */
+/* 操作结果成功提示条（绿色，与错误条对称；TC-INT-07-5） */
 .intg-row-notice {
   margin-top: 4px;
   font-size: 12px;
-  color: #047857;
+  color: var(--ok);
 }
 
 .intg-note {
   margin-top: 4px;
   font-size: 12px;
-  color: #9ca3af;
+  color: var(--ink-faint);
 }
 
-/* 状态点四态（已安装=绿 / 未安装=灰 / 需更新=橙 / 错误=红） */
+/* 状态点四态（已安装=ok / 未安装=line / 需更新=accent / 错误=danger） */
 .intg-dot {
   width: 10px;
   height: 10px;
-  border-radius: 50%;
   flex: none;
-  background: #d1d5db;
+  background: var(--line);
 }
 
 .intg-dot-installed {
-  background: #10b981;
+  background: var(--ok);
 }
 
 .intg-dot-stale {
-  background: #f59e0b;
+  background: var(--accent);
 }
 
 .intg-dot-error {
-  background: #ef4444;
+  background: var(--danger);
 }
 
-/* 安装中 spinner（与按钮 disabled 态配合，§1.7） */
+/* 安装中 spinner */
 .intg-spinner {
   display: inline-block;
   width: 12px;
   height: 12px;
-  border: 2px solid #d1d5db;
-  border-top-color: #6b7280;
-  border-radius: 50%;
+  border: 2px solid var(--line);
+  border-top-color: var(--ink-soft);
   animation: intg-spin 0.8s linear infinite;
 }
 
@@ -359,8 +607,7 @@ body,
   }
 }
 
-/* ---- Token 统计（M3，TC-TK-08/09） ---- */
-
+/* ---- Token 统计 ---- */
 .token-controls {
   display: flex;
   flex-wrap: wrap;
@@ -369,55 +616,36 @@ body,
   margin-bottom: 16px;
 }
 
-.token-seg {
-  display: inline-flex;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  overflow: hidden;
-  background: #fff;
-}
-
-.token-seg .seg {
-  appearance: none;
-  border: none;
-  background: transparent;
-  padding: 6px 12px;
-  font-size: 13px;
-  color: #6b7280;
-  cursor: pointer;
-}
-
-.token-seg .seg.active {
-  background: #6366f1;
-  color: #fff;
-}
-
 .token-dates {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 13px;
-  color: #6b7280;
+  font-size: 12px;
+  color: var(--ink-faint);
+  font-family: var(--font-mono);
 }
 
 .token-dates input {
   padding: 5px 8px;
-  border: 1px solid #e5e7eb;
-  border-radius: 6px;
-  font-size: 13px;
+  border: 2px solid var(--line);
+  border-radius: 2px;
+  font-size: 12px;
+  background: var(--surface);
+  color: var(--ink);
+  font-family: var(--font-mono);
 }
 
 .token-error {
   margin: 16px 0;
   padding: 14px 16px;
-  background: #fef3c7;
-  border: 1px solid #fcd34d;
-  border-radius: 8px;
-  color: #92400e;
+  background: var(--surface);
+  border: 2px solid var(--danger);
+  color: var(--danger);
   font-size: 13px;
   line-height: 1.6;
 }
 
+/* KPI 卡：2px 墨边 + 硬阴影；首卡 accent 阴影（今日高亮语义） */
 .token-kpis {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -426,42 +654,80 @@ body,
 }
 
 .kpi {
-  background: #fff;
-  border: 1px solid #e5e7eb;
-  border-radius: 10px;
-  padding: 14px;
-  text-align: center;
+  background: var(--surface);
+  border: 2px solid var(--ink);
+  padding: 12px 14px;
+  box-shadow: var(--shadow-hard-lg);
+  text-align: left;
+}
+
+.token-kpis .kpi:first-child {
+  box-shadow: 3px 3px 0 var(--accent);
 }
 
 .kpi-value {
-  font-size: 20px;
+  font-family: var(--font-mono);
+  font-size: 22px;
   font-weight: 700;
-  color: #111827;
+  color: var(--ink);
 }
 
 .kpi-label {
   margin-top: 4px;
-  font-size: 12px;
-  color: #9ca3af;
+  font-size: 11px;
+  color: var(--ink-soft);
+  letter-spacing: 0.08em;
 }
 
+/* 内容卡片 */
 .token-section {
-  background: #fff;
-  border: 1px solid #e5e7eb;
-  border-radius: 10px;
+  background: var(--surface);
+  border: 2px solid var(--ink);
+  box-shadow: var(--shadow-hard-lg);
   padding: 14px 16px;
   margin-bottom: 16px;
 }
 
 .token-section h3 {
-  margin: 0 0 10px;
-  font-size: 14px;
-  color: #374151;
+  margin: 0 0 12px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--ink);
 }
 
 .token-chart {
   width: 100%;
   height: auto;
+}
+
+/* SVG 时序柱图/饼图色（token 化：attribute 不支持 var()，走类） */
+.token-chart .bar-fill {
+  fill: var(--chart-output);
+}
+
+.token-chart .chart-axis {
+  stroke: var(--line);
+}
+
+.token-chart .chart-label {
+  fill: var(--ink-soft);
+  font-family: var(--font-mono);
+}
+
+.token-chart .chart-label.faint {
+  fill: var(--ink-faint);
+}
+
+/* 饼图三色循环（M2 轻翻新；M3 砍饼图后由堆叠柱图三段 token 接管） */
+.pie-c0 {
+  fill: var(--chart-output);
+}
+.pie-c1 {
+  fill: var(--chart-input);
+}
+.pie-c2 {
+  fill: var(--chart-cache);
 }
 
 .token-columns {
@@ -490,14 +756,23 @@ body,
   align-items: center;
   gap: 8px;
   padding: 4px 0;
-  border-bottom: 1px dashed #f3f4f6;
+  border-bottom: 1px dashed var(--line);
 }
 
 .project-dot {
   width: 10px;
   height: 10px;
-  border-radius: 3px;
   flex: none;
+}
+
+.project-dot.pie-c0 {
+  background: var(--chart-output);
+}
+.project-dot.pie-c1 {
+  background: var(--chart-input);
+}
+.project-dot.pie-c2 {
+  background: var(--chart-cache);
 }
 
 .project-name {
@@ -505,23 +780,27 @@ body,
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: #374151;
+  color: var(--ink-soft);
 }
 
 .project-pct {
-  color: #6b7280;
+  color: var(--ink-faint);
   min-width: 48px;
   text-align: right;
+  font-family: var(--font-mono);
+  font-size: 12px;
 }
 
 .project-cost {
-  color: #111827;
+  color: var(--ink);
   min-width: 64px;
   text-align: right;
+  font-family: var(--font-mono);
+  font-size: 12px;
 }
 
 .token-empty {
-  color: #9ca3af;
+  color: var(--ink-faint);
   font-size: 13px;
 }
 
@@ -544,17 +823,18 @@ body,
   background: transparent;
   cursor: pointer;
   text-align: left;
-  border-radius: 6px;
+  color: var(--ink);
 }
 
 .session-row:hover {
-  background: #f9fafb;
+  background: var(--surface-2);
 }
 
 .session-id {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  color: #6b7280;
+  font-family: var(--font-mono);
+  color: var(--ink-faint);
   min-width: 110px;
+  font-size: 12px;
 }
 
 .session-project {
@@ -562,23 +842,25 @@ body,
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: #374151;
+  color: var(--ink-soft);
 }
 
 .session-tokens {
   min-width: 64px;
   text-align: right;
-  color: #111827;
+  color: var(--ink);
+  font-family: var(--font-mono);
 }
 
 .session-cost {
   min-width: 64px;
   text-align: right;
-  color: #6b7280;
+  color: var(--ink-soft);
+  font-family: var(--font-mono);
 }
 
 .session-caret {
-  color: #9ca3af;
+  color: var(--ink-faint);
   width: 14px;
   text-align: center;
 }
@@ -589,8 +871,7 @@ body,
   gap: 6px 12px;
   margin: 0;
   padding: 8px 12px;
-  background: #f9fafb;
-  border-radius: 6px;
+  background: var(--surface-2);
   font-size: 12px;
 }
 
@@ -599,17 +880,16 @@ body,
 }
 
 .session-detail dt {
-  color: #9ca3af;
+  color: var(--ink-faint);
 }
 
 .session-detail dd {
   margin: 0;
-  color: #374151;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--ink);
+  font-family: var(--font-mono);
 }
 
-/* fireworks 窗口：透明画布（M4 粒子烟花，TC-RM-09/16）
-   Windows 回退（TC-RM-16，M8 实机）：若透明异常改为不透明近桌面深色（DESIGN §12） */
+/* fireworks 窗口：透明画布（无文案，不涉及主题） */
 .fireworks-canvas {
   display: block;
   width: 100vw;
@@ -617,8 +897,7 @@ body,
   background: transparent;
 }
 
-/* ---- 提醒配置（M4，TC-RM-07/11/13） ---- */
-
+/* ---- 提醒配置（M2 轻量翻新；表单重做并入 M4） ---- */
 .reminders {
   max-width: 860px;
 }
@@ -633,25 +912,36 @@ body,
 .reminder-check {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   font-size: 13px;
-  color: #374151;
+  color: var(--ink-soft);
   cursor: pointer;
   white-space: nowrap;
 }
 
 .reminder-check.compact {
   font-size: 12px;
-  color: #6b7280;
+  color: var(--ink-faint);
 }
 
 .reminder-paused-badge {
-  padding: 3px 10px;
-  border-radius: 999px;
-  background: #fef3c7;
-  border: 1px solid #fcd34d;
-  color: #92400e;
+  padding: 4px 10px;
+  background: var(--surface-2);
+  border: 2px solid var(--accent);
+  color: var(--accent-ink);
   font-size: 12px;
+  white-space: nowrap;
+}
+
+/* v2 M2：todo 派生行「已停用（插件关闭）」徽标（可见但惰性，TC-UI-07-3） */
+.reminder-plugin-off {
+  flex: none;
+  padding: 2px 8px;
+  font-size: 11px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  color: var(--ink-faint);
+  white-space: nowrap;
 }
 
 .reminder-list {
@@ -660,12 +950,17 @@ body,
   padding: 0;
 }
 
+/* 列表行：10px 8px 行距节奏 + 中线对齐（label 弹性吸收宽度波动）。
+ * R1-supplement-4：wrap 允许——固定内容（kind/meta/checkbox/操作组）总宽
+ * 逼近容器时（实测 ~818/824px），操作组整组折行到第二行右贴（margin-left:
+ * auto 在折行后仍生效），信息零丢失、规格零缩小；空间充足时仍单行。 */
 .reminder-item {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
-  padding: 8px 6px;
-  border-bottom: 1px dashed #f3f4f6;
+  gap: 10px 12px;
+  padding: 10px 8px;
+  border-bottom: 1px dashed var(--line);
   font-size: 13px;
 }
 
@@ -674,54 +969,42 @@ body,
 }
 
 .reminder-kind {
-  min-width: 64px;
-  color: #374151;
+  flex: none;
+  min-width: 76px;
+  color: var(--ink-soft);
+  white-space: nowrap;
 }
 
 .reminder-label {
   flex: 1;
+  min-width: 120px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: #111827;
+  color: var(--ink);
   font-weight: 500;
 }
 
 .reminder-meta {
-  color: #6b7280;
+  color: var(--ink-faint);
   font-size: 12px;
   white-space: nowrap;
+  font-family: var(--font-mono);
 }
 
 .reminder-actions {
   display: inline-flex;
-  gap: 6px;
+  gap: 8px;
+  margin-left: auto;
+  flex: none;
 }
 
-.reminder-actions .seg,
-.reminder-templates .seg {
-  padding: 4px 10px;
-  border: 1px solid #e5e7eb;
-  border-radius: 6px;
-  background: #fff;
-  font-size: 12px;
-  color: #374151;
-  cursor: pointer;
-}
-
-.reminder-actions .seg.danger {
-  color: #dc2626;
-}
-
-.reminder-actions .seg:hover,
-.reminder-templates .seg:hover {
-  background: #f3f4f6;
-}
+/* （.seg 按钮规格由基类 .seg 提供——R1-supplement-3） */
 
 .reminder-form {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
 }
 
 .reminder-templates {
@@ -734,15 +1017,15 @@ body,
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
-  gap: 12px;
+  gap: 12px 16px;
 }
 
 .reminder-form-row label {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
   font-size: 12px;
-  color: #6b7280;
+  color: var(--ink-soft);
 }
 
 .reminder-form-row label.grow {
@@ -750,42 +1033,57 @@ body,
   min-width: 240px;
 }
 
+/* 行内 checkbox：与 32px 输入框底缘对齐（表单行 align-items: flex-end） */
 .reminder-form-row label.reminder-check {
   flex-direction: row;
   align-items: center;
-  padding-bottom: 6px;
+  gap: 8px;
+  padding-bottom: 7px;
+  white-space: nowrap;
 }
 
+/* 输入类控件统一 32px 高（控件规格基线） */
 .reminder-form input[type="text"],
 .reminder-form input[type="number"],
 .reminder-form input[type="time"],
+.reminder-form input[type="date"],
 .reminder-form select {
-  padding: 6px 8px;
-  border: 1px solid #e5e7eb;
-  border-radius: 6px;
+  padding: 5px 10px;
+  min-height: 32px;
+  border: 2px solid var(--line);
+  border-radius: 2px;
   font-size: 13px;
-  background: #fff;
-  color: #111827;
+  background: var(--surface);
+  color: var(--ink);
 }
 
 .reminder-form input[type="text"] {
   width: 100%;
 }
 
+/* 锁定态（todo 派生规则编辑时锁类型/间隔/时刻——craft-floor states：
+ * 禁用须可辨，不只是不响应） */
+.reminder-form input:disabled,
+.reminder-form select:disabled {
+  color: var(--ink-faint);
+  background: var(--surface-2);
+  cursor: not-allowed;
+}
+
 .reminder-hint {
   margin: 0;
   font-size: 12px;
-  color: #92400e;
-  background: #fffbeb;
-  border: 1px solid #fde68a;
-  border-radius: 6px;
-  padding: 6px 10px;
+  line-height: 1.7;
+  color: var(--accent-ink);
+  background: var(--surface-2);
+  border: 1px dashed var(--line);
+  padding: 8px 12px;
 }
 
 .reminder-form-error {
   margin: 0;
   font-size: 12px;
-  color: #b91c1c;
+  color: var(--danger);
 }
 
 .reminder-form-actions {
@@ -793,10 +1091,19 @@ body,
   gap: 8px;
 }
 
+/* 主按钮：32px 与输入框齐高（视觉权重对齐表单） */
+.reminder-form-actions .seg,
 .reminder-form-actions .primary {
-  background: #6366f1;
-  color: #fff;
-  border-color: #6366f1;
+  min-height: 32px;
+  padding: 5px 16px;
+  font-size: 13px;
+}
+
+.reminder-form-actions .primary {
+  background: var(--ink);
+  color: var(--bg);
+  border: 2px solid var(--ink);
+  cursor: pointer;
 }
 
 .reminder-stats {
@@ -809,9 +1116,9 @@ body,
 .reminder-stats li {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 4px 0;
-  border-bottom: 1px dashed #f3f4f6;
+  gap: 16px;
+  padding: 8px 4px;
+  border-bottom: 1px dashed var(--line);
 }
 
 .reminder-toast {
@@ -819,21 +1126,20 @@ body,
   bottom: 20px;
   right: 20px;
   padding: 10px 16px;
-  background: #111827;
-  color: #f9fafb;
-  border-radius: 8px;
+  background: var(--ink);
+  color: var(--bg);
   font-size: 13px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  box-shadow: var(--shadow-hard);
 }
 
-/* ---- M7 Todo 插件（内置 built-in-todo，TC-TD-01/02） ---- */
-
+/* ---- M7 Todo 插件 ---- */
 .todo-plugin-meta {
   font-size: 12px;
-  color: #6b7280;
-  padding: 4px 2px 10px;
-  border-bottom: 1px dashed #e5e7eb;
-  margin-bottom: 8px;
+  line-height: 1.7;
+  color: var(--ink-faint);
+  padding: 2px 2px 12px;
+  border-bottom: 1px dashed var(--line);
+  margin-bottom: 14px;
 }
 
 .todo-list {
@@ -842,27 +1148,25 @@ body,
   padding: 0;
 }
 
+/* 列表行与提醒页同节奏（10px 8px）；操作组贴右；wrap 同 reminder-item
+ * （R1-supplement-4：四按钮操作组在窄内容下整组折行，不溢出）。 */
 .todo-item {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
-  padding: 8px 6px;
-  border-bottom: 1px dashed #f3f4f6;
+  gap: 10px 12px;
+  padding: 10px 8px;
+  border-bottom: 1px dashed var(--line);
   font-size: 13px;
 }
 
 .todo-item.done .todo-title {
   text-decoration: line-through;
-  color: #9ca3af;
+  color: var(--ink-faint);
 }
 
 .todo-item.done {
   opacity: 0.7;
-}
-
-.todo-check input {
-  width: 16px;
-  height: 16px;
 }
 
 .todo-main {
@@ -870,11 +1174,11 @@ body,
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 4px;
 }
 
 .todo-title {
-  color: #111827;
+  color: var(--ink);
   font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -882,7 +1186,7 @@ body,
 }
 
 .todo-notes {
-  color: #6b7280;
+  color: var(--ink-faint);
   font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -892,43 +1196,46 @@ body,
 .todo-meta {
   display: flex;
   align-items: center;
-  gap: 10px;
-  color: #6b7280;
+  gap: 4px 12px;
+  color: var(--ink-faint);
   font-size: 12px;
   flex-wrap: wrap;
 }
 
 .todo-priority {
-  padding: 1px 6px;
-  border-radius: 8px;
-  background: #f3f4f6;
-  color: #6b7280;
+  padding: 2px 8px;
+  font-size: 11px;
+  background: var(--surface-2);
+  color: var(--ink-soft);
+  white-space: nowrap;
 }
 
 .todo-priority.p2 {
-  background: #fef3c7;
-  color: #b45309;
+  background: var(--surface-2);
+  color: var(--accent-ink);
+  border: 1px solid var(--accent);
 }
 
 .todo-priority.p3 {
-  background: #fee2e2;
-  color: #b91c1c;
+  color: var(--danger);
+  border: 1px solid var(--danger);
 }
 
 .todo-tags code {
   margin-right: 4px;
-  padding: 1px 5px;
-  border-radius: 6px;
-  background: #eef2ff;
-  color: #4338ca;
+  padding: 2px 6px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  color: var(--ink-soft);
   font-size: 11px;
+  font-family: var(--font-mono);
 }
 
 .todo-actions {
   display: inline-flex;
-  gap: 6px;
+  gap: 8px;
+  margin-left: auto;
+  flex: none;
 }
 
-.todo-actions .seg {
-  padding: 4px 10px;
-}
+/* （.seg 按钮规格由基类 .seg 提供——R1-supplement-3） */

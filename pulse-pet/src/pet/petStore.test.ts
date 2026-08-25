@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { usePetStore, setReminderReporter, type ReminderReporter } from "./petStore";
-import { BUBBLE_AUTO_HIDE_MS } from "../lib/bubble";
 import type { AtlasMeta, AtlasPixels } from "../lib/atlas";
 
 describe("petStore M5 atlas 状态（热替换基础，TC-SP-11②）", () => {
@@ -84,10 +83,10 @@ describe("petStore M6 交互模式 / 右键菜单状态（TC-WIN-02/03/05）", (
   });
 });
 
-describe("petStore 气泡状态（M3 token 汇报，TC-TK-10/12）", () => {
+describe("petStore 气泡排队（v2 M2，TC-UI-09/13-3：单槽位断言有意改写为排队语义）", () => {
   beforeEach(() => {
     vi.useFakeTimers();
-    usePetStore.getState().hideBubble();
+    usePetStore.getState().resetBubbles();
     usePetStore.getState().setRaw("idle");
   });
 
@@ -95,54 +94,139 @@ describe("petStore 气泡状态（M3 token 汇报，TC-TK-10/12）", () => {
     vi.useRealTimers();
   });
 
-  it("showBubble：合法文本入列，8s 后自动消失", () => {
-    usePetStore.getState().showBubble("本期用了 58.3k input / 910 output / $0.05");
-    expect(usePetStore.getState().bubble?.text).toBe(
-      "本期用了 58.3k input / 910 output / $0.05",
-    );
-    vi.advanceTimersByTime(BUBBLE_AUTO_HIDE_MS - 1);
-    expect(usePetStore.getState().bubble).not.toBeNull();
+  it("pushBubble(info)：分级 dwell 6s 后自动消失（不再恒定 8s）", () => {
+    usePetStore.getState().pushBubble({ text: "本期用了 58.3k input", level: "info", source: "token-report" });
+    expect(usePetStore.getState().bubble.current?.text).toBe("本期用了 58.3k input");
+    vi.advanceTimersByTime(5999);
+    expect(usePetStore.getState().bubble.current).not.toBeNull();
     vi.advanceTimersByTime(1);
-    expect(usePetStore.getState().bubble).toBeNull();
+    expect(usePetStore.getState().bubble.current).toBeNull();
   });
 
-  it("showBubble：净化约束生效（多行单行化、超长截断、非法输入丢弃）", () => {
-    usePetStore.getState().showBubble("a\nb");
-    expect(usePetStore.getState().bubble?.text).toBe("a b");
-    usePetStore.getState().showBubble("x".repeat(200));
-    expect(usePetStore.getState().bubble?.text?.length).toBe(140);
-    // 空串/非字符串 → 不出气泡（TC-TK-12 精神：无内容不显示）
-    usePetStore.getState().hideBubble();
-    usePetStore.getState().showBubble("");
-    expect(usePetStore.getState().bubble).toBeNull();
-    usePetStore.getState().showBubble(123 as unknown as string);
-    expect(usePetStore.getState().bubble).toBeNull();
+  it("pushBubble 净化约束（多行单行化、超长截断）；空/非法输入丢弃", () => {
+    usePetStore.getState().pushBubble({ text: "a\nb", level: "info", source: "x" });
+    expect(usePetStore.getState().bubble.current?.text).toBe("a b");
+    usePetStore.getState().pushBubble({ text: "x".repeat(200), level: "info", source: "x" });
+    expect(usePetStore.getState().bubble.current?.text?.length).toBe(140);
+    usePetStore.getState().resetBubbles();
+    usePetStore.getState().pushBubble({ text: "", level: "info", source: "x" });
+    expect(usePetStore.getState().bubble.current).toBeNull();
+    usePetStore.getState().pushBubble({ text: 123 as unknown as string, level: "info", source: "x" });
+    expect(usePetStore.getState().bubble.current).toBeNull();
   });
 
-  it("showBubble：新气泡重置自动隐藏计时", () => {
-    usePetStore.getState().showBubble("第一条");
-    vi.advanceTimersByTime(BUBBLE_AUTO_HIDE_MS - 1);
-    usePetStore.getState().showBubble("第二条");
-    // 再走满 8s：从第二条出现时刻起算
-    vi.advanceTimersByTime(BUBBLE_AUTO_HIDE_MS);
-    expect(usePetStore.getState().bubble).toBeNull();
+  it("critical 顶替 info：info 回队首、critical 到期后 info 重现（续走剩余 dwell）", () => {
+    usePetStore.getState().pushBubble({ text: "汇报", level: "info", source: "token-report" });
+    vi.advanceTimersByTime(3000); // info 已显示 3s
+    usePetStore.getState().pushBubble({ text: "该喝水啦 💧", level: "critical", source: "reminder:1", reminder: { logId: 1 } });
+    expect(usePetStore.getState().bubble.current?.level).toBe("critical");
+    expect(usePetStore.getState().bubble.queue.map((q) => q.text)).toEqual(["汇报"]);
+    // critical 8s 到期 → info 重现；剩余 dwell 3s（冻结语义外的续走由 shownAt 推进保证）
+    vi.advanceTimersByTime(8000);
+    expect(usePetStore.getState().bubble.current?.text).toBe("汇报");
+    vi.advanceTimersByTime(2999);
+    expect(usePetStore.getState().bubble.current?.text).toBe("汇报");
+    vi.advanceTimersByTime(1);
+    expect(usePetStore.getState().bubble.current).toBeNull();
   });
 
-  it("hideBubble：手动清除并取消定时器", () => {
-    usePetStore.getState().showBubble("马上消失");
-    usePetStore.getState().hideBubble();
-    expect(usePetStore.getState().bubble).toBeNull();
-    // 定时器已被取消：走到 8s 后不应有残留副作用（保持 null）
-    vi.advanceTimersByTime(BUBBLE_AUTO_HIDE_MS + 1000);
-    expect(usePetStore.getState().bubble).toBeNull();
+  it("悬停冻结（M3 预留接口）：setHoverPaused(true) 冻结 dwell，恢复续走剩余", () => {
+    usePetStore.getState().pushBubble({ text: "a", level: "info", source: "x" });
+    vi.advanceTimersByTime(3000);
+    usePetStore.getState().setHoverPaused(true);
+    vi.advanceTimersByTime(60000); // 冻结期间不走
+    expect(usePetStore.getState().bubble.current).not.toBeNull();
+    usePetStore.getState().setHoverPaused(false);
+    vi.advanceTimersByTime(2999); // 剩余 3s
+    expect(usePetStore.getState().bubble.current).not.toBeNull();
+    vi.advanceTimersByTime(1);
+    expect(usePetStore.getState().bubble.current).toBeNull();
   });
 
-  it("气泡与精灵状态互不影响", () => {
-    usePetStore.getState().setRaw("success");
-    usePetStore.getState().showBubble("汇报");
-    expect(usePetStore.getState().sprite).toBe("success");
-    expect(usePetStore.getState().raw).toBe("success");
-    expect(usePetStore.getState().bubble?.text).toBe("汇报");
+  it("R2 P2-1：冻结期间新上屏气泡不挂 dwell 计时器（防 0ms 定时器死循环）", () => {
+    usePetStore.getState().pushBubble({ text: "a", level: "info", source: "x" });
+    usePetStore.getState().setHoverPaused(true); // 冻结 → 清计时器
+    expect(vi.getTimerCount()).toBe(0);
+    // 冻结期间 critical 到达（顶替上屏）：修复前 pushBubble 会经
+    // armForCurrent 挂 dwell 计时器 → 到期时 expireCurrent 因冻结返回
+    // dismissed:null → remain=max(0, dwell-elapsed)=0 → setTimeout(0) 无限循环
+    usePetStore.getState().pushBubble({
+      text: "r", level: "critical", source: "reminder:1", reminder: { logId: 1 },
+    });
+    expect(usePetStore.getState().bubble.current?.level).toBe("critical");
+    expect(vi.getTimerCount()).toBe(0); // 冻结期间不得挂 dwell 计时器（0ms 死循环根因）
+    // 走过 dwell+1：无计时器 → 无 tick → 不结案、不空转
+    vi.advanceTimersByTime(10_000);
+    expect(usePetStore.getState().bubble.current?.text).toBe("r");
+  });
+});
+
+describe("petStore 提醒气泡排队 + 记账（M4 语义在排队模型下的延续，TC-UI-09-6/TC-UI-10）", () => {
+  let reporter: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    usePetStore.getState().resetBubbles();
+    usePetStore.getState().setRaw("idle");
+    reporter = vi.fn();
+    setReminderReporter(reporter as unknown as ReminderReporter);
+  });
+
+  afterEach(() => {
+    setReminderReporter(null); // 不污染其它用例
+    vi.useRealTimers();
+  });
+
+  it("critical 携带 logId：8s 自动消失回报 auto（TC-RM-03 语义在分级 dwell 下）", () => {
+    usePetStore.getState().pushBubble({ text: "该喝水啦 💧", level: "critical", source: "reminder:42", reminder: { logId: 42 } });
+    expect(usePetStore.getState().bubble.current?.reminder).toEqual({ logId: 42 });
+    expect(reporter).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(7999);
+    expect(usePetStore.getState().bubble.current).not.toBeNull();
+    vi.advanceTimersByTime(1);
+    expect(usePetStore.getState().bubble.current).toBeNull();
+    expect(reporter).toHaveBeenCalledWith(42, "auto");
+  });
+
+  it("ackReminderBubble：提前确认 → 立即消失回报 bubble（TC-RM-04）", () => {
+    usePetStore.getState().pushBubble({ text: "休息一下 ☕", level: "critical", source: "reminder:7", reminder: { logId: 7 } });
+    vi.advanceTimersByTime(2000);
+    const done = usePetStore.getState().ackReminderBubble();
+    expect(done).toBe(true);
+    expect(usePetStore.getState().bubble.current).toBeNull();
+    expect(reporter).toHaveBeenCalledWith(7, "bubble");
+    expect(reporter).not.toHaveBeenCalledWith(7, "auto");
+    vi.advanceTimersByTime(10000);
+    expect(reporter).toHaveBeenCalledTimes(1); // 确认后计时器不再触发 auto
+  });
+
+  it("ackReminderBubble：非提醒气泡返回 false（点击交回状态轮换）", () => {
+    usePetStore.getState().pushBubble({ text: "普通气泡", level: "info", source: "x" });
+    expect(usePetStore.getState().ackReminderBubble()).toBe(false);
+    expect(usePetStore.getState().bubble.current).not.toBeNull();
+  });
+
+  it("净化后为空的提醒文案：不出气泡，立即按 auto 结案（§2.6.1 规则⑤）", () => {
+    usePetStore.getState().pushBubble({ text: "   ", level: "critical", source: "reminder:9", reminder: { logId: 9 } });
+    expect(usePetStore.getState().bubble.current).toBeNull();
+    expect(reporter).toHaveBeenCalledWith(9, "auto");
+  });
+
+  it("critical 显示中 info 排队：critical 到期才记账，info 随后上屏（规则⑥）", () => {
+    usePetStore.getState().pushBubble({ text: "第一条", level: "critical", source: "reminder:1", reminder: { logId: 1 } });
+    // token 汇报（info）不会顶 critical：排队
+    usePetStore.getState().pushBubble({ text: "汇报", level: "info", source: "token-report" });
+    expect(usePetStore.getState().bubble.current?.reminder).toEqual({ logId: 1 });
+    expect(usePetStore.getState().bubble.queue).toHaveLength(1);
+    // 第一条 8s 到期 → 汇报上屏；第一条此时才结案 auto
+    vi.advanceTimersByTime(8000);
+    expect(reporter).toHaveBeenCalledTimes(1);
+    expect(reporter).toHaveBeenCalledWith(1, "auto");
+    expect(usePetStore.getState().bubble.current?.text).toBe("汇报");
+    // 汇报 6s 到期消失（从其上屏时刻起算）
+    vi.advanceTimersByTime(6000);
+    expect(usePetStore.getState().bubble.current).toBeNull();
+    expect(reporter).toHaveBeenCalledTimes(1); // info 气泡无记账
   });
 });
 
@@ -178,73 +262,10 @@ describe("petStore M7 完成庆祝（TC-TD-04/05 waving 覆盖）", () => {
 
   it("庆祝与气泡/精灵状态互不影响（渲染层按 until 覆盖行，不改 raw）", () => {
     usePetStore.getState().setRaw("working");
-    usePetStore.getState().showBubble("干得漂亮 🎉");
+    usePetStore.getState().pushBubble({ text: "干得漂亮 🎉", level: "info", source: "celebration" });
     usePetStore.getState().startCelebration();
     expect(usePetStore.getState().raw).toBe("working");
-    expect(usePetStore.getState().bubble?.text).toBe("干得漂亮 🎉");
+    expect(usePetStore.getState().bubble.current?.text).toBe("干得漂亮 🎉");
     expect(usePetStore.getState().celebration).not.toBeNull();
-  });
-});
-
-describe("petStore 提醒气泡（M4，TC-RM-03/04/05）", () => {
-  let reporter: ReturnType<typeof vi.fn>;
-
-  beforeEach(() => {
-    vi.useFakeTimers();
-    usePetStore.getState().hideBubble();
-    usePetStore.getState().setRaw("idle");
-    reporter = vi.fn();
-    setReminderReporter(reporter as unknown as ReminderReporter);
-  });
-
-  afterEach(() => {
-    setReminderReporter(null); // 不污染其它用例
-    vi.useRealTimers();
-  });
-
-  it("showReminderBubble：携带 logId，8s 自动消失回报 auto（TC-RM-03）", () => {
-    usePetStore.getState().showReminderBubble("该喝水啦 💧", 42);
-    expect(usePetStore.getState().bubble?.text).toBe("该喝水啦 💧");
-    expect(usePetStore.getState().bubble?.reminder).toEqual({ logId: 42 });
-    expect(reporter).not.toHaveBeenCalled();
-    vi.advanceTimersByTime(BUBBLE_AUTO_HIDE_MS - 1);
-    expect(usePetStore.getState().bubble).not.toBeNull();
-    vi.advanceTimersByTime(1);
-    expect(usePetStore.getState().bubble).toBeNull();
-    expect(reporter).toHaveBeenCalledWith(42, "auto");
-  });
-
-  it("ackReminderBubble：提前确认 → 立即消失并回报 bubble（TC-RM-04）", () => {
-    usePetStore.getState().showReminderBubble("休息一下 ☕", 7);
-    vi.advanceTimersByTime(2000); // 触发 2s 时点击
-    const done = usePetStore.getState().ackReminderBubble();
-    expect(done).toBe(true);
-    expect(usePetStore.getState().bubble).toBeNull();
-    expect(reporter).toHaveBeenCalledWith(7, "bubble");
-    expect(reporter).not.toHaveBeenCalledWith(7, "auto");
-    // 确认后定时器已取消：走到 8s 不再触发 auto 回报
-    vi.advanceTimersByTime(BUBBLE_AUTO_HIDE_MS);
-    expect(reporter).toHaveBeenCalledTimes(1);
-  });
-
-  it("ackReminderBubble：非提醒气泡返回 false（点击交回状态轮换）", () => {
-    usePetStore.getState().showBubble("普通气泡");
-    expect(usePetStore.getState().ackReminderBubble()).toBe(false);
-    expect(usePetStore.getState().bubble).not.toBeNull();
-  });
-
-  it("净化后为空的提醒文案：不出气泡，立即按 auto 结案", () => {
-    usePetStore.getState().showReminderBubble("   ", 9);
-    expect(usePetStore.getState().bubble).toBeNull();
-    expect(reporter).toHaveBeenCalledWith(9, "auto");
-  });
-
-  it("提醒气泡被新气泡顶替：旧的按 auto 回报", () => {
-    usePetStore.getState().showReminderBubble("第一条", 1);
-    usePetStore.getState().showReminderBubble("第二条", 2);
-    expect(reporter).toHaveBeenCalledWith(1, "auto");
-    expect(usePetStore.getState().bubble?.reminder).toEqual({ logId: 2 });
-    vi.advanceTimersByTime(BUBBLE_AUTO_HIDE_MS);
-    expect(reporter).toHaveBeenCalledWith(2, "auto");
   });
 });

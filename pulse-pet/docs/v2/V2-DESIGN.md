@@ -432,7 +432,7 @@ integrations.fail             操作失败：{msg} / Operation failed: {msg}
 ### 2.1 目标与范围
 
 - 设计系统：token 层（色板双主题/字版/间距/圆角/阴影）+ 像素语言规则（2px 硬边框、位移阴影、等宽数字）。
-- 面板壳重构：顶栏（签名 mini 猫 + 标题 + agent 状态芯片）+ tab 栏 + 内容区栅格。
+- 面板壳重构：顶栏（签名 mini 猫 + 标题 + agent 状态芯片）+ tab 栏 + 内容区栅格。（2026-08-24 修订：mini 猫移除，顶栏 = 标题 + agent 状态芯片两段，见 §2.4 修订）
 - 主题机制：设置页「外观」（跟随系统/浅色/深色），即时切换，持久化。
 - tab 注册表 + feature flag：核心 tab 静态注册，插件 tab 消费 `plugins_list` 的 `enabled`；设置页「功能管理」区开关。
 - 气泡组件重构 + 排队模型：`bubble-queue.ts` 纯函数 + petStore 改造；宠物右键菜单视觉同步翻新。
@@ -486,6 +486,8 @@ integrations.fail             操作失败：{msg} / Operation failed: {msg}
 
 ### 2.4 面板壳重构
 
+> **修订（2026-08-24，用户裁定）**：顶栏 mini 猫移除（用户目验：左上角"很小的活动的宠物"不需要，去掉）。删 `MiniCat.tsx` 与 `atlas_sheet_png` 命令及其单测（方案 A：唯一消费方消失即回收，不留无消费方代码）；顶栏改为**标题 + agent 状态芯片两段布局**；agent 状态芯片与 P1-1 前置拉前（`get_display_state` 扩展返回 `{kind, agent}` + `DisplayNotifier` `(kind, agent)` 去重）**保留**（芯片为其独立消费方）。下文 mini 猫相关条目（atlas_sheet_png / MiniCat.tsx / 帧映射）按此修订作废。
+
 ```
 ┌────────────────────────────────────────────────────────┐
 │ [mini猫] PulsePet · 控制面板        [● claude-code · working] │  ← 顶栏：签名 + 状态芯片
@@ -525,7 +527,7 @@ interface TabDef { id: string; kind: "core" | "plugin"; labelKey: string; render
   - 隐藏 tab：注册表过滤（前端）。
   - 停派生提醒（P2-2 修订，过滤位置定案）：调度器加载走**专用过滤查询** `load_active_rules(conn)`（`load_rules` 基础上排除 `kind='todo'` 且源插件 `enabled=0` 的行）；**`reminders_list` 照旧走 `load_rules`**——v1 提醒 tab 本就展示 todo 派生行（含锁定编辑/截止时刻展示），禁用后行**可见但惰性**，前端据注册表已知的插件状态给这些行加「已停用（插件关闭）」徽标（数据保留可见，用户不疑惑「我的 todo 提醒去哪了」）。
   - 数据保留：无任何 DELETE。
-- **设置页「功能管理」区**：每启用插件一行（名称/版本/开关 toggle）；核心三 tab 不在此列（不可关）。
+- **设置页「功能管理」区**：每个插件一行（**含已停用**——2026-08-24 committer 边界修订：原「每启用插件一行」字面致禁用后行消失无法重启用，与 TC-UI-07-4 矛盾；名称/版本/开关 toggle）；核心三 tab 不在此列（不可关）。
 - **正在查看的 tab 被禁用**：立即切到首个可用 tab（注册表 hook 内处理）。
 
 ### 2.6 气泡组件重构 + 排队模型
@@ -544,8 +546,8 @@ interface TabDef { id: string; kind: "core" | "plugin"; labelKey: string; render
 
 1. **顶替**：高优先级到达立即顶掉显示中的低优先级（被顶者**回队首**，不丢失、不结案）；同级新条目按 FIFO 排队。
 2. **同源合并**：同 `source`（见 2.6.2）+ 同级别 10s 内的新条目**原地替换**旧条目（含显示中的——文案刷新、dwell 重计时；也替换队列中的），不产生第二条。**合并仅作用于仍在显示或队列中的条目**（已离场过期的不复活，新条目独立入队）。
-3. **队列上限与驱逐**（P2-1 修订）：上限 3 指 **queue 数组长度（不含 current）**；入队/回队导致超限时按 **ambient → info 顺序从队尾驱逐**；critical/info 永不被驱逐（queue 全为 critical/info 时允许临时超过 3）；被顶替回队的 ambient 若遇满队驱逐即丢弃（ambient 可丢语义）。提醒记账因此无漏账风险（critical 永不丢）。
-4. **悬停层（M3 预留接口）**：悬停宠物今日汇总显示期间**暂停队列推进**（当前条目 dwell 冻结），移开恢复——作为特殊层实现，不进队列。
+3. **队列上限与驱逐**（P2-1 修订；2026-08-24 committer 边界修订：原文「ambient → info 顺序」与「info 永不被驱逐」不可同时成立，定案为仅 ambient 可驱逐）：上限 3 指 **queue 数组长度（不含 current）**；入队/回队导致超限时**仅驱逐 ambient（自队尾优先）**；critical/info 永不被驱逐（queue 全为 critical/info 时允许临时超过 3）；被顶替回队的 ambient 若遇满队驱逐即丢弃（ambient 可丢语义）。提醒记账因此无漏账风险（critical 永不丢）。
+4. **悬停层（M3 预留接口）**：悬停宠物今日汇总显示期间**暂停队列推进**（当前条目 dwell 冻结），移开恢复——作为特殊层实现，不进队列。（2026-08-25 R2 committer 定案补充）边界语义：冻结期间新上屏的条目（critical 顶替/队列推进上屏）恢复后 dwell 自恢复时刻按满额计（含冻结段溢记容差，方向为**偏长不偏短**——气泡多显示而非少显示，信息不丢、记账不早，对 M3 悬停层安全）。
 5. **去重护栏沿用**：sanitizeBubbleText 净化后为空 → 直接按 auto 结案（v1 语义）。
 6. **提醒记账语义不变**：只有最终离开显示（dwell 到期/确认）才回报 dismissed_via；被顶回队期间不结案。**critical 不会被 info/ambient 顶**（只有同级 critical 之间按 FIFO 或同源合并轮换）。已知边界：critical 尚在队列未显示时 App 退出 → 该 reminder_log 的 dismissed_via 永久 NULL（与 v1「显示中退出同样丢回报」同窗，无回归，记录在案）。
 
@@ -583,7 +585,7 @@ interface BubbleItem {
 | `i18n.rs` 或新 `theme.rs` | `ui_get_theme` / `ui_set_theme`（app_state `ui.theme` + `ui://theme` 广播；照 ui.language 模式，无 Rust 消费面） |
 | `plugins.rs` | 新命令 `plugins_set_enabled(id, enabled)`（写列 + 调 reminder_scheduler reload）；`plugins_list` 已含 enabled 无需改 |
 | `reminder_scheduler.rs` | 新增 `load_active_rules`（调度器专用过滤：排除 kind='todo' 且源插件 disabled 的行；`reminders_list` 的 `load_rules` 不动，P2-2 定案）；reload 既有通道复用 |
-| `atlas.rs` | 新命令 `atlas_sheet_png`（dataURL，AtlasState 内缓存，热替换失效；**async fn + spawn_blocking**——1536×1872 重编码 ~50-200ms 不占主线程，沿 M1 §1.5 线程纪律） |
+| `atlas.rs` | 新命令 `atlas_sheet_png`（dataURL，AtlasState 内缓存，热替换失效；**async fn + spawn_blocking**——1536×1872 重编码 ~50-200ms 不占主线程，沿 M1 §1.5 线程纪律）——**2026-08-24 修订：随 mini 猫移除作废（见 §2.4 修订）** |
 | `http_server.rs` + `lib.rs` | **M1 前置拉前（P1-1）**：`get_display_state` 返回 `{kind, agent}`；`DisplayNotifier` 去重键改 `(kind, agent)`（M1 §1.5/§1.6 已加修订标注） |
 | `lib.rs` | 命令注册；**无新 managed state**（theme 走 app_state 读写，AtlasState 复用）——issue #9 铁律自动满足 |
 
@@ -592,7 +594,7 @@ interface BubbleItem {
 | 文件 | 变更 |
 |---|---|
 | `styles/tokens.css`（新） | 双主题 token 全量定义（含 `--pet-world-*` 固定色组）；`global.css` 重构为消费 token 的组件层（BEM 命名不变，值全部 token 化——**pet 窗气泡/右键菜单除外**，其「宠物世界」色统一走 `--pet-world-*`，不随 data-theme，P2-3 修订） |
-| `panel/registry.ts` / `panelStore.ts` / `MiniCat.tsx`（新） | §2.4/2.5 |
+| `panel/registry.ts` / `panelStore.ts` / `MiniCat.tsx`（新） | §2.4/2.5（2026-08-24 修订：MiniCat.tsx 随 mini 猫移除删除；panelStore 保留供 agent 芯片） |
 | `Panel.tsx` | 注册表驱动 + header 重构 + 主题 data-theme 挂载点 |
 | `lib/bubble-queue.ts`（新）+ `pet/petStore.ts` + `pet/Bubble.tsx` + `lib/http-bridge.ts` + `lib/reminder-bridge.ts` + `lib/todo-bridge.ts` | §2.6（todo-bridge 的完成庆祝调用迁移至 pushBubble，P2-4 补） |
 | `pet/PetMenu.tsx` + `lib/pet-menu.ts` | 菜单视觉翻新（行为不变） |
@@ -606,12 +608,12 @@ interface BubbleItem {
 
 ### 2.10 测试与验收（M2 Done 标准）
 
-**单测**：`bubble-queue.test.ts`（合并/合并仅限在显在队/上限与驱逐序（ambient 先逐出、critical/info 永不、全满时允许超 3）/顶替回队/被顶 ambient 满队即丢/冻结/记账时机/净化空结案）；`resolveTheme` 纯函数（auto+系统深浅/手动覆盖）；`registry` 逻辑（禁用过滤/回退/插件插位/panel_tab 键读取）；i18n 字典完备性（新键 zh/en 一致）；既有 `bubble.ts`/`token-chart` 套件不红；`petStore.test.ts` 排队语义改写；Rust：`plugins_set_enabled`（禁用后 `load_active_rules` 过滤派生行、`reminders_list` 仍全量、重启用恢复）、`ui_get_theme`/`ui_set_theme`（缺省 auto、非法值拒绝/回退、写入后 `ui://theme` 广播断言，P2-6 补）、`atlas_sheet_png`（非空 dataURL/热替换失效）。
+**单测**：`bubble-queue.test.ts`（合并/合并仅限在显在队/上限与驱逐序（ambient 先逐出、critical/info 永不、全满时允许超 3）/顶替回队/被顶 ambient 满队即丢/冻结/记账时机/净化空结案）；`resolveTheme` 纯函数（auto+系统深浅/手动覆盖）；`registry` 逻辑（禁用过滤/回退/插件插位/panel_tab 键读取）；i18n 字典完备性（新键 zh/en 一致）；既有 `bubble.ts`/`token-chart` 套件不红；`petStore.test.ts` 排队语义改写；Rust：`plugins_set_enabled`（禁用后 `load_active_rules` 过滤派生行、`reminders_list` 仍全量、重启用恢复）、`ui_get_theme`/`ui_set_theme`（缺省 auto、非法值拒绝/回退、写入后 `ui://theme` 广播断言，P2-6 补）、`atlas_sheet_png`（非空 dataURL/热替换失效）——**2026-08-24 修订：随 mini 猫移除作废**。
 
 **实机验收**（TC-UI-xx，实施时落 V2-TEST-CASES.md）：
 
 1. 主题：三档切换即时生效（panel 全控件跟随）；「跟随系统」下改系统外观即时联动；重启保留；**气泡/右键菜单不随主题变**（暖白恒定）；
-2. mini 猫：随 agent 状态切行（working 跑动/error 倒下）；atlas 热替换后 mini 猫同步换装；atlas 损坏回退时 mini 猫降级占位不崩；状态芯片 agent 正确跟随（含 kind 不变期 agent 切换——验证 (kind,agent) 去重拉前生效）；
+2. mini 猫：随 agent 状态切行（working 跑动/error 倒下）；atlas 热替换后 mini 猫同步换装；atlas 损坏回退时 mini 猫降级占位不崩；状态芯片 agent 正确跟随（含 kind 不变期 agent 切换——验证 (kind,agent) 去重拉前生效）；**（2026-08-24 修订：mini 猫移除，本项仅保留「状态芯片 agent 正确跟随（含 (kind,agent) 去重拉前生效）」半句验收）**；
 3. tab 注册表：禁用 Todo → tab 消失 + 当前正查看时自动切走 + 派生提醒不再触发（到期无气泡）+ **提醒列表中 todo 派生行显示「已停用（插件关闭）」徽标** + 数据完好；重启用全恢复；`panel://tab` 直达禁用 tab 回退首个；
 4. 气泡排队：提醒显示中收到 token 汇报 → 不顶替（critical 优先）；token 汇报显示中提醒到达 → 立即顶替、汇报回队首随后重现；同源 10s 合并；队列上限与驱逐（M2 无 ambient 真实来源，用测试驱动器验证或留 M3 补验）；确认记账 dismissed_via 语义不变；
 5. 四 tab 页视觉落新系统（对比样例 a/b 目验）；深色下图表/表格可读性目验；硬编码色清零核对（grep `#[0-9a-f]{3,8}` 与 `rgba(`，未列入 token 的即清理对象）。
@@ -620,11 +622,11 @@ interface BubbleItem {
 
 | # | 风险/问题 | 处置 |
 |---|---|---|
-| R1 | `atlas_sheet_png` 大 dataURL IPC（~30-50KB base64）一次开销 | 启动/换装各一次，面板显示时才拉取（懒加载）；可接受；如实测卡顿改 `convertFileSrc` 临时文件方案 |
+| R1 | `atlas_sheet_png` 大 dataURL IPC（~30-50KB base64）一次开销 | 启动/换装各一次，面板显示时才拉取（懒加载）；可接受；如实测卡顿改 `convertFileSrc` 临时文件方案（2026-08-24 修订：随 mini 猫移除，风险不再存在） |
 | R2 | 深色主题下既有 Token 图表配色可读性（旧图表色硬编码） | M2 轻翻新时图表色 token 化（三段 chart token）；精细打磨在 M3（柱图本就要重做） |
 | R3 | 悬停层（M3）与 dwell 冻结接口 M2 先行实现但无消费方 | 接口极小（setHoverPaused），测试钉住；M3 直接用 |
 | R4 | `plugins_set_enabled` 与调度器 reload 的并发（reload 时正在触发） | 复用 v1 既有 reload 通道语义（增删改同样场景），无新竞态面 |
-| R5 | 主题切换时 panel 内 canvas（mini 猫/图表）重绘 | data-theme 变化触发 React 重渲染自然重绘；无缓存像素需要失效 |
+| R5 | 主题切换时 panel 内 canvas（mini 猫/图表）重绘 | data-theme 变化触发 React 重渲染自然重绘；无缓存像素需要失效（2026-08-24 修订：mini 猫移除后仅剩图表） |
 | R6 | petStore 排队改造回归风险（M3~M6 都压在它上面） | bubble-queue 纯函数 100% 覆盖 + 桥层适配层最小化；M2 验收 item 4 全链路目验；已知边界（critical 在队未显示时退出 → dismissed_via NULL）见 §2.6.1 规则 6 |
 | R7 | **805 行 global.css 重构无自动化视觉回归手段**（纯函数测试不覆盖 CSS） | 验收 item 5 目验 + 轻翻新不换信息架构以降低面；重点核对深色下所有卡片/表格/输入控件/滚动条/hover/disabled 态 |
 | R8 | **双主题下硬编码颜色清理清单**（漏一处 = 深色下白底刺眼） | 以 grep 色值字面量（`#[0-9a-f]{3,8}` / `rgba(`）为准绳做全量清单，未列入 token 表的即清理对象；验收 item 5 含核对步骤 |

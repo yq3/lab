@@ -13,6 +13,7 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::plog;
 use rusqlite::{params, Connection};
 use serde::Serialize;
 use tauri::Manager;
@@ -163,6 +164,42 @@ pub fn plugins_list<R: tauri::Runtime>(
 }
 
 // ---------------------------------------------------------------------------
+// v2 M2：feature flag（V2-DESIGN §2.5，TC-UI-07/08）
+// ---------------------------------------------------------------------------
+
+/// 写 `plugins.enabled` 列（纯逻辑；未知 id → Err）。
+pub fn set_enabled_at(conn: &Connection, id: &str, enabled: bool) -> Result<(), String> {
+    let n = conn
+        .execute(
+            "UPDATE plugins SET enabled = ?2 WHERE id = ?1",
+            params![id, enabled as i64],
+        )
+        .map_err(|e| format!("set plugin enabled: {e}"))?;
+    if n == 0 {
+        return Err(format!("插件不存在：{id}"));
+    }
+    Ok(())
+}
+
+/// 功能管理开关：写列 + **触发提醒调度器 reload**（禁用停派生的执行面——
+/// reload 后调度器走 `load_active_rules` 过滤禁用插件的派生行）。
+/// 数据保留语义：无任何 DELETE，重启用即恢复。
+#[tauri::command]
+pub fn plugins_set_enabled<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    id: String,
+    enabled: bool,
+) -> Result<(), String> {
+    {
+        let db = app.state::<std::sync::Mutex<Connection>>();
+        let conn = db.lock().map_err(|e| format!("db lock: {e}"))?;
+        set_enabled_at(&conn, &id, enabled)?;
+    }
+    plog!("[pulsepet] plugin {id} enabled={enabled}");
+    crate::reminder_scheduler::reload_from_app(&app)
+}
+
+// ---------------------------------------------------------------------------
 // 测试
 // ---------------------------------------------------------------------------
 
@@ -268,5 +305,80 @@ mod tests {
         assert_eq!(list2[0].name, "Todo");
 
         std::fs::remove_dir_all(&root).ok();
+    }
+
+    // ---- v2 M2：plugins_set_enabled（TC-UI-07/08） ----
+
+    #[test]
+    fn set_enabled_at_writes_column_and_rejects_unknown_id() {
+        let root = tempdir("seten");
+        let c = conn();
+        ensure_builtin_plugins_at(&root, &c).unwrap();
+
+        set_enabled_at(&c, BUILTIN_TODO_ID, false).unwrap();
+        let enabled: i64 = c
+            .query_row(
+                "SELECT enabled FROM plugins WHERE id = ?1",
+                [BUILTIN_TODO_ID],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(enabled, 0, "禁用写 plugins.enabled 列");
+        set_enabled_at(&c, BUILTIN_TODO_ID, true).unwrap();
+        let enabled: i64 = c
+            .query_row(
+                "SELECT enabled FROM plugins WHERE id = ?1",
+                [BUILTIN_TODO_ID],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(enabled, 1, "重启用恢复");
+
+        assert!(set_enabled_at(&c, "no-such-plugin", true).is_err(), "未知 id 报错");
+
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn plugins_set_enabled_triggers_scheduler_reload_via_mock_runtime() {
+        use std::sync::{Arc, Mutex as StdMutex};
+        let app = tauri::test::mock_app();
+        let handle = app.handle();
+        let c = conn();
+        // 登记内置插件 + 一条普通提醒 + 一条 todo 派生提醒（禁用语义的过滤对象）
+        crate::db::set_state(&c, "x", "1").ok();
+        c.execute(
+            "INSERT INTO plugins (id, name, version, manifest_version, enabled) \
+             VALUES ('built-in-todo', 'Todo', '0.1.0', 1, 1)",
+            [],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO reminders (kind, label, interval_minutes, enabled, use_fireworks) \
+             VALUES ('hydration', '喝水', 30, 1, 0)",
+            [],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO reminders (kind, label, interval_minutes, enabled, use_fireworks, \
+             source_todo_id, start_time) \
+             VALUES ('todo', '交周报', 0, 1, 0, 7, '2026-08-25T09:55')",
+            [],
+        )
+        .unwrap();
+        handle.manage(StdMutex::new(c));
+        let st = Arc::new(StdMutex::new(
+            crate::reminder_scheduler::RemindersState::default(),
+        ));
+        handle.manage(st.clone());
+
+        plugins_set_enabled(handle.clone(), BUILTIN_TODO_ID.to_string(), false).unwrap();
+        {
+            let s = st.lock().unwrap();
+            assert_eq!(s.rules.len(), 1, "禁用后调度器 reload：todo 派生行被过滤");
+            assert_eq!(s.rules[0].rule.kind, "hydration");
+        }
+        plugins_set_enabled(handle.clone(), BUILTIN_TODO_ID.to_string(), true).unwrap();
+        assert_eq!(st.lock().unwrap().rules.len(), 2, "重启用恢复（数据保留，无 DELETE）");
     }
 }

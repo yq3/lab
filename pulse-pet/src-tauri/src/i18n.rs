@@ -97,11 +97,11 @@ impl Lang {
     }
 
     // ---- panel 窗口标题 ----
-
+    // R2 P3-2：与页内 h1（前端 panel.title）逐字一致——「PulsePet · 控制面板」。
     pub fn panel_title(&self) -> &'static str {
         match self {
-            Lang::Zh => "PulsePet 控制面板",
-            Lang::En => "PulsePet Control Panel",
+            Lang::Zh => "PulsePet · 控制面板",
+            Lang::En => "PulsePet · Control Panel",
         }
     }
 
@@ -245,6 +245,15 @@ impl Lang {
             Lang::En => "Uninstalled; restart your CC session for this to take effect",
         }
     }
+
+    /// 安装后建议新开 CC 会话（v2 M2 L1/P2-1：安装路径的提示不再复用卸载
+    /// 文案——修复「已安装…已卸载」措辞矛盾；一键级 i18n）。
+    pub fn intg_install_hint(&self) -> &'static str {
+        match self {
+            Lang::Zh => "已安装；如 CC 会话已在运行，建议新开会话以启用",
+            Lang::En => "Installed; restart your CC session to activate it",
+        }
+    }
 }
 
 /// setup 时恢复持久化语言（无值 / 非法值保持默认 zh，由前端按系统语言接管）。
@@ -305,6 +314,9 @@ mod tests {
         assert_eq!(Lang::En.tray_toggle(), "Show/Hide Pet");
         assert!(Lang::Zh.tray_quit().contains("退出"));
         assert_eq!(Lang::En.tray_quit(), "Quit");
+        // R2 P3-2：窗口标题 zh/en 互异且含间隔点（与前端 panel.title 一致性钉子）
+        assert_eq!(Lang::Zh.panel_title(), "PulsePet · 控制面板");
+        assert_eq!(Lang::En.panel_title(), "PulsePet · Control Panel");
         // 全部五项在两种语言下互不相同（防"en 串误粘贴 zh"类回归）
         for (zh, en) in [
             (Lang::Zh.tray_toggle(), Lang::En.tray_toggle()),
@@ -373,6 +385,21 @@ mod tests {
         ] {
             assert!(!zh.is_empty() && !en.is_empty());
             assert_ne!(zh, en);
+        }
+        // v2 M2 L1（P2-1）：安装提示独立成键——安装路径不再出现「已卸载」措辞
+        for (zh, en) in [(
+            Lang::Zh.intg_install_hint(),
+            Lang::En.intg_install_hint(),
+        )] {
+            assert!(!zh.is_empty() && !en.is_empty());
+            assert_ne!(zh, en);
+            assert!(zh.contains("已安装"), "{zh}");
+            assert!(!zh.contains("已卸载"), "安装文案不得复用卸载措辞：{zh}");
+            assert!(en.to_lowercase().contains("installed"), "{en}");
+            assert!(
+                !en.to_lowercase().contains("uninstalled"),
+                "install wording must not reuse uninstall text: {en}"
+            );
         }
         assert!(Lang::Zh.intg_installed().contains("已安装"));
         assert!(Lang::En.intg_installed().contains("Installed"));

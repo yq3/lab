@@ -3,8 +3,9 @@
  *
  * Rust 调度器到点广播 `reminder://trigger`（payload 见 parseReminderTrigger）：
  * - 气泡路径（无条件）：planReminderActions 产出的净化文案 → petStore.
- *   showReminderBubble（8s 自动消失回报 'auto'；点击宠物确认回报 'bubble'，
- *   由本模块注册的 reporter invoke 回 Rust）；
+ *   pushBubble（v2 M2 排队模型：critical 级 source="reminder:<logId>"，分级
+ *   dwell 8s 到期回报 'auto'；点击宠物确认回报 'bubble'，由本模块注册的
+ *   reporter invoke 回 Rust；被顶回队不结案——只有最终离场才记账）；
  * - 烟花（use_fireworks 或全局开关开，TC-RM-11 的 OR 语义）**额外** invoke
  *   `reminder_play_fireworks`，由 Rust 定位发射点并编排 fireworks 窗口
  *   （TC-RM-09/10；dismissed_via='fireworks' 由 Rust 在播完 hide 时写）。
@@ -53,8 +54,15 @@ export function initReminderBridge(): void {
       if (!t) return;
       // v0.1.3 四-5（TC-RM-17/09）：气泡无条件展示，烟花按 plan 额外叠加——
       // 特效只叠加、不替代气泡（烟花触发时用户同样能看到提醒文案）。
+      // v2 M2：critical 级 + source="reminder:<logId>"（排队模型 §2.6.2；
+      // planReminderActions 的烟花叠加编排原样保留）。
       const plan = planReminderActions(t, Date.now());
-      usePetStore.getState().showReminderBubble(plan.bubbleText, t.log_id);
+      usePetStore.getState().pushBubble({
+        text: plan.bubbleText,
+        level: "critical",
+        source: `reminder:${t.log_id}`,
+        reminder: { logId: t.log_id },
+      });
       if (plan.fireworks) {
         void (async () => {
           try {

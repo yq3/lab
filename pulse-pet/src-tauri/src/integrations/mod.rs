@@ -1045,8 +1045,9 @@ pub async fn integrations_install(
     result?;
     let mut st = spawn_status(&activity, &id, lang).await?;
     if id == ID_CLAUDE_CODE {
-        // §1.4.4：Windows 字面路径无逐事件自愈，卸载/重装后建议新开 CC 会话
-        st.message = format!("{} · {}", st.message, lang.intg_uninstall_hint());
+        // §1.4.4：Windows 字面路径无逐事件自愈，安装后建议新开 CC 会话
+        // v2 M2 L1（P2-1）：安装路径用安装措辞（不再复用卸载文案）
+        st.message = format!("{} · {}", st.message, action_hint(lang, "install"));
     }
     Ok(st)
 }
@@ -1077,7 +1078,8 @@ pub async fn integrations_uninstall(
     result?;
     let mut st = spawn_status(&activity, &id, lang).await?;
     if id == ID_CLAUDE_CODE {
-        st.message = format!("{} · {}", st.message, lang.intg_uninstall_hint());
+        // §1.4.4：Windows 字面路径无逐事件自愈，卸载后建议新开 CC 会话
+        st.message = format!("{} · {}", st.message, action_hint(lang, "uninstall"));
     }
     Ok(st)
 }
@@ -1086,6 +1088,15 @@ pub async fn integrations_uninstall(
 fn activity_of(app: &tauri::AppHandle) -> crate::http_server::AgentActivity {
     use tauri::Manager;
     app.state::<crate::http_server::AgentActivity>().inner().clone()
+}
+
+/// 安装/卸载后追加的会话提示（v2 M2 L1/P2-1：install 用安装措辞，不再复用
+/// 卸载文案——修复安装后提示条「已安装…已卸载」矛盾；仅 claude-code 路径）。
+fn action_hint(lang: Lang, action: &str) -> &'static str {
+    match action {
+        "install" => lang.intg_install_hint(),
+        _ => lang.intg_uninstall_hint(),
+    }
 }
 
 /// 探测 + 组装单个接入状态（阻塞 I/O → spawn_blocking）。
@@ -1688,5 +1699,29 @@ mod tests {
             |app, id| Box::pin(integrations_install(app, id));
         let _uninstall: fn(tauri::AppHandle, String) -> OneFut =
             |app, id| Box::pin(integrations_uninstall(app, id));
+    }
+
+    // ---- v2 M2 L1（P2-1）：安装路径提示文案修复 ----
+
+    #[test]
+    fn install_path_hint_uses_install_wording_not_uninstall() {
+        // L1：integrations_install 的 claude-code 路径此前误用
+        // intg_uninstall_hint（安装后提示条出现「已安装…已卸载」矛盾）。
+        let zh = Lang::Zh;
+        let en = Lang::En;
+        let install_zh = action_hint(zh, "install");
+        assert!(install_zh.contains("已安装"), "{install_zh}");
+        assert!(!install_zh.contains("已卸载"), "安装路径不得出现卸载措辞：{install_zh}");
+        let install_en = action_hint(en, "install");
+        assert!(install_en.to_lowercase().contains("installed"));
+        assert!(!install_en.to_lowercase().contains("uninstalled"));
+        // 卸载路径保持既有文案（语义不变）
+        assert_eq!(action_hint(zh, "uninstall"), zh.intg_uninstall_hint());
+        // 源码钉子：install 命令追加 hint 走 action_hint("install")
+        let src = include_str!("mod.rs");
+        assert!(
+            src.contains(r#"action_hint(lang, "install")"#),
+            "integrations_install 须经 action_hint(\"install\") 取安装提示"
+        );
     }
 }

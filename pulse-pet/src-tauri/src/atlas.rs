@@ -169,6 +169,7 @@ pub fn validate_declared(
 
 // ---- 解码 ----
 
+#[derive(Clone)]
 pub struct AtlasData {
     pub cols: u32,
     pub rows: u32,
@@ -628,8 +629,17 @@ pub struct PetOptionDto {
 }
 
 /// 受管状态：当前生效的 atlas 选择。
+/// （2026-08-24 修订：mini 猫 PNG dataURL 缓存随 atlas_sheet_png 命令一并
+/// 回收删除——V2-DESIGN §2.4 修订，唯一消费方消失即回收，不留无消费方代码。）
 pub struct AtlasState {
     pub selection: Selection,
+}
+
+impl AtlasState {
+    /// 从完整 Selection 构造（init_selection 用）。
+    pub fn new(selection: Selection) -> Self {
+        Self { selection }
+    }
 }
 
 fn selection_dto(s: &Selection) -> AtlasMetaDto {
@@ -661,7 +671,7 @@ pub fn init_selection(conn: &Connection) -> Result<AtlasState, String> {
     let requested = crate::db::get_state(conn, "pet.selected").filter(|s| !s.is_empty());
     let selection = resolve_requested(requested.as_deref(), &home_dir());
     log_selection(&selection);
-    Ok(AtlasState { selection })
+    Ok(AtlasState::new(selection))
 }
 
 fn log_selection(s: &Selection) {
@@ -710,8 +720,12 @@ pub fn atlas_list_pets(_app: tauri::AppHandle) -> Result<Vec<PetOptionDto>, Stri
 
 /// 选择宠物（None = 恢复自动）：持久化 `pet.selected` → 加载 → 事件通知 webview
 /// 热替换（TC-SP-11② / TC-APP-12）。失败回退内置占位 + notice（TC-SP-05/09）。
+/// v2 M2：泛型 Runtime（tauri::test mock 可驱动）+ 代次前进使 PNG 缓存失效。
 #[tauri::command]
-pub fn atlas_select(app: tauri::AppHandle, id: Option<String>) -> Result<AtlasMetaDto, String> {
+pub fn atlas_select<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    id: Option<String>,
+) -> Result<AtlasMetaDto, String> {
     {
         let db = app.state::<std::sync::Mutex<Connection>>();
         let conn = db.lock().map_err(|e| format!("db lock: {e}"))?;
@@ -1259,4 +1273,7 @@ mod tests {
 
         fs::remove_dir_all(&home).ok();
     }
+
+    // （v2 M2 atlas_sheet_png / base64 / PNG 缓存相关测试随命令一并回收删除
+    //  ——2026-08-24 修订：mini 猫移除，唯一消费方消失，V2-DESIGN §2.4。）
 }

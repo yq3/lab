@@ -17,6 +17,12 @@ import {
   type IntegrationStatus,
   type IntegrationUiState,
 } from "../lib/integrations";
+import {
+  setThemePreference,
+  useThemeStore,
+  type ThemePreference,
+} from "../lib/theme";
+import { setPluginEnabled, usePluginStore } from "../lib/plugin-store";
 import { usePetStore } from "../pet/petStore";
 import { changeLanguage, t, useLangStore, type Lang } from "../lib/i18n";
 
@@ -62,16 +68,25 @@ export default function Settings() {
   /** M6 P2 ②（M7 清偿）：穿透失败单独持有——成功时只清它，不动 atlas 错误横幅。 */
   const [passThroughError, setPassThroughError] = useState<string | null>(null);
   const [langBusy, setLangBusy] = useState(false);
-  /** v2 M1 接入管理：doctor 快照 + 操作中的接入 id + 每接入操作错误/成功提示。 */
+  /** v2 M1 接入管理：doctor 快照 + 操作中的接入 id + 每接入操作错误/成功提示。
+   * v2 M2 L2（P3-1）：notice 存 Rust 返回的 **status 对象**（渲染时以当前语言
+   * 现拼前缀），语言切换时清空——修复「提示条文案在动作时点语言烘焙、切换
+   * 语言后旧提示保持旧语言」。 */
   const [intg, setIntg] = useState<IntegrationStatus[] | null>(null);
   const [intgBusy, setIntgBusy] = useState<IntegrationId | null>(null);
   const [intgErrors, setIntgErrors] = useState<Record<string, string>>({});
-  /** tester P2-1（TC-INT-07-5）：操作返回 message 的行内成功提示——claude-code
-   * 卸载/重装的「建议新开 CC 会话」提示在 doctor 重拉里没有，必须单独展示；
-   * 持续展示至该行下一次操作（提示是可执行建议，不做一闪而过的 toast）。 */
-  const [intgNotices, setIntgNotices] = useState<Record<string, string>>({});
+  const [intgNotices, setIntgNotices] = useState<Record<string, IntegrationStatus>>({});
   const passThrough = usePetStore((s) => s.passThrough);
   const lang = useLangStore((s) => s.lang); // M8 i18n：语言变化时本页文案重渲染
+  const themePref = useThemeStore((s) => s.preference); // v2 M2 外观
+  const plugins = usePluginStore((s) => s.plugins); // v2 M2 功能管理
+  const [themeError, setThemeError] = useState<string | null>(null);
+  const [pluginBusy, setPluginBusy] = useState<string | null>(null);
+
+  // L2：语言切换 → 旧语言的 notice（Rust message 无法前端重算）整组清除
+  useEffect(() => {
+    setIntgNotices({});
+  }, [lang]);
 
   const load = useCallback(async () => {
     if (!isTauriRuntime()) {
@@ -205,9 +220,8 @@ export default function Settings() {
   };
 
   /** v2 M1 接入管理动作（安装/重装/卸载）：完成后刷新 doctor；结果双向可见——
-   * 失败行级错误条（intgErrors）；成功行级提示条（intgNotices，展示 Rust
-   * 返回的 message 全文，含 claude-code 卸载的「建议新开 CC 会话」提示，
-   * TC-INT-07-5 / tester P2-1）。 */
+   * 失败行级错误条（intgErrors）；成功行级提示条（intgNotices，存 status
+   * 对象、渲染时以当前语言现拼——L2 修复，TC-INT-07-5 / tester P2-1）。 */
   const onIntegrationAction = async (id: IntegrationId, action: "install" | "uninstall") => {
     setIntgBusy(id);
     // 新操作清掉该行旧结果（错误与提示都属上一动作）
@@ -225,9 +239,8 @@ export default function Settings() {
       const status = action === "install"
         ? await installIntegration(id)
         : await uninstallIntegration(id);
-      const notice = composeActionNotice(t("integrations.actionDone"), status);
-      if (notice) {
-        setIntgNotices((prev) => ({ ...prev, [id]: notice }));
+      if (composeActionNotice(t("integrations.actionDone"), status)) {
+        setIntgNotices((prev) => ({ ...prev, [id]: status }));
       }
     } catch (e) {
       setIntgErrors((prev) => ({
@@ -237,6 +250,33 @@ export default function Settings() {
     } finally {
       setIntgBusy(null);
       await loadIntegrations();
+    }
+  };
+
+  /** v2 M2 外观：主题三档切换（本地立即生效 + Rust 持久化 + ui://theme 广播；
+   * 失败回滚由 setThemePreference 内处理并抛出——此处展示错误）。 */
+  const onTheme = async (next: ThemePreference) => {
+    if (next === themePref) return;
+    setThemeError(null);
+    try {
+      await setThemePreference(next);
+    } catch (e) {
+      setThemeError(
+        t("settings.themeFail", { msg: e instanceof Error ? e.message : String(e) }),
+      );
+    }
+  };
+
+  /** v2 M2 功能管理：插件开关（Rust 写列 + 调度器 reload；本 store 重拉驱动
+   * tab 栏/徽标联动）。 */
+  const onPluginToggle = async (id: string, enabled: boolean) => {
+    setPluginBusy(id);
+    try {
+      await setPluginEnabled(id, enabled);
+    } catch (e) {
+      console.error("[pulsepet] set plugin enabled failed:", e);
+    } finally {
+      setPluginBusy(null);
     }
   };
 
@@ -336,6 +376,58 @@ export default function Settings() {
         <option value="en">{t("settings.languageEn")}</option>
       </select>
 
+      {/* v2 M2：外观（主题三档分段控件；panel 窗专属，TC-UI-01） */}
+      <h2>{t("settings.theme")}</h2>
+      {themeError && <p className="settings-error">⚠️ {themeError}</p>}
+      <div className="theme-seg" role="radiogroup" aria-label={t("settings.theme")}>
+        {(["auto", "light", "dark"] as ThemePreference[]).map((v) => (
+          <button
+            key={v}
+            role="radio"
+            aria-checked={themePref === v}
+            className={themePref === v ? "seg active" : "seg"}
+            onClick={() => void onTheme(v)}
+          >
+            {t(
+              v === "auto"
+                ? "settings.themeAuto"
+                : v === "light"
+                  ? "settings.themeLight"
+                  : "settings.themeDark",
+            )}
+          </button>
+        ))}
+      </div>
+      <p className="settings-current">{t("settings.themeHint")}</p>
+
+      {/* v2 M2：功能管理（插件启停 = feature flag，TC-UI-07）；核心三 tab 不在列 */}
+      <h2>{t("plugins.manage")}</h2>
+      <p className="settings-current">{t("plugins.manageHint")}</p>
+      <div className="intg-list">
+        {(plugins ?? []).map((p) => (
+          <div className="intg-row plugin-row" key={p.id}>
+            <div className="intg-row-head">
+              <span className="intg-name">{p.name}</span>
+              <span className="intg-state-label">v{p.version}</span>
+              <span className="intg-row-actions">
+                <label
+                  className="reminder-check compact"
+                  title={t("plugins.manageToggle", { name: p.name })}
+                >
+                  <input
+                    type="checkbox"
+                    checked={p.enabled}
+                    disabled={pluginBusy === p.id}
+                    onChange={(e) => void onPluginToggle(p.id, e.target.checked)}
+                  />
+                  {p.enabled ? t("todo.plugin.enabled") : t("todo.plugin.disabled")}
+                </label>
+              </span>
+            </div>
+          </div>
+        ))}
+      </div>
+
       {/* v2 M1：接入管理（V2-DESIGN §1.7，TC-INT-09） */}
       <h2>{t("integrations.title")}</h2>
       {intgErrors.__load && <p className="settings-error">⚠️ {intgErrors.__load}</p>}
@@ -373,9 +465,16 @@ export default function Settings() {
               </div>
               <p className="intg-path">{s.configPath}</p>
               <p className="intg-message">{s.message}</p>
-              {intgNotices[s.id] && (
-                <p className="intg-row-notice">✅ {intgNotices[s.id]}</p>
-              )}
+              {intgNotices[s.id] &&
+                composeActionNotice(
+                  t("integrations.actionDone"),
+                  intgNotices[s.id],
+                ) && (
+                  <p className="intg-row-notice">
+                    ✅{" "}
+                    {composeActionNotice(t("integrations.actionDone"), intgNotices[s.id])}
+                  </p>
+                )}
               {intgErrors[s.id] && <p className="intg-row-error">⚠️ {intgErrors[s.id]}</p>}
               <p className="intg-note">{t("integrations.backupNote")}</p>
             </div>

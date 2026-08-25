@@ -51,3 +51,14 @@ describe("composeActionNotice：操作结果提示（tester P2-1 / TC-INT-07-5�
     expect("integrations.actionDone" in DICT.en).toBe(true);
   });
 });
+
+describe("v2 M2 L2（P3-1）：提示条语言不烘焙——渲染时以当前语言现拼", () => {
+  it("同一 status 在 zh/en 前缀下产出不同文案（Settings 渲染时现算，语言切换即跟随）", () => {
+    const status = st({ message: "已安装 · v0.2.0" });
+    const zh = composeActionNotice(t("integrations.actionDone", undefined, "zh"), status);
+    const en = composeActionNotice(t("integrations.actionDone", undefined, "en"), status);
+    expect(zh).toBe("操作完成：已安装 · v0.2.0");
+    expect(en).toBe("Done: 已安装 · v0.2.0");
+    expect(zh).not.toBe(en);
+  });
+});

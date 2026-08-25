@@ -199,16 +199,20 @@
 
 - **步骤**：打开控制面板，驱动任一 agent 会话产生状态变化。
 - **预期**：
-  1. 顶栏 = mini 猫 + 「PulsePet · 控制面板」标题 + agent 状态芯片三段布局；tab 栏在顶栏正下方（2px 底线，激活 tab 带 accent 色硬阴影上浮效果）；
+  1. 顶栏 = 「PulsePet · 控制面板」标题 + agent 状态芯片**两段布局**（2026-08-24 修订：mini 猫移除，原三段布局作废）；tab 栏在顶栏正下方（2px 底线，激活 tab 带 accent 色硬阴影上浮效果）；
   2. 状态芯片 `● {agent} · {kind}`，等宽字体，随 `pulsepet://state` 实时更新；agent / kind 字面量不翻译（i18n 约定），aria-label 走 `panel.statusAria`；
   3. 面板初开即正确（`get_display_state` 返回 `{kind, agent}`——M1 前置拉前至 M2 生效）；
   4. sessions 全空 → idle 且 agent 为空时芯片优雅降级（不显示错误值）。
 
 ### TC-UI-04 atlas_sheet_png 命令（单测）
 
+> **作废（2026-08-24 修订）**：用户裁定移除顶栏 mini 猫，`atlas_sheet_png` 命令为唯一消费方，一并回收删除——本用例不再执行。原文留档：
+
 - **步骤/预期**：返回非空 PNG dataURL；结果随 AtlasState 缓存（重复调用不重编码）；atlas 热替换（换宠物）时缓存失效重建；命令为 `async fn` + `spawn_blocking`（1536×1872 重编码 ~50-200ms 不占主线程，issue #9 纪律）。
 
 ### TC-UI-05 mini 猫状态镜像与降级（实机）
+
+> **作废（2026-08-24 修订）**：用户裁定移除顶栏 mini 猫（连带 MiniCat.tsx），本用例不再执行。原文留档：
 
 - **步骤**：驱动 agent 状态变化（working / error 等）→ 换宠物（atlas 热替换）→ 构造 atlas 损坏回退。
 - **预期**：
@@ -231,7 +235,7 @@
   4. 重新启用 Todo；
   5. `panel://tab` 直达已禁用的 tab（宠物右键菜单 → 设置路径再验证）。
 - **预期**：
-  1. 核心三 tab（Token / 提醒 / 设置）静态注册、顺序渲染，**不可关闭、不出现在「功能管理」区**；插件 tab（今日 = Todo）按 name 排序插在提醒与设置之间；
+  1. 核心三 tab（Token / 提醒 / 设置）静态注册、顺序渲染，**不可关闭、不出现在「功能管理」区**；插件 tab（今日 = Todo）按 name 排序插在提醒与设置之间；「功能管理」区列**每个插件一行（含已停用——2026-08-24 修订）**；
   2. 禁用 Todo → tab 立即消失；正查看时**立即自动切到首个可用 tab**；
   3. 禁用期间 todo 派生提醒**不再触发**（到期无气泡 / 无烟花）；提醒列表中 todo 派生行仍可见但显示「已停用（插件关闭）」徽标（可见但惰性——数据不删，用户不疑惑「我的 todo 提醒去哪了」）；
   4. 重启用后全恢复（tab 回来 + 派生提醒恢复触发 + 徽标消失），DB 数据全程无损（无任何 DELETE）；
@@ -251,7 +255,7 @@
 - **步骤/预期**（对照 V2-DESIGN §2.6.1 六条规则）：
   1. **顶替回队**：critical 到达时 info 显示中 → info 立即被顶回**队首**（不丢失、不结案）；同级新条目按 FIFO 排队；
   2. **同源合并 10s**：同 `source` + 同级别 10s 内新条目**原地替换**旧条目——显示中的替换后文案刷新 + dwell 重计时，队列中的同样替换；**已离场过期的不复活**（新条目独立入队）；
-  3. **队列上限与驱逐**：上限 3 指 queue 数组长度（不含 current）；入队 / 回队超限按 **ambient → info 顺序从队尾驱逐**；critical / info 永不被驱逐（queue 全为 critical/info 时允许临时超 3）；被顶替回队的 ambient 遇满队驱逐即丢弃（ambient 可丢语义，critical 无漏账风险）；
+  3. **队列上限与驱逐**：上限 3 指 queue 数组长度（不含 current）；入队 / 回队超限**仅驱逐 ambient（自队尾优先——2026-08-24 修订，原「ambient → info 顺序」与下句矛盾）**；critical / info 永不被驱逐（queue 全为 critical/info 时允许临时超 3）；被顶替回队的 ambient 遇满队驱逐即丢弃（ambient 可丢语义，critical 无漏账风险）；
   4. **分级 dwell**：critical 8s（或点宠物确认）、info 6s、ambient 4s；`expireCurrent` 到期离场；
   5. **悬停层冻结**：`setHoverPaused(true)` 后 dwell 冻结、队列不推进；恢复后续走剩余 dwell；
   6. **净化护栏与记账**：sanitizeBubbleText 净化后为空 → 按 auto 结案；只有最终离开显示（dwell 到期 / 确认）才回报 dismissed_via，被顶回队期间不结案；**critical 不会被 info / ambient 顶**（只有同级 critical 间 FIFO / 合并轮换）；
