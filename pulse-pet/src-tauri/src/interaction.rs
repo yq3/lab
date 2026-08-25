@@ -14,6 +14,7 @@
 
 use crate::plog;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 
 use rusqlite::Connection;
 use tauri::{Emitter, Manager};
@@ -125,6 +126,58 @@ pub fn pet_set_pass_through(
     Ok(enabled)
 }
 
+// ---------------------------------------------------------------------------
+// v2 M3（V2-DESIGN §3.7.2，P1-3）：工具播报开关——跨窗口机制照穿透模式
+//（panel/pet 双 webview 不共享 store：app_state 持久化 + get 初始化 +
+// `pulsepet://tool-broadcast` 定向 pet 窗广播 → pet 桥 store 即时静默/恢复）。
+// ---------------------------------------------------------------------------
+
+/// app_state 键：工具播报开关（"true"/"false"；缺省 true = 默认开）。
+pub const KEY_TOOL_BROADCAST: &str = "bubble.toolBroadcast";
+
+/// 工具播报广播事件名（`tool_broadcast_set` 后定向 pet 窗下发；与前端
+/// tool-bubble-bridge.ts 的常量一致）。
+pub const TOOL_BROADCAST_EVENT: &str = "pulsepet://tool-broadcast";
+
+/// 读取持久化的工具播报开关：**缺省 true、非法值回退 true**（默认开；
+/// 仅显式 "false"/"0" 视为关——与穿透的 false 缺省语义相反，§3.7.2）。
+pub fn read_tool_broadcast(conn: &Connection) -> bool {
+    !matches!(
+        crate::db::get_state(conn, KEY_TOOL_BROADCAST).as_deref(),
+        Some("false") | Some("0")
+    )
+}
+
+/// 查询工具播报开关（pet 桥启动初始化 + panel 设置页初始显示值，N13）。
+#[tauri::command]
+pub fn tool_broadcast_get<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<bool, String> {
+    let db = app.state::<Mutex<Connection>>();
+    let conn = db.lock().map_err(|e| format!("db lock: {e}"))?;
+    Ok(read_tool_broadcast(&conn))
+}
+
+/// 设置工具播报开关：持久化 → 定向 pet 窗广播（pet 桥 store 即时静默/恢复，
+/// 无需重启——TC-M3-16-2）。panel 是唯一写入方，自身展示由调用方乐观更新。
+#[tauri::command]
+pub fn tool_broadcast_set<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    enabled: bool,
+) -> Result<bool, String> {
+    {
+        let db = app.state::<Mutex<Connection>>();
+        let conn = db.lock().map_err(|e| format!("db lock: {e}"))?;
+        crate::db::set_state(&conn, KEY_TOOL_BROADCAST, if enabled { "true" } else { "false" })
+            .map_err(|e| format!("persist tool broadcast: {e}"))?;
+    }
+    let _ = app.emit_to(
+        "pet",
+        TOOL_BROADCAST_EVENT,
+        serde_json::json!({ "enabled": enabled }),
+    );
+    plog!("[pulsepet] tool broadcast = {enabled}");
+    Ok(enabled)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -165,5 +218,68 @@ mod tests {
         assert!(s.get());
         s.set(false);
         assert!(!s.get());
+    }
+
+    // ---- v2 M3：工具播报开关（§3.7.2，TC-M3-14-5 / TC-M3-16-1） ----
+
+    #[test]
+    fn tool_broadcast_read_defaults_true_and_falls_back_on_garbage() {
+        let c = conn();
+        assert!(read_tool_broadcast(&c), "缺省 true（默认开）");
+        for v in ["garbage", "", "1", "true"] {
+            crate::db::set_state(&c, KEY_TOOL_BROADCAST, v).unwrap();
+            assert!(read_tool_broadcast(&c), "值 {v:?} → true（非法回退/显式开）");
+        }
+        for v in ["false", "0"] {
+            crate::db::set_state(&c, KEY_TOOL_BROADCAST, v).unwrap();
+            assert!(!read_tool_broadcast(&c), "值 {v:?} → false（显式关）");
+        }
+    }
+
+    #[test]
+    fn tool_broadcast_commands_roundtrip_and_broadcast() {
+        // mock runtime：managed db + 事件广播断言（照 theme.rs 命令级模式）
+        use std::sync::mpsc;
+        use tauri::Listener;
+        let app = tauri::test::mock_app();
+        let handle = app.handle();
+        handle.manage(Mutex::new(conn()));
+        // emit_to 定向 pet 窗：mock runtime 建同 label 窗口 + 窗口级 listener
+        //（emit_to 的 label 过滤只匹配 Window/Webview target，app-level listen
+        //  的 Any target 收不到——与真实 pet 窗 JS listen 同语义）
+        let pet = tauri::WebviewWindowBuilder::new(
+            handle,
+            "pet",
+            tauri::WebviewUrl::default(),
+        )
+        .build()
+        .unwrap();
+
+        // 缺省 true（N13：panel 初始显示值经 get 初始化）
+        assert!(tool_broadcast_get(handle.clone()).unwrap());
+
+        // set → 持久化 + 定向 pet 窗广播 payload {enabled}
+        let (tx, rx) = mpsc::channel::<bool>();
+        let tx = Mutex::new(tx);
+        pet.listen(TOOL_BROADCAST_EVENT, move |event| {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(event.payload()) {
+                if let Some(b) = v["enabled"].as_bool() {
+                    let _ = tx.lock().unwrap().send(b);
+                }
+            }
+        });
+        tool_broadcast_set(handle.clone(), false).unwrap();
+        assert_eq!(
+            rx.recv_timeout(std::time::Duration::from_secs(2)).unwrap(),
+            false,
+            "set(false) → tool-broadcast 广播 enabled:false"
+        );
+        assert!(!tool_broadcast_get(handle.clone()).unwrap(), "写入后可回读");
+        tool_broadcast_set(handle.clone(), true).unwrap();
+        assert_eq!(
+            rx.recv_timeout(std::time::Duration::from_secs(2)).unwrap(),
+            true
+        );
+        assert!(tool_broadcast_get(handle.clone()).unwrap(), "重开恢复");
     }
 }

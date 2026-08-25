@@ -202,6 +202,15 @@ select {
   background: rgba(23, 19, 15, 0.08); /* pet-world 墨系的低透明 hover（固定色族） */
 }
 
+/* v2 M3（§3.4 ③）：信息项（今日 token）与行为项间的分隔线样式 */
+.pet-menu-info {
+  border-bottom: 1px dashed rgba(23, 19, 15, 0.35);
+  border-radius: 0;
+  margin-bottom: 3px;
+  color: #29241d;
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+
 /* ---- panel 窗口 ---- */
 .panel {
   min-height: 100%;
@@ -701,9 +710,18 @@ select {
   height: auto;
 }
 
-/* SVG 时序柱图/饼图色（token 化：attribute 不支持 var()，走类） */
-.token-chart .bar-fill {
+/* v2 M3：堆叠柱图三段色（token 化：SVG attribute 不支持 var()，走类；
+   色 = M2 --chart-output/input/cache，深浅主题同 token 可读） */
+.token-chart .stack-seg-output {
   fill: var(--chart-output);
+}
+
+.token-chart .stack-seg-input {
+  fill: var(--chart-input);
+}
+
+.token-chart .stack-seg-cache {
+  fill: var(--chart-cache);
 }
 
 .token-chart .chart-axis {
@@ -719,84 +737,118 @@ select {
   fill: var(--ink-faint);
 }
 
-/* 饼图三色循环（M2 轻翻新；M3 砍饼图后由堆叠柱图三段 token 接管） */
-.pie-c0 {
-  fill: var(--chart-output);
-}
-.pie-c1 {
-  fill: var(--chart-input);
-}
-.pie-c2 {
-  fill: var(--chart-cache);
+/* 堆叠柱图容器（HTML tooltip 绝对定位于此） */
+.stack-chart-wrap {
+  position: relative;
 }
 
-.token-columns {
-  display: grid;
-  grid-template-columns: 5fr 7fr;
-  gap: 16px;
-  align-items: start;
+/* 自定义 HTML tooltip（§3.5：日期 + 三值 + 占比 + 总量） */
+.chart-tip {
+  position: absolute;
+  transform: translateX(-50%);
+  pointer-events: none;
+  background: var(--surface-2);
+  border: 2px solid var(--ink);
+  box-shadow: var(--shadow-hard);
+  padding: 6px 10px;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--ink);
+  white-space: nowrap;
+  z-index: 4;
 }
 
-.project-pie {
+.chart-tip-title {
+  font-weight: 700;
+  margin-bottom: 2px;
+}
+
+.chart-tip-row {
+  color: var(--ink-soft);
+}
+
+/* 图例三项（仅说明不可交互，§3.5） */
+.chart-legend {
   display: flex;
   gap: 16px;
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.legend-item {
+  display: inline-flex;
   align-items: center;
+  gap: 6px;
 }
 
-.project-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  flex: 1;
-  font-size: 13px;
-}
-
-.project-list li {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 0;
-  border-bottom: 1px dashed var(--line);
-}
-
-.project-dot {
+.legend-dot {
   width: 10px;
   height: 10px;
   flex: none;
 }
 
-.project-dot.pie-c0 {
+.legend-dot.legend-output {
   background: var(--chart-output);
 }
-.project-dot.pie-c1 {
+
+.legend-dot.legend-input {
   background: var(--chart-input);
 }
-.project-dot.pie-c2 {
+
+.legend-dot.legend-cacheRead {
   background: var(--chart-cache);
 }
 
-.project-name {
-  flex: 1;
+/* v2 M3：筛选 chip 行——可容纳多组筛选的容器（M5 时 agent 组作为第二组
+   插入同一 .filter-row；M3 只渲染模型组不留空位，P1-2 预留位） */
+.filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  margin-bottom: 12px;
+}
+
+.filter-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.model-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 2px solid var(--line);
+  background: var(--surface-2);
+  padding: 3px 8px;
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.model-chip:has(input:checked) {
+  border-color: var(--ink);
+  background: var(--surface);
+}
+
+.model-chip input {
+  margin: 0;
+}
+
+.model-chip-name {
+  color: var(--ink);
+  font-family: var(--font-mono);
+  max-width: 180px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--ink-soft);
 }
 
-.project-pct {
+.model-chip-total {
   color: var(--ink-faint);
-  min-width: 48px;
-  text-align: right;
   font-family: var(--font-mono);
-  font-size: 12px;
-}
-
-.project-cost {
-  color: var(--ink);
-  min-width: 64px;
-  text-align: right;
-  font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .token-empty {
@@ -830,11 +882,14 @@ select {
   background: var(--surface-2);
 }
 
-.session-id {
-  font-family: var(--font-mono);
-  color: var(--ink-faint);
-  min-width: 110px;
-  font-size: 12px;
+/* v2 M3（§3.6）：首列 = 会话标题（flex 省略；title 属性 tooltip 提供完整信息） */
+.session-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink);
 }
 
 .session-project {

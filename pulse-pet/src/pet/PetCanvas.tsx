@@ -275,6 +275,8 @@ export default function PetCanvas() {
   // 点击语义保留：未超阈值的按下-抬起仍是 click（M1 状态轮换 + TC-RM-04 确认）；
   // 拖拽结束后 OS/WKWebView 可能补发一次 click（R2 实测），由 DragClickGuard
   // 识别并吞掉——拖拽绝不附加单击效果，真实单击不受影响。
+  //（v2 M3 主动层悬停卡已按用户 2026-08-25 裁定移除——pointerenter/leave
+  //  接线随组件一并清退，三层快捷查看降为两层。）
   const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (e.button !== 0 || passThroughRef.current) return;
     // R3 P1：先快照菜单开态（此刻 PetMenu 的冒泡关闭尚未执行）

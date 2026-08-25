@@ -23,6 +23,20 @@ export interface TokenRow {
   tokens_cache_write: number;
   time_created: number | null;
   time_updated: number | null;
+  /** v2 M3：`json_extract(model,'$.id')`（仅按 id 归并）；NULL/损坏 → null（「未知模型」合并）。 */
+  model_id: string | null;
+  /** v2 M3：basename(project.worktree)；global（"/"）或 JOIN 未命中 → null（前端回退标签）。 */
+  project_name: string | null;
+  /** v2 M3：会话标题（by-session 独有；聚合行 null）。 */
+  title: string | null;
+}
+
+/** v2 M3：今日 token 聚合（token_stats_today；三层快捷查看共享单一数据源）。 */
+export interface TodayStats {
+  input: number;
+  output: number;
+  cache_read: number;
+  cost: number;
 }
 
 export type GroupBy = "session" | "day" | "week" | "range";
@@ -95,6 +109,23 @@ export async function fetchTokenRows(
   }
 }
 
+/**
+ * v2 M3（§3.2/§3.4）：今日 token 聚合（`token_stats_today`——from=本地今天 0 点、
+ * mock 过滤、reasoning 不计均在 Rust 侧）。错误经 parseStatsError 结构化透传
+ * （no-database 等，悬停卡「暂无数据」/菜单「—」态的来源）。
+ */
+export async function fetchTodayStats(): Promise<TodayStats> {
+  if (!isTauriRuntime()) {
+    throw new StatsError("query", t("token.needApp"));
+  }
+  const { invoke } = await import("@tauri-apps/api/core");
+  try {
+    return await invoke<TodayStats>("token_stats_today");
+  } catch (e) {
+    throw parseStatsError(e);
+  }
+}
+
 // 注：M3 曾有 `fetchCurrentSession`（token_stats_current_session 的 TS 封装），前端无
 // 调用方（当前会话气泡汇报由 Rust 侧 idle hook 直接下发），按 M4 清偿 P3-② 删除；
 // Rust command 按 spec §4.2 保留注册，供后续里程碑接入。
@@ -114,22 +145,27 @@ export function formatCost(usd: number): string {
   return `$${usd.toFixed(2)}`;
 }
 
-// ---- 时间跨度（TC-TK-08：边界含当天） ----
+// ---- 时间跨度（TC-TK-08：边界含当天；v2 M3 增 today preset） ----
 
-export type RangePreset = "7d" | "30d";
+export type RangePreset = "today" | "7d" | "30d";
 
 export interface TimeRange {
   fromMs: number;
   toMs: number;
 }
 
-/** 7d/30d：from = 本地今天 0 点往前 N-1 天（含当天共 N 天），to = 当前时刻。 */
+/**
+ * today：from = 本地今天 0 点、to = 当前时刻（§3.3）；
+ * 7d/30d：from = 本地今天 0 点往前 N-1 天（含当天共 N 天），to = 当前时刻。
+ */
 export function rangeForPreset(preset: RangePreset, now = new Date()): TimeRange {
-  const days = preset === "7d" ? 7 : 30;
   const toMs = now.getTime();
   const from = new Date(now);
   from.setHours(0, 0, 0, 0);
-  from.setDate(from.getDate() - (days - 1));
+  if (preset !== "today") {
+    const days = preset === "7d" ? 7 : 30;
+    from.setDate(from.getDate() - (days - 1));
+  }
   return { fromMs: from.getTime(), toMs };
 }
 
@@ -154,21 +190,24 @@ export function localDateStr(d = new Date()): string {
 // ---- KPI 汇总 ----
 
 export interface KpiTotals {
+  /** v2 M3（§3.5）：总量 = input + output + cache_read（reasoning 不计，SCOPE D）。 */
+  total: number;
   input: number;
   output: number;
   cacheRead: number;
   cost: number;
 }
 
-/** 跨度内总 input/output/cache_read/cost（TC-TK-09 ①）。 */
+/** 跨度内 total/input/output/cache_read/cost（TC-TK-09 ①；M3 增 total）。 */
 export function sumRows(rows: TokenRow[]): KpiTotals {
   return rows.reduce<KpiTotals>(
     (acc, r) => ({
+      total: acc.total + r.tokens_input + r.tokens_output + r.tokens_cache_read,
       input: acc.input + r.tokens_input,
       output: acc.output + r.tokens_output,
       cacheRead: acc.cacheRead + r.tokens_cache_read,
       cost: acc.cost + r.cost,
     }),
-    { input: 0, output: 0, cacheRead: 0, cost: 0 },
+    { total: 0, input: 0, output: 0, cacheRead: 0, cost: 0 },
   );
 }

@@ -60,6 +60,51 @@ describe("字典完备性", () => {
       }
     }
   });
+
+  // v2 M3（§3.9 键名清单 + 实施细项增补，TC-M3-17）：新键双语齐备
+  it("M3 新键 zh/en 均存在（含实施细项微调键）", async () => {
+    const { DICT } = await import("./i18n");
+    const m3Keys = [
+      "token.preset.today",
+      "token.kpi.total",
+      "token.col.model",
+      "token.model.unknown",
+      "token.project.global",
+      "token.project.unknown",
+      "token.chart.tip",
+      "token.chart.tipRow",
+      "token.chart.noModels",
+      "menu.todayToken",
+      "toolb.read",
+      "toolb.edit",
+      "toolb.bash",
+      "toolb.search",
+      "toolb.web",
+      "settings.sectionPet",
+      "settings.toolBroadcast",
+      "settings.toolBroadcastFail",
+    ];
+    for (const k of m3Keys) {
+      expect(DICT.zh[k], `zh 缺键 ${k}`).toBeTruthy();
+      expect(DICT.en[k], `en 缺键 ${k}`).toBeTruthy();
+    }
+  });
+
+  // 用户 2026-08-25 裁定修订：cache read 升独立第二卡（总量/cache read/input/
+  // output），首卡「含 cache read X」副行随之取消——totalSub 键清退
+  it("token.kpi.totalSub 已清退（cache read 独立卡取代副行小字）", async () => {
+    const { DICT } = await import("./i18n");
+    expect(!("token.kpi.totalSub" in DICT.zh), "zh 应无 totalSub").toBe(true);
+    expect(!("token.kpi.totalSub" in DICT.en), "en 应无 totalSub").toBe(true);
+  });
+
+  // 用户 2026-08-25 14:05 裁定：移除主动层悬停卡（三层降两层）——悬停卡错误态
+  // 专用键 todayUnavailable 清退（TC-M3-17 清退断言）
+  it("token.todayUnavailable 已清退（悬停卡移除，无消费方）", async () => {
+    const { DICT } = await import("./i18n");
+    expect(!("token.todayUnavailable" in DICT.zh), "zh 应无 todayUnavailable").toBe(true);
+    expect(!("token.todayUnavailable" in DICT.en), "en 应无 todayUnavailable").toBe(true);
+  });
 });
 
 describe("systemLangSafe：默认语言跟随系统", () => {

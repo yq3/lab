@@ -114,6 +114,16 @@ impl Lang {
         }
     }
 
+    /// M3（V2-DESIGN §3.2）：idle 汇报气泡末尾追加的「今日累计」段（含前导
+    /// 分隔符；total 为 format_tokens_k 已格式化串）。今日聚合失败时调用方
+    /// 静默省略本段（本期文案照常），zh 措辞与 SCOPE C ①「· 今日 42M」钉住。
+    pub fn token_report_today(&self, total: &str) -> String {
+        match self {
+            Lang::Zh => format!(" · 今日 {total}"),
+            Lang::En => format!(" · today {total}"),
+        }
+    }
+
     // ---- atlas 回退提示（TC-SP-05/09 措辞；zh 与 M5 定案逐字一致）----
 
     pub fn atlas_notice_grid(&self, id: &str, width: u32, height: u32) -> String {
@@ -342,6 +352,28 @@ mod tests {
             "This session: 58.3k input / 910 output / $0.05"
         );
         set(Lang::Zh); // 恢复默认，避免影响其它测试
+    }
+
+    #[test]
+    fn token_report_today_appends_segment_bilingually() {
+        // M3：追加段模板（TC-M3-09-1 逐字钉住——含前导「 · 」分隔）
+        set(Lang::Zh);
+        assert_eq!(current().token_report_today("42M"), " · 今日 42M");
+        // 拼接语义：本期文案 + 追加段
+        let full = format!(
+            "{}{}",
+            current().token_report("58.3k", "910", "$0.05"),
+            current().token_report_today("42M")
+        );
+        assert_eq!(full, "本期用了 58.3k input / 910 output / $0.05 · 今日 42M");
+        set(Lang::En);
+        assert_eq!(current().token_report_today("1.2M"), " · today 1.2M");
+        assert_ne!(
+            Lang::Zh.token_report_today("42M"),
+            Lang::En.token_report_today("42M"),
+            "zh/en 互异（防粘贴错语言）"
+        );
+        set(Lang::Zh); // 恢复默认
     }
 
     #[test]

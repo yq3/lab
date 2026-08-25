@@ -23,6 +23,9 @@ function row(overrides: Partial<TokenRow> = {}): TokenRow {
     tokens_cache_write: 0,
     time_created: null,
     time_updated: null,
+    model_id: null,
+    project_name: null,
+    title: null,
     ...overrides,
   };
 }
@@ -73,6 +76,29 @@ describe("rangeForPreset：时间跨度（含当天，TC-TK-08）", () => {
     expect(toMs).toBe(now.getTime());
     const from = new Date(fromMs);
     expect(from.getDate()).toBe(18); // 跨月由 Date 自行回退（7-18）
+  });
+
+  // ---- v2 M3（§3.3，TC-M3-04）：today preset ----
+
+  it("today：from = 本地今天 0 点、to = now（与 token_stats_today 同 0 点起点）", () => {
+    // 注入固定时刻：正午
+    const noon = new Date(2026, 7, 16, 12, 34, 56, 789);
+    const r = rangeForPreset("today", noon);
+    expect(r.toMs).toBe(noon.getTime());
+    const from = new Date(r.fromMs);
+    expect([from.getFullYear(), from.getMonth(), from.getDate()]).toEqual([2026, 7, 16]);
+    expect([from.getHours(), from.getMinutes(), from.getSeconds(), from.getMilliseconds()]).toEqual(
+      [0, 0, 0, 0],
+    );
+    // 跨午夜边界前 1ms：起点仍是当天 0 点
+    const late = new Date(2026, 7, 16, 23, 59, 59, 999);
+    const fromLate = new Date(rangeForPreset("today", late).fromMs);
+    expect(fromLate.getDate()).toBe(16);
+    // 午夜后第一毫秒：起点翻到次日 0 点
+    const next = new Date(2026, 7, 17, 0, 0, 0, 0);
+    const fromNext = new Date(rangeForPreset("today", next).fromMs);
+    expect(fromNext.getDate()).toBe(17);
+    expect(fromNext.getHours()).toBe(0);
   });
 });
 
@@ -147,7 +173,18 @@ describe("sumRows：KPI 汇总", () => {
     expect(kpi.cost).toBeCloseTo(0.6, 9);
   });
 
-  it("空列表全 0", () => {
-    expect(sumRows([])).toEqual({ input: 0, output: 0, cacheRead: 0, cost: 0 });
+  it("v2 M3（TC-M3-07-3）：total = in + out + cache_read，reasoning 不参与任何汇总", () => {
+    const rows = [
+      row({ tokens_input: 100, tokens_output: 10, tokens_cache_read: 5, tokens_reasoning: 999 }),
+      row({ tokens_input: 200, tokens_output: 20, tokens_cache_read: 6, tokens_reasoning: 888 }),
+    ];
+    const kpi = sumRows(rows);
+    expect(kpi.total, "total = (100+10+5) + (200+20+6)，reasoning 不计").toBe(341);
+    // 若误把 reasoning 计入（341 + 999 + 888），total 会是 2228——341 钉住排除
+    expect(kpi.total).not.toBe(341 + 999 + 888);
+  });
+
+  it("空列表全 0（含 total）", () => {
+    expect(sumRows([])).toEqual({ total: 0, input: 0, output: 0, cacheRead: 0, cost: 0 });
   });
 });

@@ -35,6 +35,7 @@ const zh: Dict = {
   "panel.statusAria": "当前 agent 状态：{text}",
 
   // ---- token 统计页 ----
+  "token.preset.today": "今日",
   "token.preset.7d": "近 7 天",
   "token.preset.30d": "近 30 天",
   "token.preset.custom": "自定义",
@@ -49,13 +50,18 @@ const zh: Dict = {
   "token.aria.dim": "统计维度",
   "token.chart.title": "Token 时序（{dim}）",
   "token.chart.aria": "token 时序柱状图",
-  "token.chart.bar": "{label}：{n} tokens",
-  "token.pie.title": "项目分布",
-  "token.pie.aria": "项目 cost 占比",
-  "token.pie.slice": "{label}：{pct}%",
+  // v2 M3：堆叠柱图 HTML tooltip（日期 + 三值 + 占比 + 总量）
+  "token.chart.tip": "{label}：共 {total}",
+  "token.chart.tipRow": "{name}：{n}（{pct}%）",
+  // v2 M3：模型筛选
+  "token.chart.noModels": "未勾选任何模型，柱图为空。",
+  "token.col.model": "模型",
+  "token.model.unknown": "未知模型",
+  "token.kpi.total": "总量",
   "token.sessions.title": "会话（{n}）",
   "token.sessions.empty": "跨度内无会话记录。",
   "token.sessions.updated": "更新时间",
+  "token.project.global": "全局",
   "token.project.unknown": "（未知项目）",
   "token.error.noDatabase": "数据库未运行/未初始化：未检测到 opencode 数据库（opencode.db / opencode-canary.db）。",
   "token.error.legacyStorage": "检测到旧版 opencode 存储格式（storage/session/*.json）：请升级 opencode 后使用。",
@@ -215,6 +221,11 @@ const zh: Dict = {
   "settings.interaction": "交互",
   "settings.passThrough":
     "点击穿透（纯展示模式）：开启后鼠标事件透出——宠物不可拖拽、右键菜单不可达，动画照常播放；可经全局热键 ⌘/Ctrl+Shift+Alt+P 或托盘菜单「切换交互模式」切回。",
+  // v2 M3（§3.7.2，P2-4）：「宠物与播报」区（工具播报开关；不放「功能管理」区）
+  "settings.sectionPet": "宠物与播报",
+  "settings.toolBroadcast":
+    "工具播报：agent 使用工具时宠物气泡播报（如「正在编辑 X.md」）；关闭立即静默，插件照常上报。",
+  "settings.toolBroadcastFail": "工具播报开关保存失败：{msg}",
   "settings.hotkeys": "全局热键：⌘/Ctrl+Shift+P 唤起/隐藏面板；⌘/Ctrl+Shift+Alt+P 切换穿透；",
   "settings.hotkeys.debug": " ⌘/Ctrl+Shift+Alt+F 调试烟花（仅开发构建）。",
   "settings.language": "语言",
@@ -262,6 +273,15 @@ const zh: Dict = {
   "menu.passOn": "开",
   "menu.passOff": "关",
   "menu.hidePet": "隐藏宠物",
+  // v2 M3：入口层「今日 token」信息项（{v} = … / 42M / — 三态）
+  "menu.todayToken": "今日 token：{v}",
+
+  // ---- v2 M3 工具级气泡（模板 ID 协议，§3.7.1；{p} = 净化后的 param）----
+  "toolb.read": "正在读 {p}",
+  "toolb.edit": "正在编辑 {p}",
+  "toolb.bash": "正在跑 {p}",
+  "toolb.search": "搜索 {p}",
+  "toolb.web": "访问 {p}",
 
   // ---- 通用 ----
   "pass.on": "穿透开：纯展示（鼠标穿透，不可拖拽/右键）",
@@ -277,6 +297,7 @@ const en: Dict = {
   "panel.tab.settings": "Settings",
   "panel.statusAria": "Current agent state: {text}",
 
+  "token.preset.today": "Today",
   "token.preset.7d": "Last 7 days",
   "token.preset.30d": "Last 30 days",
   "token.preset.custom": "Custom",
@@ -291,13 +312,16 @@ const en: Dict = {
   "token.aria.dim": "Dimension",
   "token.chart.title": "Token timeline ({dim})",
   "token.chart.aria": "Token bar chart",
-  "token.chart.bar": "{label}: {n} tokens",
-  "token.pie.title": "Project distribution",
-  "token.pie.aria": "Project cost share",
-  "token.pie.slice": "{label}: {pct}%",
+  "token.chart.tip": "{label}: total {total}",
+  "token.chart.tipRow": "{name}: {n} ({pct}%)",
+  "token.chart.noModels": "No models selected — the chart is empty.",
+  "token.col.model": "Model",
+  "token.model.unknown": "Unknown model",
+  "token.kpi.total": "Total",
   "token.sessions.title": "Sessions ({n})",
   "token.sessions.empty": "No sessions in this range.",
   "token.sessions.updated": "Updated",
+  "token.project.global": "Global",
   "token.project.unknown": "(unknown project)",
   "token.error.noDatabase":
     "Database not running/initialized: no opencode database detected (opencode.db / opencode-canary.db).",
@@ -456,6 +480,10 @@ const en: Dict = {
   "settings.interaction": "Interaction",
   "settings.passThrough":
     "Click-through (display-only mode): when on, mouse events pass through — the pet cannot be dragged and the right-click menu is unavailable, while animations keep playing; toggle back via global hotkey ⌘/Ctrl+Shift+Alt+P or the tray menu “Toggle interaction mode”.",
+  "settings.sectionPet": "Pet & Broadcast",
+  "settings.toolBroadcast":
+    "Tool broadcast: the pet bubble reports tool usage (e.g. “Editing X.md”); turning it off silences immediately while the plugin keeps reporting.",
+  "settings.toolBroadcastFail": "Failed to save tool broadcast switch: {msg}",
   "settings.hotkeys": "Global hotkeys: ⌘/Ctrl+Shift+P show/hide panel; ⌘/Ctrl+Shift+Alt+P toggle pass-through;",
   "settings.hotkeys.debug": " ⌘/Ctrl+Shift+Alt+F debug fireworks (dev builds only).",
   "settings.language": "Language",
@@ -502,6 +530,14 @@ const en: Dict = {
   "menu.passOn": "on",
   "menu.passOff": "off",
   "menu.hidePet": "Hide pet",
+  "menu.todayToken": "Today's tokens: {v}",
+
+  // ---- v2 M3 tool-level bubbles (template ID protocol, §3.7.1) ----
+  "toolb.read": "Reading {p}",
+  "toolb.edit": "Editing {p}",
+  "toolb.bash": "Running {p}",
+  "toolb.search": "Searching {p}",
+  "toolb.web": "Fetching {p}",
 
   "pass.on": "Pass-through on: display-only (mouse passes through, no drag/right-click)",
   "pass.off": "Pass-through off: interactive (draggable / right-clickable)",

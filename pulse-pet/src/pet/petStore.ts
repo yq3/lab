@@ -171,7 +171,10 @@ export const usePetStore = create<PetState>((set, get) => ({
   setAtlas: (meta, pixels) => set({ atlasMeta: meta, atlas: pixels }),
   setPassThrough: (enabled) =>
     // 切到穿透时已打开的右键菜单一并关闭（穿透态菜单不可达，TC-WIN-04）
-    set((s) => ({ passThrough: enabled, contextMenu: enabled ? null : s.contextMenu })),
+    set((s) => ({
+      passThrough: enabled,
+      contextMenu: enabled ? null : s.contextMenu,
+    })),
   openContextMenu: (x, y) => set({ contextMenu: { x, y } }),
   closeContextMenu: () => set({ contextMenu: null }),
   startCelebration: (durationMs = CELEBRATION_DEFAULT_MS) => {

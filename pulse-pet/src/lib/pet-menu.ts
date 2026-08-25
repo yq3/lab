@@ -6,20 +6,48 @@
  *
  * M8 i18n：菜单文案经 `t()` 取当前语言（默认 zh；vitest 断言不受影响），
  * `lang` 可显式传入供测试。
+ *
+ * v2 M3（§3.4 ③）：入口层「今日 token」信息项——第 0 项三态（loading … /
+ * ok 42M / error —），点击 → `openPanel("token")`（默认即今日，无缝衔接）。
  */
 
 import { t, type Lang } from "./i18n";
 
-export type PetMenuAction = "settings" | "toggle-pass-through" | "hide-pet";
+export type PetMenuAction =
+  | "today-token"
+  | "settings"
+  | "toggle-pass-through"
+  | "hide-pet";
+
+/** 「今日 token」信息项三态（数据来自 token_stats_today 的 30s 缓存）。 */
+export type TodayTokenState =
+  | { status: "loading" }
+  | { status: "ok"; text: string }
+  | { status: "error" };
 
 export interface PetMenuItem {
   id: PetMenuAction;
   label: string;
+  /** v2 M3：信息项（今日 token）与行为项分隔线样式区分（§3.4 ③）。 */
+  info?: boolean;
+}
+
+/** 三态 → label 插值 v（… / 42M / —）。 */
+export function todayTokenValue(state: TodayTokenState): string {
+  switch (state.status) {
+    case "loading":
+      return "…";
+    case "ok":
+      return state.text;
+    case "error":
+      return "—";
+  }
 }
 
 /**
  * 菜单项（非穿透态弹出；穿透态下 contextmenu 事件透出，本菜单不可达，
  * TC-WIN-04）：
+ * - 今日 token（v2 M3 入口层）：三态信息项，点击 → openPanel("token")；
  * - 设置：打开控制面板设置页（panel://tab 事件）；
  * - 切换交互模式：穿透开/关（与热键 ⌘/Ctrl+Shift+Alt+P、托盘菜单同一 Rust
  *   状态，三通道同步，TC-WIN-05）；
@@ -27,9 +55,15 @@ export interface PetMenuItem {
  */
 export function buildPetMenuItems(
   passThrough: boolean,
+  todayToken: TodayTokenState,
   lang?: Lang,
 ): PetMenuItem[] {
   return [
+    {
+      id: "today-token",
+      label: t("menu.todayToken", { v: todayTokenValue(todayToken) }, lang),
+      info: true,
+    },
     { id: "settings", label: t("menu.settings", undefined, lang) },
     {
       id: "toggle-pass-through",
