@@ -29,7 +29,7 @@ const zh: Dict = {
   "panel.title": "PulsePet · 控制面板",
   "panel.tab.token": "Token",
   "panel.tab.reminders": "提醒",
-  "panel.tab.todo": "Todo",
+  "panel.tab.todo": "待办",
   "panel.tab.settings": "设置",
   // v2 M2：顶栏 agent 状态芯片 aria-label（agent/kind 字面量不翻译）
   "panel.statusAria": "当前 agent 状态：{text}",
@@ -76,7 +76,7 @@ const zh: Dict = {
   "reminders.fwGlobal": "全局烟花模式（未单独勾选的提醒也升级为烟花）",
   "reminders.pausedBadge": "已暂停所有提醒（托盘可恢复）",
   "reminders.rules.title": "提醒规则（{n}）",
-  "reminders.rules.empty": "还没有提醒规则，从下方模板或表单新建一条吧。",
+  "reminders.rules.empty": "还没有例程，从下方模板或表单新建一条吧。",
   "reminders.kind.hydration": "喝水",
   "reminders.kind.rest": "休息",
   "reminders.kind.custom": "自定义",
@@ -106,8 +106,8 @@ const zh: Dict = {
   "reminders.delete": "删除",
   "reminders.deleteConfirm": "确认删除？",
   "reminders.deleteHint": "再次点击确认删除",
-  "reminders.form.newTitle": "新建提醒",
-  "reminders.form.editTitle": "编辑提醒 #{n}",
+  "reminders.form.newTitle": "新建例程",
+  "reminders.form.editTitle": "编辑例程 #{n}",
   "reminders.form.todoHint":
     "📋 Todo 派生提醒（单次，由 Todo 插件管理类型/间隔/时刻——在 Todo 页改任务的截止或提前提醒即可）。此处仅可调整文案、启用与烟花；改动会随任务下次保存被任务标题覆盖。",
   "reminders.form.type": "类型",
@@ -146,9 +146,9 @@ const zh: Dict = {
   "reminders.validation.timeRange": "{what}时间越界（00:00-23:59）",
 
   // ---- v2 M4：定时任务（tasks.*，V2-DESIGN §4.7）----
-  "panel.tab.tasks": "定时任务",
+  "panel.tab.tasks": "例程",
   "panel.agentTask": "定时任务",
-  "tasks.rules.title": "任务（{n}）",
+  "tasks.rules.title": "例程（{n}）",
   "tasks.actionType": "动作类型",
   "tasks.action.notify": "提醒",
   "tasks.action.exec": "执行命令",
@@ -413,7 +413,8 @@ const en: Dict = {
   "reminders.fwGlobal": "Global fireworks mode (reminders without per-rule opt-in are upgraded to fireworks)",
   "reminders.pausedBadge": "All reminders paused (resume from tray)",
   "reminders.rules.title": "Reminder rules ({n})",
-  "reminders.rules.empty": "No reminder rules yet — create one from the templates or the form below.",
+  "reminders.rules.empty":
+    "No routines yet — create one from the templates or the form below.",
   "reminders.kind.hydration": "Hydration",
   "reminders.kind.rest": "Rest",
   "reminders.kind.custom": "Custom",
@@ -443,8 +444,8 @@ const en: Dict = {
   "reminders.delete": "Delete",
   "reminders.deleteConfirm": "Confirm delete?",
   "reminders.deleteHint": "Click again to confirm delete",
-  "reminders.form.newTitle": "New reminder",
-  "reminders.form.editTitle": "Edit reminder #{n}",
+  "reminders.form.newTitle": "New routine",
+  "reminders.form.editTitle": "Edit routine #{n}",
   "reminders.form.todoHint":
     "📋 Derived todo reminder (one-shot; type/interval/time are managed by the Todo plugin — change the task's due or lead time on the Todo page). Only text, enabled and fireworks can be adjusted here; edits will be overwritten by the task title on its next save.",
   "reminders.form.type": "Type",
@@ -483,9 +484,9 @@ const en: Dict = {
   "reminders.validation.timeRange": "{what} time out of range (00:00-23:59)",
 
   // ---- v2 M4: scheduled tasks (tasks.*, V2-DESIGN §4.7) ----
-  "panel.tab.tasks": "Tasks",
+  "panel.tab.tasks": "Routines",
   "panel.agentTask": "Task",
-  "tasks.rules.title": "Tasks ({n})",
+  "tasks.rules.title": "Routines ({n})",
   "tasks.actionType": "Action",
   "tasks.action.notify": "Notify",
   "tasks.action.exec": "Run command",

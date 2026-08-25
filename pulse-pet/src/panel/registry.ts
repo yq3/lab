@@ -51,6 +51,16 @@ const LEGACY_TAB_ALIASES: Record<string, string> = {
   reminders: "tasks",
 };
 
+/**
+ * 插件 tab 的 i18n 显示名覆盖键（用户 2026-08-25 裁定：Todo tab zh 显示
+ * 「待办」——manifest title 是双语单值数据，改 manifest 会波及 en；此处
+ * 前端按 tab id 覆盖为 i18n 键，en 侧仍走 panel.tab.todo = "Todo"）。
+ * 无覆盖的插件 tab 照旧直显 manifest title（数据值不翻译的原约定不变）。
+ */
+const PLUGIN_TAB_LABEL_KEYS: Record<string, string> = {
+  "built-in-todo": "panel.tab.todo",
+};
+
 /** 旧 id 兼容映射（reminders → tasks；未知值原样返回由 resolveTabId 回退）。 */
 export function normalizeTabId(id: string): string {
   return LEGACY_TAB_ALIASES[id] ?? id;
@@ -76,7 +86,7 @@ export function buildTabs(plugins: PluginTabSource[], renderers: PluginRenderMap
     .map((p) => ({
       id: p.id,
       kind: "plugin" as const,
-      labelKey: "",
+      labelKey: PLUGIN_TAB_LABEL_KEYS[p.id] ?? "",
       label: typeof p.panel_tab?.title === "string" ? p.panel_tab.title : p.name,
       render: renderers[p.id],
     }));

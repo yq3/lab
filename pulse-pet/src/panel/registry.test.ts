@@ -150,3 +150,21 @@ describe("v2 M4（TC-M4-02-1）：tab id reminders → tasks + 旧值兼容", ()
     expect(tabs.some((t) => t.id === "tasks")).toBe(true);
   });
 });
+
+describe("v2 M4 R1 补充（用户 2026-08-25）：Todo tab zh 显示名「待办」——i18n 覆盖键", () => {
+  it("built-in-todo 插件 tab 带 labelKey 覆盖（panel.tab.todo）；label 保留 manifest 值兜底", () => {
+    const tabs = buildTabs([plugin({ id: "built-in-todo", name: "Todo" })], {
+      "built-in-todo": noop,
+    });
+    const todoTab = tabs.find((t) => t.id === "built-in-todo");
+    expect(todoTab?.labelKey).toBe("panel.tab.todo");
+    expect(todoTab?.label).toBe("Todo"); // manifest 值兜底（en 语境等）
+  });
+
+  it("无覆盖的插件 tab labelKey 为空（直显 manifest title 的原约定不变）", () => {
+    const tabs = buildTabs([plugin({ id: "other-plugin", name: "X" })], {
+      "other-plugin": noop,
+    });
+    expect(tabs.find((t) => t.id === "other-plugin")?.labelKey).toBe("");
+  });
+});

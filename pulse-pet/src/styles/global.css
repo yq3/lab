@@ -1181,6 +1181,40 @@ select {
   gap: 8px;
 }
 
+/* ---- v2 M4 R1 补充（用户 2026-08-25 裁定）：例程表单新建按钮右下角 +
+ * accent 强调色。独立类——.reminder-form-actions 为 Todo 插件页共用，保持
+ * 原样零波及。 ---- */
+.task-form-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end; /* 新建按钮置表单块右下角 */
+}
+
+.task-form-actions .seg,
+.task-form-actions .primary {
+  min-height: 32px;
+  padding: 5px 16px;
+  font-size: 13px;
+}
+
+/* 主按钮（新建/保存例程）：M2 accent 强调（浅色蜜橘 / 深色项圈青——各主题
+ * 自己的强调色，非默认 ink 主按钮），前景 surface（浅色橙底暖白字 / 深色
+ * 青底炭字，两主题对比均达标），hover 加深走 accent-ink；硬阴影对齐 M2
+ * 按钮语言（与激活 tab 的 accent 阴影同族）。 */
+.task-form-actions .primary {
+  background: var(--accent);
+  color: var(--surface);
+  border: 2px solid var(--accent);
+  box-shadow: var(--shadow-hard);
+  cursor: pointer;
+}
+
+.task-form-actions .primary:hover {
+  background: var(--accent-ink);
+  border-color: var(--accent-ink);
+  color: var(--surface);
+}
+
 /* 主按钮：32px 与输入框齐高（视觉权重对齐表单） */
 .reminder-form-actions .seg,
 .reminder-form-actions .primary {

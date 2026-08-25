@@ -105,6 +105,21 @@ describe("字典完备性", () => {
     expect(!("token.todayUnavailable" in DICT.zh), "zh 应无 todayUnavailable").toBe(true);
     expect(!("token.todayUnavailable" in DICT.en), "en 应无 todayUnavailable").toBe(true);
   });
+
+  // v2 M4 R1 补充（用户 2026-08-25 五点 UI 裁定）：tab/表单 zh 显示名改「例程」
+  // 「待办」——钉住键值防回退（en：Routines / Todo）
+  it("M4 R1 补充改名键：tasks 例程 / todo 待办（zh）+ Routines / Todo（en）", async () => {
+    const { DICT } = await import("./i18n");
+    expect(DICT.zh["panel.tab.tasks"]).toBe("例程");
+    expect(DICT.en["panel.tab.tasks"]).toBe("Routines");
+    expect(DICT.zh["panel.tab.todo"]).toBe("待办");
+    expect(DICT.en["panel.tab.todo"]).toBe("Todo");
+    expect(DICT.zh["reminders.form.newTitle"]).toBe("新建例程");
+    expect(DICT.en["reminders.form.newTitle"]).toBe("New routine");
+    expect(DICT.zh["reminders.form.editTitle"]).toBe("编辑例程 #{n}");
+    expect(DICT.zh["tasks.rules.title"]).toBe("例程（{n}）");
+    expect(DICT.en["tasks.rules.title"]).toBe("Routines ({n})");
+  });
 });
 
 describe("systemLangSafe：默认语言跟随系统", () => {

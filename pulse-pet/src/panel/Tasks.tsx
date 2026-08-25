@@ -527,7 +527,8 @@ export default function Tasks() {
           )}
           {form.kind !== "todo" && (
             <>
-              {/* 动作类型分段（notify/exec） */}
+              {/* 动作类型分段（notify/exec；用户 2026-08-25 裁定去图标——
+                  徽标仅保留在列表行） */}
               <div className="token-seg" role="tablist" aria-label={t("tasks.actionType")}>
                 {(["notify", "exec"] as ActionType[]).map((a) => (
                   <button
@@ -535,7 +536,6 @@ export default function Tasks() {
                     className={form.action_type === a ? "seg active" : "seg"}
                     onClick={() => setActionType(a)}
                   >
-                    {a === "exec" ? "⚡ " : "💧 "}
                     {t(`tasks.action.${a}`)}
                   </button>
                 ))}
@@ -781,7 +781,10 @@ export default function Tasks() {
             </>
           )}
           {formError && <p className="reminder-form-error">{formError}</p>}
-          <div className="reminder-form-actions">
+          {/* 用户 2026-08-25 裁定：新建按钮置表单块右下角 + accent 强调色
+              （独立类 task-form-actions——reminder-form-actions 为 Todo 插件页
+              共用，不波及） */}
+          <div className="task-form-actions">
             <button className="seg primary" onClick={() => void save()}>
               {editing ? t("reminders.form.save") : t("reminders.form.create")}
             </button>

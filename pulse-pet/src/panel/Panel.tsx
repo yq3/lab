@@ -102,7 +102,10 @@ export default function Panel() {
               className={on ? "panel-tab active" : "panel-tab"}
               onClick={() => setTab(tabDef.id)}
             >
-              {tabDef.kind === "core" ? t(tabDef.labelKey) : (tabDef.label ?? tabDef.id)}
+              {/* v2 M4 R1 补充：labelKey 非空（核心 tab + 覆盖键的插件 tab，
+                  如 built-in-todo → panel.tab.todo）走 i18n；其余插件 tab
+                  直显 manifest title（数据值不翻译） */}
+              {tabDef.labelKey ? t(tabDef.labelKey) : (tabDef.label ?? tabDef.id)}
             </button>
           );
         })}
