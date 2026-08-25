@@ -142,6 +142,23 @@ describe("petStore 气泡排队（v2 M2，TC-UI-09/13-3：单槽位断言有意�
     vi.advanceTimersByTime(1);
     expect(usePetStore.getState().bubble.current).toBeNull();
   });
+
+  it("R2 P2-1：冻结期间新上屏气泡不挂 dwell 计时器（防 0ms 定时器死循环）", () => {
+    usePetStore.getState().pushBubble({ text: "a", level: "info", source: "x" });
+    usePetStore.getState().setHoverPaused(true); // 冻结 → 清计时器
+    expect(vi.getTimerCount()).toBe(0);
+    // 冻结期间 critical 到达（顶替上屏）：修复前 pushBubble 会经
+    // armForCurrent 挂 dwell 计时器 → 到期时 expireCurrent 因冻结返回
+    // dismissed:null → remain=max(0, dwell-elapsed)=0 → setTimeout(0) 无限循环
+    usePetStore.getState().pushBubble({
+      text: "r", level: "critical", source: "reminder:1", reminder: { logId: 1 },
+    });
+    expect(usePetStore.getState().bubble.current?.level).toBe("critical");
+    expect(vi.getTimerCount()).toBe(0); // 冻结期间不得挂 dwell 计时器（0ms 死循环根因）
+    // 走过 dwell+1：无计时器 → 无 tick → 不结案、不空转
+    vi.advanceTimersByTime(10_000);
+    expect(usePetStore.getState().bubble.current?.text).toBe("r");
+  });
 });
 
 describe("petStore 提醒气泡排队 + 记账（M4 语义在排队模型下的延续，TC-UI-09-6/TC-UI-10）", () => {

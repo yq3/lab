@@ -133,11 +133,15 @@ function expireTick(): void {
   armForCurrent(state);
 }
 
-/** 为 current 挂 dwell 计时（null 则不挂）。 */
+/** 为 current 挂 dwell 计时（null 则不挂）。
+ * R2 P2-1：悬停冻结期间不挂——冻结中到达/顶替上屏的新条目若挂上计时器，
+ * 到期时 expireCurrent 因冻结返回 dismissed:null，remain 重算为 0 →
+ * setTimeout(0) 无限循环（CPU 空转直至解除冻结）。恢复路径
+ * setHoverPaused(false) 自行重挂，不依赖本函数。 */
 function armForCurrent(b: BubbleState): void {
   clearBubbleTimer();
   const cur = b.current;
-  if (!cur) return;
+  if (!cur || b.hoverPaused) return;
   const elapsed = Date.now() - b.shownAt;
   const remain = Math.max(0, dwellFor(cur.level) - elapsed);
   bubbleTimer = setTimeout(expireTick, remain);
@@ -207,11 +211,8 @@ export const usePetStore = create<PetState>((set, get) => ({
     set({ bubble: next });
     if (paused) {
       clearBubbleTimer(); // 冻结：dwell 停走（恢复时续走剩余）
-    } else if (next.current) {
-      const elapsed = Date.now() - next.shownAt;
-      const remain = Math.max(0, dwellFor(next.current.level) - elapsed);
-      clearBubbleTimer();
-      bubbleTimer = setTimeout(expireTick, remain);
+    } else {
+      armForCurrent(next); // 恢复：续走剩余 dwell（内部含清挂 + 冻结 guard 不触发）
     }
   },
   resetBubbles: () => {

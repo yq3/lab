@@ -97,11 +97,11 @@ impl Lang {
     }
 
     // ---- panel 窗口标题 ----
-
+    // R2 P3-2：与页内 h1（前端 panel.title）逐字一致——「PulsePet · 控制面板」。
     pub fn panel_title(&self) -> &'static str {
         match self {
-            Lang::Zh => "PulsePet 控制面板",
-            Lang::En => "PulsePet Control Panel",
+            Lang::Zh => "PulsePet · 控制面板",
+            Lang::En => "PulsePet · Control Panel",
         }
     }
 
@@ -314,6 +314,9 @@ mod tests {
         assert_eq!(Lang::En.tray_toggle(), "Show/Hide Pet");
         assert!(Lang::Zh.tray_quit().contains("退出"));
         assert_eq!(Lang::En.tray_quit(), "Quit");
+        // R2 P3-2：窗口标题 zh/en 互异且含间隔点（与前端 panel.title 一致性钉子）
+        assert_eq!(Lang::Zh.panel_title(), "PulsePet · 控制面板");
+        assert_eq!(Lang::En.panel_title(), "PulsePet · Control Panel");
         // 全部五项在两种语言下互不相同（防"en 串误粘贴 zh"类回归）
         for (zh, en) in [
             (Lang::Zh.tray_toggle(), Lang::En.tray_toggle()),

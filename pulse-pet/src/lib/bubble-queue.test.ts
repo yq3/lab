@@ -104,6 +104,23 @@ describe("bubble-queue TC-UI-09 ②同源合并 10s", () => {
     expect(s.current?.id).toBe(10);
     expect(s.queue.map((q) => q.id)).toEqual([11]); // 同 source 不同 level 不合并
   });
+
+  it("R2 P3-3：队列中合并保留旧条目的 preShownMs（重现续走剩余而非重计）", () => {
+    let s = initialState();
+    s = enqueue(s, item(1, "info", "token-report", "旧"), T0); // 上屏
+    // 显示 4s 后被 critical 顶替 → 回队携带 preShownMs=4000（剩余 dwell 2s）
+    s = enqueue(s, item(2, "critical", "reminder:9"), T0 + 4_000);
+    expect(s.queue[0].preShownMs).toBe(4_000);
+    // 合并窗口内同源同级新条目替换队列中的旧条目
+    s = enqueue(s, item(3, "info", "token-report", "新"), T0 + 5_000);
+    expect(s.queue.map((q) => q.id)).toEqual([3]);
+    expect(s.queue[0].preShownMs).toBe(4_000); // 合并须保留旧条目 preShownMs
+    // critical 确认 → 合并条目重现：续走剩余 2s（而非满额 6s 重计）
+    const { state: s2 } = ackCurrent(s, T0 + 6_000);
+    expect(s2.current?.id).toBe(3);
+    expect(expireCurrent(s2, T0 + 6_000 + 2_000 - 1).dismissed).toBeNull();
+    expect(expireCurrent(s2, T0 + 6_000 + 2_000).dismissed?.id).toBe(3);
+  });
 });
 
 describe("bubble-queue TC-UI-09 ③队列上限与驱逐", () => {

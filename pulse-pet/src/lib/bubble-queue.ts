@@ -115,11 +115,16 @@ export function enqueue(state: BubbleState, item: BubbleItem, now: number): Bubb
   if (state.current && mergeable(state.current, item, now)) {
     return { ...state, current: { ...item, enqueuedAt: now }, shownAt: now };
   }
-  // ② 队列中条目合并（原地替换，位置不变）
+  // ② 队列中条目合并（原地替换，位置不变；R2 P3-3：保留旧条目的
+  //    preShownMs——被顶回队过的条目经合并刷新文案后，重现仍续走剩余 dwell）
   const qIdx = state.queue.findIndex((q) => mergeable(q, item, now));
   if (qIdx >= 0) {
     const queue = [...state.queue];
-    queue[qIdx] = { ...item, enqueuedAt: now };
+    queue[qIdx] = {
+      ...item,
+      enqueuedAt: now,
+      preShownMs: item.preShownMs ?? state.queue[qIdx].preShownMs,
+    };
     return { ...state, queue };
   }
   // ③ 顶替：高优先级顶掉显示中的低优先级（被顶者回**队首**，不丢失、
