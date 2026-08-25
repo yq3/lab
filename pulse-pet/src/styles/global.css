@@ -743,14 +743,6 @@ select {
   letter-spacing: 0.08em;
 }
 
-/* v2 M3（§3.5）：首卡副行小字「含 cache read X」 */
-.kpi-sub {
-  margin-top: 2px;
-  font-size: 11px;
-  color: var(--ink-faint);
-  font-family: var(--font-mono);
-}
-
 /* 内容卡片 */
 .token-section {
   background: var(--surface);

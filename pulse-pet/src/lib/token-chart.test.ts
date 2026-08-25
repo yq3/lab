@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { computeModelChips, computeStackedBars, type ModelKey } from "./token-chart";
+import {
+  computeModelChips,
+  computeStackedBars,
+  TOOLTIP_ROW_ORDER,
+  type ModelKey,
+} from "./token-chart";
 import type { TokenRow } from "./token-stats";
 
 function gRow(
@@ -123,5 +128,14 @@ describe("computeModelChips：模型 chip 清单（§3.5）", () => {
       { key: "kimi", total: 50 },
       { key: null, total: 1 },
     ]);
+  });
+});
+
+describe("TOOLTIP_ROW_ORDER：tooltip 行序（用户 2026-08-25 裁定修订，TC-M3-05-2）", () => {
+  it("三项数值行自上而下 cache read → input → output（与柱内堆叠顺序独立）", () => {
+    expect(TOOLTIP_ROW_ORDER).toEqual(["cacheRead", "input", "output"]);
+    // 与柱内堆叠序（自底向上 output → input → cache read，SCOPE D 不变）互为逆序——
+    // 两序独立钉住，防一处改动波及另一处
+    expect([...TOOLTIP_ROW_ORDER].reverse()).toEqual(["output", "input", "cacheRead"]);
   });
 });

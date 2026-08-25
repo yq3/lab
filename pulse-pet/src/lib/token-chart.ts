@@ -123,6 +123,13 @@ export interface ModelChip {
   total: number;
 }
 
+/**
+ * tooltip 三项数值行的显示顺序（自上而下）：**cache read → input → output**
+ * （用户 2026-08-25 裁定修订，TC-M3-05-2）。与柱内三段堆叠顺序（自底向上
+ * output → input → cache read，SCOPE D 不变）**独立**——两序互为逆序。
+ */
+export const TOOLTIP_ROW_ORDER = ["cacheRead", "input", "output"] as const;
+
 /** 聚合行 → 模型 chip 清单（§3.5：distinct model_id、按总量降序、默认全勾）。 */
 export function computeModelChips(rows: TokenRow[]): ModelChip[] {
   const map = new Map<ModelKey, number>();

@@ -15,6 +15,7 @@ import {
 import {
   computeModelChips,
   computeStackedBars,
+  TOOLTIP_ROW_ORDER,
   type ModelKey,
   type StackedBar,
 } from "../lib/token-chart";
@@ -221,14 +222,18 @@ export default function TokenStats() {
       {/* 错误态（TC-TK-03/04/13：不崩溃，给出可行动提示） */}
       {error && <div className="token-error">{errorHint(error)}</div>}
 
-      {/* ① KPI 四卡（v2 M3 §3.5：总量/input/output/cost；cache read 降首卡副行） */}
+      {/* ① KPI 四卡（用户 2026-08-25 裁定修订：总量 / cache read / input /
+          output——cost 卡移除，cache read 升独立第二卡，首卡无副行小字；
+          cost 数据仍在会话详情中展示） */}
       {rows && (
         <div className="token-kpis">
           <div className="kpi kpi-total">
             <div className="kpi-value">{formatTokens(kpi.total)}</div>
             <div className="kpi-label">{t("token.kpi.total")}</div>
-            {/* 副行小字：含 cache read X */}
-            <div className="kpi-sub">{t("token.kpi.totalSub", { v: formatTokens(kpi.cacheRead) })}</div>
+          </div>
+          <div className="kpi">
+            <div className="kpi-value">{formatTokens(kpi.cacheRead)}</div>
+            <div className="kpi-label">cache read</div>
           </div>
           <div className="kpi">
             <div className="kpi-value">{formatTokens(kpi.input)}</div>
@@ -237,10 +242,6 @@ export default function TokenStats() {
           <div className="kpi">
             <div className="kpi-value">{formatTokens(kpi.output)}</div>
             <div className="kpi-label">output tokens</div>
-          </div>
-          <div className="kpi">
-            <div className="kpi-value">{formatCost(kpi.cost)}</div>
-            <div className="kpi-label">cost</div>
           </div>
         </div>
       )}
@@ -459,7 +460,9 @@ function StackedBarChart({ bars }: { bars: StackedBar[] }) {
           <div className="chart-tip-title">
             {t("token.chart.tip", { label: tip.bar.label, total: formatTokens(tip.bar.total) })}
           </div>
-          {(["output", "input", "cacheRead"] as const).map((k) => {
+          {/* 三项数值行自上而下 cache read → input → output（用户 2026-08-25
+              裁定修订；与柱内堆叠顺序独立——TOOLTIP_ROW_ORDER 钉住） */}
+          {TOOLTIP_ROW_ORDER.map((k) => {
             const v =
               k === "output" ? tip.bar.output : k === "input" ? tip.bar.input : tip.bar.cacheRead;
             const pct = tip.bar.total > 0 ? (v / tip.bar.total) * 100 : 0;

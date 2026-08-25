@@ -67,7 +67,6 @@ describe("字典完备性", () => {
     const m3Keys = [
       "token.preset.today",
       "token.kpi.total",
-      "token.kpi.totalSub",
       "token.col.model",
       "token.model.unknown",
       "token.project.global",
@@ -90,6 +89,14 @@ describe("字典完备性", () => {
       expect(DICT.zh[k], `zh 缺键 ${k}`).toBeTruthy();
       expect(DICT.en[k], `en 缺键 ${k}`).toBeTruthy();
     }
+  });
+
+  // 用户 2026-08-25 裁定修订：cache read 升独立第二卡（总量/cache read/input/
+  // output），首卡「含 cache read X」副行随之取消——totalSub 键清退
+  it("token.kpi.totalSub 已清退（cache read 独立卡取代副行小字）", async () => {
+    const { DICT } = await import("./i18n");
+    expect(!("token.kpi.totalSub" in DICT.zh), "zh 应无 totalSub").toBe(true);
+    expect(!("token.kpi.totalSub" in DICT.en), "en 应无 totalSub").toBe(true);
   });
 });
 
