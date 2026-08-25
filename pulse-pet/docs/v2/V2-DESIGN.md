@@ -760,13 +760,15 @@ pub async fn token_stats_today() -> Result<TodayStats, String>
 
 ### 3.4 三层快捷查看今日 token
 
+> **〔修订 2026-08-25 用户裁定〕主动层 ②（悬停宠物 500ms 今日汇总卡）实际体感差，已删除**——三层降为两层（① 被动层 + ③ 入口层）；HoverToday 组件及 PetCanvas 悬停接线不保留；`token_stats_today` 与 pet 桥层 30s 缓存仍由入口层 ③ 独享消费；M2 `setHoverPaused` 冻结接口为 M2 交付物保留（无运行时消费方，测试保留）。下表 ② 行与「② 悬停层细节」段留档原貌不作实施依据。
+
 | 层 | 触发 | 呈现 | 数据 |
 |---|---|---|---|
 | ① 被动层 | 会话 idle + 有用量（既有护栏） | 既有 token 汇报气泡（M2 info 级 source="token-report"）末尾追加 ` · 今日 42M` | idle hook 追加（§3.2） |
-| ② 主动层 | 悬停宠物 **500ms**（非穿透态） | **悬停层卡片**（M2 预留接口）：总量大字 + input/output/cacheRead 三行（等宽字体）；移开即消 | `token_stats_today`，**pet 桥层缓存 30s**（防高频悬停打查询） |
-| ③ 入口层 | 宠物右键菜单 | 信息项「今日 token：42M」（数据未到 `…`、无库/错误 `—`）；点击 → `openPanel("token")`（默认即今日，无缝衔接） | 菜单打开时 invoke + 30s 缓存共享 |
+| ~~② 主动层~~〔已移除〕 | ~~悬停宠物 **500ms**（非穿透态）~~ | ~~悬停层卡片~~ | ~~`token_stats_today`，pet 桥层缓存 30s~~（现由 ③ 独享） |
+| ③ 入口层 | 宠物右键菜单 | 信息项「今日 token：42M」（数据未到 `…`、无库/错误 `—`）；点击 → `openPanel("token")`（默认即今日，无缝衔接） | 菜单打开时 invoke + 30s 缓存 |
 
-**② 悬停层细节**（M2 排队模型对接）：
+**② 悬停层细节**（M2 排队模型对接）〔**已移除 2026-08-25，本段留档原貌不作实施依据**〕：
 
 - PetCanvas `onPointerEnter` → 500ms 定时器到点显示；`onPointerLeave` → **立即**取消定时器/隐藏（SCOPE §5.10 防抖口径：进入防抖、离开即时）。
 - 显示期间调 M2 `setHoverPaused(true)`：队列推进暂停、当前气泡 dwell 冻结；悬停层**视觉替换**当前气泡位置渲染（底层 current 不销毁），移开后恢复显示并续走剩余 dwell。
@@ -786,9 +788,9 @@ pub async fn token_stats_today() -> Result<TodayStats, String>
   - 未勾选模型的行直接剔除后聚合；selectedModels 为空集 → 空态文案（不渲染柱）；
   - **opts 预留 `agentFilter?: ReadonlySet<string>` 参数位**（M3 声明类型不传值——M5 接入时填实现，签名与调用点均不变；N3 措辞修正，弃「never 收窄」说法）。
 - **agent 筛选 UI 预留位（SCOPE H「避免二次返工」的落实）**：筛选 chip 行设计为**可容纳多组筛选的容器**（`<div class="filter-row">` 内模型组为第一组）；M5 时 agent 组作为第二组 chip 插入同一容器（数据维度到来前不渲染空组、不留空位）——布局与组件结构按两组设计，M3 只渲染模型组。
-- **渲染**：SVG/DOM 三段矩形（色值 = M2 `--chart-output/input/cache` token）；悬浮 **HTML tooltip**（日期 + 三项数值 + 占比 + 总量）；图例三项（仅说明，不可交互——避免与模型筛选语义混淆）。
+- **渲染**：SVG/DOM 三段矩形（色值 = M2 `--chart-output/input/cache` token；柱内堆叠顺序维持自底向上 output → input → cache read 不变）；悬浮 **HTML tooltip**（日期 + 三项数值 + 占比 + 总量；三项数值行**自上而下 cache read → input → output**〔用户 2026-08-25 裁定修订，与柱内堆叠顺序独立〕）；图例三项（仅说明，不可交互——避免与模型筛选语义混淆）。
 - **模型筛选**：柱图上方复选 chip 列表（水平 wrap），来源 = 当前跨度聚合行的 distinct model_id（按总量降序）；默认全勾；作用域**仅柱图**（KPI/会话列表不联动，SCOPE E 裁定）。probe-model 已在 SQL 层过滤（S4）。
-- **KPI 首卡**：`总量 = input + output + cache_read`（`sumRows` 增 total 字段；reasoning 不计）；卡片顺序：总量/input/output/cost（cache read 移入首卡副行小字 `含 cache read X`，四卡布局保持）。
+- **KPI 首卡**：`总量 = input + output + cache_read`（`sumRows` 增 total 字段；reasoning 不计）；卡片顺序：**总量 / cache read / input / output** 四卡（cost 卡移除，cache read 升独立第二卡，首卡无副行小字）〔用户 2026-08-25 裁定修订，取代原「总量/input/output/cost + cache read 副行小字」布局；cost 数据仍在会话详情与 TodayStats 中存在，仅不作 KPI 卡展示〕。
 - range 维度无柱图：隐藏柱图与筛选区，仅 KPI + 会话列表（现状语义不变）。
 
 ### 3.6 会话列表改造 + 砍饼图
@@ -833,8 +835,8 @@ pub async fn token_stats_today() -> Result<TodayStats, String>
 
 | 模块 | 变更 |
 |---|---|
-| `token_stats.rs` | TokenRow +3 字段；SESSION_REQUIRED_COLUMNS +2 列；by-session/day/week/range 四查询改造（JOIN/model_id 分组）；**mock 过滤覆盖全部查询含 query_current_session（仅加过滤，无 JOIN/分组——N5 措辞精确化）**；`token_stats_today`（async+spawn_blocking）；`build_idle_report` 不动（追加在 lib.rs hook） |
-| `lib.rs` | idle hook 追加今日累计段（agent 分流内）；`emit_to("pet", "pulsepet://tool-bubble")` 接线；**`tool_broadcast_get`/`tool_broadcast_set` 命令**（app_state `bubble.toolBroadcast` + `pulsepet://tool-broadcast` 定向广播）；命令注册 |
+| `token_stats.rs` | TokenRow +3 字段；SESSION_REQUIRED_COLUMNS +2 列；by-session/day/week/range 四查询改造（JOIN/model_id 分组）；**mock 过滤覆盖全部查询含 query_current_session（仅加过滤，无 JOIN/分组——N5 措辞精确化）**；`token_stats_today`（async+spawn_blocking）；~~`build_idle_report` 不动（追加在 lib.rs hook）~~〔实施修订：为满足 §3.2「同连接顺带 SUM（一次查询）」，旧 `build_idle_report` 重构为 `build_idle_report_with_today`（同连接一次查询，本期数字逻辑不变），旧单函数无调用方已删——2026-08-25〕 |
+| `lib.rs` | idle hook 追加今日累计段（agent 分流内）；`emit_to("pet", "pulsepet://tool-bubble")` 接线；**`tool_broadcast_get`/`tool_broadcast_set` 命令**（app_state `bubble.toolBroadcast` + `pulsepet://tool-broadcast` 定向广播；〔实施修订：两命令实际落位 `interaction.rs`——crate root 泛型 command 与 tauri 宏冲突，行为与注册不变，2026-08-25〕）；命令注册 |
 | `http_server.rs` | `StateEvent.detail` 从「校验不消费」→ 透传回调（不落盘不变，内存传递；不做解析） |
 | `i18n.rs` | `token_report_today` 追加段模板（zh/en） |
 | db.rs | 无 schema 迁移（app_state 键值即可） |
@@ -846,11 +848,11 @@ pub async fn token_stats_today() -> Result<TodayStats, String>
 | `lib/token-stats.ts` | RangePreset+today；TokenRow+3 字段；sumRows+total；fetchTodayStats 封装（含错误透传） |
 | `lib/token-chart.ts` | computeStackedBars 新增；computeBars/pieSlices 删除（测试同步） |
 | `panel/TokenStats.tsx` | 默认今日；三段柱图+HTML tooltip+图例；模型 chip 筛选；删饼图/双栏；会话列表列改造 |
-| `pet/PetCanvas.tsx` + `pet/HoverToday.tsx`（新） | 悬停 500ms 防抖/离开即消/缓存 30s/setHoverPaused 对接/菜单互斥 |
+| ~~`pet/PetCanvas.tsx` + `pet/HoverToday.tsx`（新）~~ | ~~悬停 500ms 防抖/离开即消/缓存 30s/setHoverPaused 对接/菜单互斥~~ **〔HoverToday 已移除 2026-08-25；PetCanvas 悬停接线移除，今日数据经 `pet/todayToken.ts` 30s 缓存由右键菜单独享〕** |
 | `lib/pet-menu.ts` + `pet/PetMenu.tsx` | `buildPetMenuItems(passThrough, todayToken, lang?)` 签名扩展；「今日 token」三态信息项（分隔线样式）+ 点击直达；menuH 估值调整 |
 | `lib/tool-bubble-bridge.ts`（新） | detail 切分/白名单校验/param 再净化/开关 store（get 初始化 + 广播订阅）/ambient 入队 |
 | `opencode-plugin/pulse-pet-hook.js` | `extractDetailParam`（含 env 赋值剥离/路径 basename 强化）+ detail 独立 20s 节流（reaction 后判定）+ 仅 tool.execute.before 携带 |
-| `panel/Settings.tsx` + `lib/i18n.ts` | 「宠物与播报」区（工具播报开关）；新键（`token.preset.today`、`token.kpi.total`、`token.col.model`、`token.project.global/unknown`、`token.todayUnavailable`、`menu.todayToken`、`toolb.read/edit/bash/search/web`、`settings.toolBroadcast*`、`settings.sectionPet*`；「未知模型」/「含 cache read X」副行/空勾选空态/title tooltip 等细项实施时按模板微调增补，zh/en 键集合一致——N6） |
+| `panel/Settings.tsx` + `lib/i18n.ts` | 「宠物与播报」区（工具播报开关）；新键（`token.preset.today`、`token.kpi.total`、`token.col.model`、`token.project.global/unknown`、`menu.todayToken`、`toolb.read/edit/bash/search/web`、`settings.toolBroadcast*`、`settings.sectionPet*`；~~`token.todayUnavailable`~~〔随悬停卡移除清退 2026-08-25〕；「未知模型」/空勾选空态/title tooltip 等细项实施时按模板微调增补，zh/en 键集合一致——N6） |
 
 ### 3.10 数据库：零迁移
 
@@ -875,7 +877,7 @@ pub async fn token_stats_today() -> Result<TodayStats, String>
 
 1. Token 页默认今日；切 7d/30d/自定义行为不回归；柱图三段自底向上 output→input→cache read；tooltip 内容（日期+三值+占比+总量）；模型 chip 取消勾选仅柱图变化、KPI/会话列表不动；probe-model 不出现在 chip 列表；
 2. 饼图与双栏布局消失；会话列表首列为标题（悬停 tooltip 完整标题+id）、项目列 basename、展开有「模型」行；New session 回退行原样；
-3. 真实会话结束 → 汇报气泡末尾「· 今日 XM」；悬停宠物 500ms 出汇总卡（四行）、移开即消、期间提醒气泡冻结恢复；穿透模式悬停与右键菜单均不可达（已知，仅被动层与面板可用）；**悬停显示中切穿透 → 卡即消 + 队列冻结解除（N14）**；右键菜单「今日 token」三态 + 点击直达 Token 页（默认今日）；**三层口径交叉断言**：口径一致（同 0 点起点 + mock 过滤 + reasoning 不计），**会话静止窗口内**三处数值相等（悬停卡总量 = 面板今日 KPI 总量 = 菜单显示值——活跃会话持续写入下秒级差异属正常，N2）；
+3. 真实会话结束 → 汇报气泡末尾「· 今日 XM」；~~悬停宠物 500ms 出汇总卡（四行）、移开即消、期间提醒气泡冻结恢复；穿透模式悬停不可达；悬停显示中切穿透 → 卡即消 + 队列冻结解除（N14）~~〔悬停卡已移除 2026-08-25，本段悬停部分作废〕；穿透模式右键菜单不可达（已知，仅被动层与面板可用）；右键菜单「今日 token」三态 + 点击直达 Token 页（默认今日）；**口径交叉断言（两层，原三层随悬停卡移除调整）**：口径一致（同 0 点起点 + mock 过滤 + reasoning 不计），**会话静止窗口内**两处数值相等（面板今日 KPI 总量 = 菜单显示值——活跃会话持续写入下秒级差异属正常，N2）；
 4. 工具级气泡默认开：opencode 编辑文件 →「正在编辑 X.md」ambient 4s 自动消失；连续工具调用 20s 节流；设置页关闭开关后立即静默（无需重启，广播生效）；气泡不含任何路径/参数/URL 原文（TC-SEC 口径目验）；**ambient 排队语义实机补验**（承接 M2 §2.10 item 4 遗留）：提醒（critical）显示中触发工具播报 → 排队不顶替；连续不同工具产生多条 ambient → 队列上限驱逐可观察；
 5. 深浅主题下柱图三段色可读（token 化色值）。
 
@@ -885,7 +887,7 @@ pub async fn token_stats_today() -> Result<TodayStats, String>
 |---|---|---|
 | R1 | `json_extract` 依赖 JSON1——bundled SQLite ≥3.45 内置（S8），但**旧版 opencode.db 的 model 列若非 JSON**（理论不存在；S2 实测 0 NULL） | json_extract 对非 JSON 值返回 NULL → model_id=None →「未知模型」合并，天然降级不崩 |
 | R2 | project 表缺失/结构变更 → JOIN SQL 失败 | 走既有 query 错误码（面板显示查询失败）；不做白名单防御（个人工具库长期稳定，防御成本>收益），记录在案 |
-| R3 | 悬停层高频 invoke | 30s 缓存（pet 桥层），最坏 2 次/分钟 |
+| R3 | ~~悬停层高频 invoke~~ 〔已失效 2026-08-25：悬停层移除，30s 缓存现仅服务右键菜单（低频）〕 | ~~30s 缓存（pet 桥层），最坏 2 次/分钟~~ |
 | R4 | detail 白名单双端漂移（插件 tplId ↔ App i18n 键） | 白名单数组两处定义 + 交叉单测（插件测试 import App 侧清单?不可行——跨包；改为双侧各自测试钉同一常量表，文档 §3.7.1 为唯一权威） |
 | R5 | 会话标题超长/含特殊字符 | title 属性天然转义；列表 flex 省略；气泡不消费标题（无净化面） |
 | R6 | grouped 查询丢 project_id 后 `token.project.unknown` 等旧文案消费方 | KPI/柱图/会话列表三处复查（饼图已删）；实施时 grep 确认无残余消费 |

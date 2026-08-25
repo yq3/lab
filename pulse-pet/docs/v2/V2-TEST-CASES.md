@@ -350,7 +350,7 @@
 - **前置**：`computeStackedBars` 纯函数单测 + 面板目验。
 - **步骤/预期**：
   1. 柱内三段**自底向上 output → input → cache read**（SCOPE D 裁定；reasoning 不参与任何汇总口径）；
-  2. 悬浮 HTML tooltip：日期 + 三项数值 + 占比 + 总量；图例三项仅说明**不可交互**（与模型筛选语义隔离）；
+  2. 悬浮 HTML tooltip：日期 + 三项数值 + 占比 + 总量；三项数值行**自上而下 cache read → input → output**（用户 2026-08-25 裁定修订；柱内堆叠顺序仍为自底向上 output → input → cache read，两者独立）；图例三项仅说明**不可交互**（与模型筛选语义隔离）；
   3. 色值 = M2 `--chart-output/input/cache` token，深浅主题下三段色均可读（token 化）；
   4. 单测：三段顺序 / 勾选模型剔除后重新聚合 / selectedModels 空集 → 空态文案不渲染柱 / 空行输入；**不传 `agentFilter` 时行为 = 不过滤**（等价全量——M5 预留参数位钉子 N12）；
   5. `computeBars` / `pieSlices` 及其测试已删除，无残余消费（grep 确认）；
@@ -371,7 +371,7 @@
 - **步骤**：`sumRows` 单测断言 + 查看 KPI 卡片，与 by-session 明细对账。
 - **预期**：
   1. 首卡「总量」= input + output + cache_read（**reasoning 不计入任何汇总口径**——用户裁定，与 GLM 官方展示同口径；数据层 tokens_reasoning 独立存在，v1 会话详情露出不变）；
-  2. 卡片顺序：总量 / input / output / cost 四卡布局；cache read 移入首卡副行小字「含 cache read X」；
+  2. 卡片顺序：**总量 / cache read / input / output** 四卡布局（用户 2026-08-25 裁定修订：cost 卡移除，cache read 升独立第二卡，首卡无「含 cache read X」副行小字）；
   3. 单测断言：`sumRows` 注入含非零 reasoning 的行数据 → total = in + out + cache_read（reasoning 字段存在但不参与任何汇总字段）。
 
 ### TC-M3-08 砍饼图与会话列表改造（实机）
@@ -394,7 +394,7 @@
   3. **失败省略分支（单测）**：注入今日聚合错误（如跨午夜边界竞态）→ 静默省略追加段、本期数字照常显示（实机不可稳定构造，以单测钉住——P2-6）；
   4. **仅 opencode**（M1 idle 分流内实现；CC 会话 idle 无追加——M5 前无 CC 数据）。
 
-### TC-M3-10 主动层：悬停宠物今日汇总卡（实机）
+### TC-M3-10 主动层：悬停宠物今日汇总卡（实机）〔**作废留档 2026-08-25 用户裁定：悬停卡实际体感差，本功能点已移除**——HoverToday 组件及接线删除；不执行本用例；30s 缓存与 token_stats_today 由 TC-M3-11 右键菜单独享〕
 
 - **步骤**：
   1. 非穿透态悬停宠物 <500ms 移开 → 再悬停 ≥500ms → 移开；
@@ -403,7 +403,7 @@
   4. 悬停显示中按热键切穿透；
   5. 穿透模式下尝试悬停 / 右键；
   6. 刚过午夜（全零数据）悬停；无 opencode 库时悬停。
-- **预期**：
+- **预期**（作废前原貌，仅留档）：
   1. 进入 500ms 防抖（不足 500ms 移开不显示）；到点显示悬停层卡片：总量大字 + input / output / cacheRead 三行（等宽字体），落点固定（宠物上方贴顶居中，与气泡同位）；**移开即消**（离开即时，非防抖）；
   2. 显示期间队列推进暂停、当前气泡 dwell 冻结（`setHoverPaused(true)`）；卡片**视觉替换**当前气泡位置（底层 current 不销毁）；移开后恢复显示并续走剩余 dwell；
   3. 与右键菜单**互斥（后开者胜）**：悬停中右键 → 菜单打开 + 卡片隐藏 + **冻结解除**（菜单打开即 `setHoverPaused(false)`，队列恢复推进）；菜单打开中悬停到点不显示（pointer 已被菜单捕获）；
@@ -411,6 +411,7 @@
   5. 穿透模式下悬停与右键均不可达（已知限制——仅被动层与面板可用，不改穿透语义）；
   6. 全零数据照常显示卡片数字为 0（诚实呈现，不伪装错误态）；错误态（no-database 等）显示一行「暂无数据」，不闪错误码；
   7. 数据经 pet 桥层 30s 缓存（防高频悬停打查询；与右键菜单共享缓存）。
+- **移除后补充验收**：悬停宠物（含长时间悬停）无任何卡片浮现；右键菜单「今日 token」与面板不受影响（TC-M3-11/12）。
 
 ### TC-M3-11 入口层：右键菜单「今日 token」（单测 + 实机）
 
@@ -422,10 +423,10 @@
   4. 菜单打开时 invoke `token_stats_today`（与悬停卡共享 30s 缓存）；
   5. 单测断言（N1 同步）：`buildPetMenuItems(passThrough, todayToken, lang?)` 注入三态 → label 分别为 `…` / `42M` / `—`；菜单恰 4 项、第 0 项 id 为 `today-token`；`PetMenuAction` 联合类型含 `"today-token"`。
 
-### TC-M3-12 三层口径交叉断言（实机）
+### TC-M3-12 口径交叉断言（实机）〔2026-08-25 修订：三层→两层（悬停卡移除）〕
 
-- **步骤**：会话静止窗口内分别读取悬停卡总量、面板今日 KPI 总量、右键菜单显示值。
-- **预期**：三处数值相等——口径一致（同 0 点起点 + mock 过滤 + reasoning 不计）；活跃会话持续写入下的秒级差异属正常（N2 时序限定）。
+- **步骤**：会话静止窗口内分别读取面板今日 KPI 总量、右键菜单显示值。
+- **预期**：两处数值相等——口径一致（同 0 点起点 + mock 过滤 + reasoning 不计）；活跃会话持续写入下的秒级差异属正常（N2 时序限定）。
 
 ### TC-M3-13 工具级气泡：插件侧提取与节流（单测）
 
@@ -470,7 +471,7 @@
 
 ### TC-M3-17 M3 新键 i18n 完备性（单测）
 
-- **步骤/预期**：M3 新键 zh/en 字典键集合一致（完备性测试守护）——含 `token.preset.today` / `token.kpi.total` / `token.col.model` / `token.project.global` / `token.project.unknown` / `token.todayUnavailable` / `menu.todayToken` / `toolb.read` / `toolb.edit` / `toolb.bash` / `toolb.search` / `toolb.web` / `settings.toolBroadcast*` / `settings.sectionPet*`（§3.9 完整清单；实施时按实际模板微调增补的细项键同样纳入断言）。
+- **步骤/预期**：M3 新键 zh/en 字典键集合一致（完备性测试守护）——含 `token.preset.today` / `token.kpi.total` / `token.col.model` / `token.project.global` / `token.project.unknown` / `menu.todayToken` / `toolb.read` / `toolb.edit` / `toolb.bash` / `toolb.search` / `toolb.web` / `settings.toolBroadcast*` / `settings.sectionPet*`（§3.9 完整清单；实施时按实际模板微调增补的细项键同样纳入断言）。〔2026-08-25 修订：`token.todayUnavailable` 随悬停卡移除清退，不再列入断言（清退断言钉住防回归）〕
 
 ---
 
