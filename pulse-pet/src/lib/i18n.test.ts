@@ -71,7 +71,6 @@ describe("字典完备性", () => {
       "token.model.unknown",
       "token.project.global",
       "token.project.unknown",
-      "token.todayUnavailable",
       "token.chart.tip",
       "token.chart.tipRow",
       "token.chart.noModels",
@@ -97,6 +96,14 @@ describe("字典完备性", () => {
     const { DICT } = await import("./i18n");
     expect(!("token.kpi.totalSub" in DICT.zh), "zh 应无 totalSub").toBe(true);
     expect(!("token.kpi.totalSub" in DICT.en), "en 应无 totalSub").toBe(true);
+  });
+
+  // 用户 2026-08-25 14:05 裁定：移除主动层悬停卡（三层降两层）——悬停卡错误态
+  // 专用键 todayUnavailable 清退（TC-M3-17 清退断言）
+  it("token.todayUnavailable 已清退（悬停卡移除，无消费方）", async () => {
+    const { DICT } = await import("./i18n");
+    expect(!("token.todayUnavailable" in DICT.zh), "zh 应无 todayUnavailable").toBe(true);
+    expect(!("token.todayUnavailable" in DICT.en), "en 应无 todayUnavailable").toBe(true);
   });
 });
 

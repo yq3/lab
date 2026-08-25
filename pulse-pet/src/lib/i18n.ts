@@ -63,7 +63,6 @@ const zh: Dict = {
   "token.sessions.updated": "更新时间",
   "token.project.global": "全局",
   "token.project.unknown": "（未知项目）",
-  "token.todayUnavailable": "暂无数据",
   "token.error.noDatabase": "数据库未运行/未初始化：未检测到 opencode 数据库（opencode.db / opencode-canary.db）。",
   "token.error.legacyStorage": "检测到旧版 opencode 存储格式（storage/session/*.json）：请升级 opencode 后使用。",
   "token.error.schemaMismatch": "opencode.db schema 不兼容（{msg}）",
@@ -324,7 +323,6 @@ const en: Dict = {
   "token.sessions.updated": "Updated",
   "token.project.global": "Global",
   "token.project.unknown": "(unknown project)",
-  "token.todayUnavailable": "No data",
   "token.error.noDatabase":
     "Database not running/initialized: no opencode database detected (opencode.db / opencode-canary.db).",
   "token.error.legacyStorage":

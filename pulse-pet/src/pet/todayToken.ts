@@ -1,9 +1,10 @@
 /**
- * pet/todayToken：今日 token 的 pet 桥层 30s 缓存（v2 M3 §3.4，R3/TC-M3-10-7）。
+ * pet/todayToken：今日 token 的 pet 桥层 30s 缓存（v2 M3 §3.4，TC-M3-11-4）。
  *
- * 悬停卡（HoverToday）与右键菜单（PetMenu）共享 `token_stats_today` 单一
- * 数据源——高频悬停下最坏 2 次查询/分钟。菜单信息项文案由既有 `formatTokens`
- * 生成（与 idle 追加段 Rust `format_tokens_k` 同口径，N11）。
+ * 右键菜单（PetMenu「今日 token」三态信息项）消费 `token_stats_today` 单一
+ * 数据源；30s 缓存防高频开关菜单打查询。（主动层悬停卡已按用户 2026-08-25
+ * 裁定移除，缓存改由菜单独享。）菜单信息项文案由既有 `formatTokens` 生成
+ *（与 idle 追加段 Rust `format_tokens_k` 同口径，N11）。
  */
 
 import { formatTokens, fetchTodayStats, type TodayStats } from "../lib/token-stats";

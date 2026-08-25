@@ -17,9 +17,11 @@ import type { TodayTokenState } from "../lib/pet-menu";
  * - 穿透态下 contextmenu 事件透出，本组件根本不会被打开（TC-WIN-04）；
  * - M8 i18n：菜单项文案随语言（订阅 useLangStore）。
  *
- * v2 M3（§3.4 ③）：菜单打开时 invoke `token_stats_today`（30s 缓存与悬停卡
- * 共享，TC-M3-11-4）→「今日 token」三态信息项；点击 → openPanel("token")
+ * v2 M3（§3.4 ③）：菜单打开时 invoke `token_stats_today`（30s 缓存，
+ * todayToken 模块）→「今日 token」三态信息项；点击 → openPanel("token")
  *（面板默认即今日，无缝衔接详情）。信息项 info 标记 → 分隔线样式。
+ *（主动层悬停卡已按用户 2026-08-25 裁定移除——三层降两层，本菜单与面板、
+ *  被动层 idle 追加段构成两层快捷查看。）
  */
 export default function PetMenu() {
   const pos = usePetStore((s) => s.contextMenu);
