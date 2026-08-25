@@ -29,7 +29,12 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 rand = "0.8"
 # M4：调度器 interval + MissedTickBehavior（tokio 已在依赖图中，仅显式引 time feature）
-tokio = { version = "1", features = ["time"] }
+# v2 M4（V2-DESIGN §4.4/§4.8）：+process（exec tokio 进程）、+macros（select!）、
+# +sync（完成回调出队的 mpsc 通道）。
+tokio = { version = "1", features = ["time", "process", "macros", "sync"] }
+# v2 M4：Unix exec 进程组处置（setsid + kill(-pgid) 杀组；Windows 走 taskkill
+# 不经 libc）。tauri 依赖树既有 crate，体积影响趋零。
+libc = "0.2"
 # M4：本地时间（HH:MM 窗口 / RFC3339 时间戳；iana-time-zone 随 chrono 已缓存）
 chrono = "0.4"
 # M5：atlas 解码（DESIGN §6.2）。webp feature = image-webp 解码器。

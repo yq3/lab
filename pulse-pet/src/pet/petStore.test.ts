@@ -206,6 +206,28 @@ describe("petStore 提醒气泡排队 + 记账（M4 语义在排队模型下的�
     expect(usePetStore.getState().bubble.current).not.toBeNull();
   });
 
+  // ---- v2 M4（TC-M4-13）：snooze 按钮 —— 与 ack 同一离场语义，via='snooze' ----
+
+  it("snoozeReminderBubble：气泡即消回报 snooze；确认后不再触发 auto", () => {
+    usePetStore.getState().pushBubble({ text: "休息一下 ☕", level: "critical", source: "reminder:11", reminder: { logId: 11 } });
+    vi.advanceTimersByTime(1000);
+    const done = usePetStore.getState().snoozeReminderBubble();
+    expect(done).toBe(true);
+    expect(usePetStore.getState().bubble.current).toBeNull();
+    expect(reporter).toHaveBeenCalledWith(11, "snooze");
+    expect(reporter).not.toHaveBeenCalledWith(11, "auto");
+    expect(reporter).not.toHaveBeenCalledWith(11, "bubble");
+    vi.advanceTimersByTime(10000);
+    expect(reporter).toHaveBeenCalledTimes(1); // snooze 离场后计时器不再触发 auto
+  });
+
+  it("snoozeReminderBubble：exec 结果气泡（无 reminder 载荷）返回 false——永不 snooze", () => {
+    usePetStore.getState().pushBubble({ text: "任务：任务完成", level: "critical", source: "task:3" });
+    expect(usePetStore.getState().snoozeReminderBubble()).toBe(false);
+    expect(usePetStore.getState().bubble.current).not.toBeNull();
+    expect(reporter).not.toHaveBeenCalled();
+  });
+
   it("净化后为空的提醒文案：不出气泡，立即按 auto 结案（§2.6.1 规则⑤）", () => {
     usePetStore.getState().pushBubble({ text: "   ", level: "critical", source: "reminder:9", reminder: { logId: 9 } });
     expect(usePetStore.getState().bubble.current).toBeNull();

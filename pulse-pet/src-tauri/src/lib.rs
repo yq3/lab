@@ -1,3 +1,4 @@
+mod action_exec;
 mod atlas;
 mod db;
 mod hotkeys;
@@ -181,6 +182,17 @@ pub fn run() {
                     .map_err(|e| format!("ensure builtin plugins: {e}"))?;
             }
 
+            // ---- v2 M4（R5）：启动时幂等清理崩溃残留的 running 态 action_logs
+            //      （正常退出走 RunEvent::Exit 补写；强杀路径无 Exit 在此结案）----
+            {
+                let db = app.state::<Mutex<Connection>>();
+                let conn = db.lock().map_err(|e| format!("db lock: {e}"))?;
+                let n = action_exec::cleanup_running_logs(&conn);
+                if n > 0 {
+                    plog!("[pulsepet] startup cleaned {n} stale running action log(s)");
+                }
+            }
+
             // ---- M8 i18n：恢复持久化语言（托盘菜单/气泡文案在构建前就绪）----
             {
                 let db = app.state::<Mutex<Connection>>();
@@ -288,6 +300,11 @@ pub fn run() {
             app.manage(reminders_state.clone());
             reminder_scheduler::spawn_scheduler(app.handle().clone(), reminders_state);
 
+            // ---- v2 M4：exec 运行句柄登记表（RunEvent::Exit 退出处置用；
+            //      issue #9 铁律：窗口创建循环之前 manage）----
+            let running_tasks = Arc::new(Mutex::new(action_exec::RunningTasks::default()));
+            app.manage(running_tasks);
+
             // ---- 窗口创建（issue #9 修复，DESIGN §7.1）：三窗口均 create:false。
             // config 窗口默认由 tauri 在用户 setup 闭包**之前**创建（App::run
             // 起点先遍历 app.windows 再跑闭包）；Windows 上 WebView2 环境创建
@@ -351,6 +368,9 @@ pub fn run() {
             reminder_scheduler::reminders_trigger_now,
             reminder_scheduler::reminders_ack,
             reminder_scheduler::reminders_dismiss,
+            reminder_scheduler::reminders_snooze,
+            reminder_scheduler::tasks_skip_once,
+            reminder_scheduler::action_logs_list,
             reminder_scheduler::reminder_play_fireworks,
             reminder_scheduler::fireworks_ready,
             reminder_scheduler::fireworks_finished,
@@ -392,6 +412,9 @@ pub fn run() {
             // 有 exit 行 = 干净退出；无 exit 行 = 崩溃/被杀（与事件查看器
             // Application Error ID 1000 互为印证，DESIGN §7.5）
             plog!("[pulsepet] exit");
+            // v2 M4（P1-2）：退出处置——遍历运行句柄杀进程组 + action_logs 补写
+            // failed「App 退出中断」（防孤儿进程继续执行副作用命令 + 重跑双份执行）
+            action_exec::abort_all_on_exit(app_handle);
             // 退出时兜底保存位置（正常拖拽期间已由防抖线程持续保存）
             windows::save_pet_position(app_handle);
             // 清除运行时文件：token 每次会话轮换、endpoint 不再指向已退出实例

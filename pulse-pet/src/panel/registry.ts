@@ -14,7 +14,7 @@
 import type { ComponentType } from "react";
 import type { PluginInfo } from "../lib/todos";
 import TokenStats from "./TokenStats";
-import Reminders from "./Reminders";
+import Tasks from "./Tasks";
 import Settings from "./Settings";
 
 export interface TabDef {
@@ -36,17 +36,37 @@ export type PluginTabSource = Pick<PluginInfo, "id" | "name" | "enabled" | "pane
  */
 export type PluginRenderMap = Record<string, ComponentType>;
 
+/**
+ * 核心 tab id（v2 M4：「提醒」→「定时任务」改名，id `reminders` → `tasks`，
+ * 位置不变——token / tasks / settings；TC-M4-02）。
+ */
+export const CORE_TAB_IDS = {
+  token: "token",
+  tasks: "tasks",
+  settings: "settings",
+} as const;
+
+/** 旧 tab id → 新 id 映射（panel://tab 直达兼容：v1 外部链接仍可打开任务页）。 */
+const LEGACY_TAB_ALIASES: Record<string, string> = {
+  reminders: "tasks",
+};
+
+/** 旧 id 兼容映射（reminders → tasks；未知值原样返回由 resolveTabId 回退）。 */
+export function normalizeTabId(id: string): string {
+  return LEGACY_TAB_ALIASES[id] ?? id;
+}
+
 /** 核心三 tab（静态注册，顺序即渲染顺序；TC-UI-07-1 不可关闭）。 */
 export const CORE_TABS: TabDef[] = [
   { id: "token", kind: "core", labelKey: "panel.tab.token", render: TokenStats },
-  { id: "reminders", kind: "core", labelKey: "panel.tab.reminders", render: Reminders },
+  { id: "tasks", kind: "core", labelKey: "panel.tab.tasks", render: Tasks },
   { id: "settings", kind: "core", labelKey: "panel.tab.settings", render: Settings },
 ];
 
 /**
- * 构建注册表：核心静态（token / reminders / settings）+ 插件动态
+ * 构建注册表：核心静态（token / tasks / settings）+ 插件动态
  * （enabled 且有 panel_tab 声明且 render 映射表有静态绑定，按 name 排序，
- * 插在 reminders 与 settings 之间）。
+ * 插在 tasks 与 settings 之间）。
  */
 export function buildTabs(plugins: PluginTabSource[], renderers: PluginRenderMap): TabDef[] {
   const pluginTabs: TabDef[] = plugins
@@ -60,15 +80,19 @@ export function buildTabs(plugins: PluginTabSource[], renderers: PluginRenderMap
       label: typeof p.panel_tab?.title === "string" ? p.panel_tab.title : p.name,
       render: renderers[p.id],
     }));
-  // 插件插位：reminders 与 settings 之间（§2.5）
+  // 插件插位：tasks 与 settings 之间（§2.5）
   return [CORE_TABS[0], CORE_TABS[1], ...pluginTabs, CORE_TABS[2]];
 }
 
 /**
  * tab id 解析（panel://tab 直达 / 当前 tab 被禁用后的回退）：
- * 目标在注册表 → 目标；否则（禁用 / 未知 / null）→ 首个可用 tab。
+ * 旧 id 先经 normalizeTabId 映射（reminders → tasks）；目标在注册表 →
+ * 目标；否则（禁用 / 未知 / null）→ 首个可用 tab。
  */
 export function resolveTabId(desired: string | null, tabs: TabDef[]): string {
-  if (desired && tabs.some((t) => t.id === desired)) return desired;
+  if (desired) {
+    const normalized = normalizeTabId(desired);
+    if (tabs.some((t) => t.id === normalized)) return normalized;
+  }
   return tabs[0]?.id ?? "token";
 }

@@ -73,8 +73,11 @@ export default function Panel() {
 
   const active = tabs.find((x) => x.id === tab) ?? tabs[0];
   const ActiveView = active?.render;
-  // 状态芯片文案：agent 空（sessions 全空）→ 优雅降级只显示 kind（TC-UI-03-4）
-  const statusText = agent ? `${agent} · ${kind}` : kind;
+  // 状态芯片文案：agent 空（sessions 全空）→ 优雅降级只显示 kind（TC-UI-03-4）；
+  // v2 M4（N4/TC-M4-10-5）：伪 session 的 agent=="task" → 显示「定时任务」
+  //（panel.agentTask）——技术字面量 task 对用户不可读。
+  const agentText = agent === "task" ? t("panel.agentTask") : (agent ?? "");
+  const statusText = agent ? `${agentText} · ${kind}` : kind;
 
   return (
     <div className="panel">

@@ -1,19 +1,28 @@
 import { describe, expect, it } from "vitest";
 import {
+  actionBadge,
+  actionBadgeTitle,
+  buildOpencodeCommand,
   formatInterval,
   formatWindow,
   isCrossMidnight,
   kindLabel,
   parseReminderTrigger,
+  parseWeekdays,
   planReminderActions,
+  renderTaskSummary,
   ruleToForm,
   sanitizeReminderText,
+  scheduleSummary,
+  shellQuote,
   usesFireworks,
   validateReminderInput,
+  weekdaysToJson,
   type ReminderInput,
   type ReminderRule,
   type ReminderTrigger,
 } from "./reminders";
+import { parseTaskResult } from "./reminder-bridge";
 
 function input(overrides: Partial<ReminderInput> = {}): ReminderInput {
   return {
@@ -27,6 +36,17 @@ function input(overrides: Partial<ReminderInput> = {}): ReminderInput {
     ...overrides,
   };
 }
+
+/** v2 M4 字段尾巴（struct 展开用）。 */
+const m4Fields = {
+  action_type: "notify" as const,
+  action_params: null,
+  schedule_kind: "interval" as const,
+  schedule_at: null,
+  schedule_weekdays: null,
+  snooze_until: null,
+  last_skipped_at: null,
+};
 
 describe("sanitizeReminderText：提醒文案净化（TC-RM-15）", () => {
   it("普通文案原样保留（含 emoji）", () => {
@@ -250,6 +270,7 @@ describe("M7：todo 派生规则的表单保真（M4 P2 ② 清偿，TC-TD 章�
     source_todo_id: 3,
     todo_due_at: "2026-08-18T15:30",
     created_at: "2026-08-17T10:00:00.000+08:00",
+    ...m4Fields,
   };
 
   it("ruleToForm：todo 规则不再降级 custom——kind/interval=0/绝对 start_time 原样保留", () => {
@@ -308,5 +329,262 @@ describe("M8 i18n：展示辅助随语言", () => {
     expect(formatWindow("22:00", "06:00", "en")).toBe("22:00-06:00 (cross-midnight)");
     expect(formatWindow("09:00", null, "en")).toBe("From 09:00");
     expect(formatWindow(null, "18:00", "en")).toBe("Until 18:00");
+  });
+});
+
+// ===========================================================================
+// v2 M4：动作/调度泛化（TC-M4-02/07/08/11 前端面）
+// ===========================================================================
+
+describe("v2 M4：validateReminderInput 动作/调度校验（与 Rust normalize 同规则）", () => {
+  it("v1 载荷（不带新字段）→ notify/interval 行为不变", () => {
+    expect(validateReminderInput(input())).toBeNull();
+    expect(validateReminderInput(input({ interval_minutes: 0 }))).toMatch(/间隔/);
+  });
+
+  it("daily：HH:MM 必填 + weekdays 校验；interval/窗口字段不校验（Rust 重置）", () => {
+    const daily = input({
+      kind: "custom",
+      interval_minutes: 0,
+      schedule_kind: "daily",
+      schedule_at: "09:00",
+    });
+    expect(validateReminderInput(daily)).toBeNull();
+    expect(
+      validateReminderInput({ ...daily, schedule_at: null }),
+    ).toMatch(/时刻/);
+    expect(validateReminderInput({ ...daily, schedule_at: "25:00" })).toMatch(/时刻/);
+    expect(
+      validateReminderInput({ ...daily, schedule_weekdays: "[1,8]" }),
+    ).toMatch(/星期/);
+    expect(
+      validateReminderInput({ ...daily, schedule_weekdays: "not json" }),
+    ).toMatch(/星期/);
+    // 非法 schedule_kind / action_type
+    expect(
+      validateReminderInput({ ...daily, schedule_kind: "weekly" as never }),
+    ).toMatch(/调度/);
+    expect(
+      validateReminderInput({ ...daily, action_type: "webhook" as never }),
+    ).toMatch(/动作/);
+  });
+
+  it("once：YYYY-MM-DDTHH:MM + 未来时刻（防创建即意外执行）", () => {
+    const once = input({
+      kind: "custom",
+      interval_minutes: 0,
+      schedule_kind: "once",
+      schedule_at: "2030-01-01T09:00",
+    });
+    expect(validateReminderInput(once)).toBeNull();
+    expect(validateReminderInput({ ...once, schedule_at: "2020-01-01T09:00" })).toMatch(
+      /未来/,
+    );
+    expect(validateReminderInput({ ...once, schedule_at: "09:00" })).toMatch(
+      /YYYY-MM-DDTHH:MM/,
+    );
+  });
+
+  it("exec：action_params 必填 JSON + command/timeout/opencode_auto 校验", () => {
+    const exec = input({
+      kind: "custom",
+      interval_minutes: 0,
+      schedule_kind: "once",
+      schedule_at: "2030-01-01T09:00",
+      action_type: "exec",
+      action_params: '{"command":"echo hi"}',
+    });
+    expect(validateReminderInput(exec)).toBeNull();
+    // params 缺失 / JSON 失败（TC-M4-01-4 前端口径）
+    expect(validateReminderInput({ ...exec, action_params: null })).toMatch(/action_params/);
+    expect(validateReminderInput({ ...exec, action_params: "{not json" })).toMatch(
+      /action_params/,
+    );
+    // command 空/超长
+    expect(
+      validateReminderInput({ ...exec, action_params: '{"command":"  "}' }),
+    ).toMatch(/命令/);
+    expect(
+      validateReminderInput({
+        ...exec,
+        action_params: `{"command":"${"x".repeat(2001)}"}`,
+      }),
+    ).toMatch(/命令/);
+    // timeout 1-120；opencode_auto bool
+    expect(
+      validateReminderInput({ ...exec, action_params: '{"command":"ls","timeout_minutes":0}' }),
+    ).toMatch(/超时/);
+    expect(
+      validateReminderInput({
+        ...exec,
+        action_params: '{"command":"ls","timeout_minutes":121}',
+      }),
+    ).toMatch(/超时/);
+    expect(
+      validateReminderInput({
+        ...exec,
+        action_params: '{"command":"ls","opencode_auto":"yes"}',
+      }),
+    ).toMatch(/布尔/);
+    // exec + interval：窗口不校验（Rust 清空）
+    const execInterval = input({
+      kind: "custom",
+      interval_minutes: 30,
+      action_type: "exec",
+      action_params: '{"command":"ls"}',
+      start_time: "25:00", // 遗留窗口脏数据——exec 不消费
+    });
+    expect(validateReminderInput(execInterval)).toBeNull();
+  });
+});
+
+describe("v2 M4：ruleToForm 往返保真（快捷开关不丢 exec/定点语义）", () => {
+  const execRule: ReminderRule = {
+    id: 9,
+    kind: "custom",
+    label: "数 md 文件",
+    interval_minutes: 0,
+    start_time: null,
+    end_time: null,
+    enabled: true,
+    use_fireworks: false,
+    last_triggered_at: null,
+    source_todo_id: null,
+    todo_due_at: null,
+    created_at: "2026-08-25T10:00:00.000+08:00",
+    action_type: "exec",
+    action_params: '{"command":"ls *.md | wc -l","timeout_minutes":10}',
+    schedule_kind: "daily",
+    schedule_at: "09:00",
+    schedule_weekdays: "[1,3,5]",
+    snooze_until: null,
+    last_skipped_at: null,
+  };
+
+  it("新字段全量带回（enabled patch 后提交仍是 exec/daily）", () => {
+    const f = ruleToForm(execRule);
+    expect(f.action_type).toBe("exec");
+    expect(f.schedule_kind).toBe("daily");
+    expect(f.schedule_at).toBe("09:00");
+    expect(f.schedule_weekdays).toBe("[1,3,5]");
+    expect(f.action_params).toContain("wc -l");
+    expect(validateReminderInput(f)).toBeNull();
+  });
+});
+
+describe("v2 M4：动作徽标 + 调度摘要（§4.7 列表行）", () => {
+  it("actionBadge：💧 notify / ⚡ exec / 📋 todo", () => {
+    expect(actionBadge({ kind: "custom", action_type: "notify" })).toBe("💧");
+    expect(actionBadge({ kind: "custom", action_type: "exec" })).toBe("⚡");
+    expect(actionBadge({ kind: "todo", action_type: "notify" })).toBe("📋");
+    expect(actionBadgeTitle({ kind: "custom", action_type: "exec" })).toContain("执行命令");
+  });
+
+  it("scheduleSummary：interval 带窗 / 每天 / 周过滤 / 一次", () => {
+    const base = {
+      kind: "custom" as const,
+      interval_minutes: 30,
+      start_time: null,
+      end_time: null,
+      schedule_kind: "interval" as const,
+      schedule_at: null,
+      schedule_weekdays: null,
+    };
+    expect(scheduleSummary(base)).toBe("每 30 分钟");
+    expect(
+      scheduleSummary({ ...base, start_time: "09:00", end_time: "18:00" }),
+    ).toBe("每 30 分钟 · 09:00-18:00");
+    expect(
+      scheduleSummary({
+        ...base,
+        interval_minutes: 0,
+        schedule_kind: "daily",
+        schedule_at: "09:00",
+      }),
+    ).toBe("每天 09:00");
+    expect(
+      scheduleSummary({
+        ...base,
+        interval_minutes: 0,
+        schedule_kind: "daily",
+        schedule_at: "09:00",
+        schedule_weekdays: "[3,5]",
+      }),
+    ).toBe("周三、五 09:00");
+    expect(
+      scheduleSummary({
+        ...base,
+        interval_minutes: 0,
+        schedule_kind: "once",
+        schedule_at: "2026-08-25T21:00",
+      }),
+    ).toBe("一次 · 08-25 21:00");
+    // en 变体
+    expect(
+      scheduleSummary(
+        {
+          ...base,
+          interval_minutes: 0,
+          schedule_kind: "daily",
+          schedule_at: "09:00",
+        },
+        "en",
+      ),
+    ).toBe("Daily 09:00");
+  });
+
+  it("parseWeekdays / weekdaysToJson 往返（空 = 每天 → null）", () => {
+    expect(parseWeekdays(null)).toEqual([]);
+    expect(parseWeekdays("[]")).toEqual([]);
+    expect(parseWeekdays("[1,3,5]")).toEqual([1, 3, 5]);
+    expect(parseWeekdays("bad")).toEqual([]);
+    expect(weekdaysToJson([])).toBeNull();
+    expect(weekdaysToJson([5, 3, 3])).toBe("[3,5]");
+  });
+});
+
+describe("v2 M4：opencode 例程模板拼接（§4.6，TC-M4-08）", () => {
+  it("逐字模板：--title 前缀 + 可选 --auto + 指令引用（不用 --dir）", () => {
+    expect(buildOpencodeCommand("数 md 文件", "数一下仓库有几个 md 文件", false)).toBe(
+      `opencode run --title 'pulsepet 例程: 数 md 文件' '数一下仓库有几个 md 文件'`,
+    );
+    expect(buildOpencodeCommand("任务A", "做 X", true)).toBe(
+      `opencode run --title 'pulsepet 例程: 任务A' --auto '做 X'`,
+    );
+    // 单引号指令安全转义（sh -c 双层语义）
+    expect(shellQuote("it's")).toBe(`'it'\\''s'`);
+    expect(buildOpencodeCommand("n", "don't stop", false)).not.toMatch(/--dir/);
+  });
+});
+
+describe("v2 M4：renderTaskSummary 模板键渲染（P3-3，与 Rust 同口径）", () => {
+  it("zh/en 双语 + timeout 参数化键 + failed 退出码", () => {
+    expect(renderTaskSummary("task.summary.ok")).toBe("任务完成");
+    expect(renderTaskSummary("task.summary.failed", 3)).toBe("失败（退出码 3）");
+    expect(renderTaskSummary("task.summary.failed", null)).toBe("失败");
+    expect(renderTaskSummary("task.summary.timeout:10")).toBe("超时（10 分钟）被终止");
+    expect(renderTaskSummary("task.summary.missed")).toBe("错过补跑窗（15 分钟）");
+    expect(renderTaskSummary("task.summary.interrupted")).toBe("App 退出中断");
+    expect(renderTaskSummary("task.summary.ok", undefined, "en")).toBe("Task finished");
+    expect(renderTaskSummary("task.summary.failed", 3, "en")).toBe("Failed (exit code 3)");
+    expect(renderTaskSummary("task.summary.timeout:1", undefined, "en")).toBe(
+      "Timed out (terminated after 1 min)",
+    );
+    // 未知键原样（可观测不静默）
+    expect(renderTaskSummary("task.summary.unknown")).toBe("task.summary.unknown");
+  });
+});
+
+describe("v2 M4：task-result 事件解析（P1-3，TC-M4-11）", () => {
+  it("合法 payload 解析；字段缺失/类型不对 → null", () => {
+    expect(parseTaskResult({ text: "任务：任务完成", logId: 3, status: "ok" })).toEqual({
+      text: "任务：任务完成",
+      logId: 3,
+      status: "ok",
+    });
+    expect(parseTaskResult(null)).toBeNull();
+    expect(parseTaskResult({ text: "", logId: 1, status: "ok" })).toBeNull();
+    expect(parseTaskResult({ text: "x", logId: "3", status: "ok" })).toBeNull();
+    expect(parseTaskResult({ text: "x", logId: 1, status: 5 })).toBeNull();
   });
 });

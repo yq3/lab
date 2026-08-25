@@ -3,6 +3,7 @@ import {
   fetchTokenRows,
   formatCost,
   formatTokens,
+  isTauriRuntime,
   localDateStr,
   localDayEndMs,
   localDayStartMs,
@@ -127,6 +128,33 @@ export default function TokenStats() {
 
   useEffect(() => {
     void load();
+  }, [load]);
+
+  /**
+   * v2 M4 并入修复（M3 移交 P2，TC-M3-11/12）：面板 Token 页数据定格——
+   * load 仅挂载执行 + panel visible:false 隐藏创建即挂载 → 长运行 App 首开
+   * 面板数据为启动时刻快照。仿 Settings.tsx tauri://focus 双触发：面板重新
+   * 可见（重开必触发）时刷新——「今日」默认跨度下首开即近实时值。
+   */
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    let unlisten: (() => void) | undefined;
+    let alive = true;
+    void import("@tauri-apps/api/window")
+      .then(({ getCurrentWindow }) =>
+        getCurrentWindow().onFocusChanged(({ payload: focused }) => {
+          if (focused) void load();
+        }),
+      )
+      .then((un) => {
+        if (alive) unlisten = un;
+        else un();
+      })
+      .catch((e) => console.error("[pulsepet] token focus refresh bind failed:", e));
+    return () => {
+      alive = false;
+      unlisten?.();
+    };
   }, [load]);
 
   // 数据/维度切换 → 模型筛选重置为全勾（新跨度 chip 集合变化）

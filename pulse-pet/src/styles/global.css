@@ -171,6 +171,41 @@ select {
   border-left-color: #d96c2c;
 }
 
+/* ---- v2 M4（TC-M4-13）：critical 提醒气泡的 snooze 按钮（hover 浮现） ---- */
+/* 可 snooze 气泡：文案右留按钮位；按钮默认隐形，hover 气泡时浮现（不喧宾） */
+.pet-bubble.snoozable {
+  padding-right: 30px;
+}
+
+.pet-bubble-snooze {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  appearance: none;
+  border: 2px solid var(--pet-world-line);
+  background: var(--pet-world-surface);
+  color: #29241d;
+  font-size: 11px;
+  font-family: inherit;
+  line-height: 1;
+  padding: 4px 6px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease-out;
+  white-space: nowrap;
+}
+
+.pet-bubble:hover .pet-bubble-snooze,
+.pet-bubble-snooze:focus-visible {
+  opacity: 1;
+}
+
+.pet-bubble-snooze:hover {
+  background: #ef8b4d; /* 蜜橘 hover（pet-world 物件固定色系） */
+  color: #17130f;
+}
+
 /* ---- 宠物右键菜单（v2 M2 同语言翻新：暖白 + 2px 墨边 + 硬阴影 + 直角项；
    行为零改动，clamp/关闭逻辑在 pet-menu.ts / PetMenu.tsx） ---- */
 .pet-menu {
@@ -1185,6 +1220,221 @@ select {
   color: var(--bg);
   font-size: 13px;
   box-shadow: var(--shadow-hard);
+}
+
+/* ---- v2 M4：定时任务（Tasks.tsx——徽标/模板块/星期/历史区，落 M2 token） ---- */
+
+/* 动作徽标（💧 notify / ⚡ exec / 📋 todo 派生）：固定宽不让行距跳动 */
+.task-badge {
+  flex: none;
+  width: 22px;
+  text-align: center;
+  font-size: 14px;
+}
+
+/* opencode 例程模板块（§4.6）：surface-2 底 + 虚线边（hint 同族容器） */
+.task-tpl-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--surface-2);
+  border: 1px dashed var(--line);
+}
+
+.task-tpl-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+.task-tpl-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* --auto 勾选后的危险色警示（R7：危险须可辨） */
+.task-tpl-row .danger-check,
+.task-tpl-row .danger-check input {
+  color: var(--danger);
+}
+
+.task-danger-hint {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--danger);
+}
+
+/* 等宽多行 command / 指令 / 输出（exec 的技术字面量） */
+.task-textarea,
+.task-output {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  border: 2px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 10px;
+}
+
+.task-textarea:focus,
+.task-output:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.task-command-label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+/* 星期过滤勾选行（daily） */
+.task-weekdays {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  font-size: 12px;
+}
+
+.task-weekdays-label {
+  color: var(--ink-soft);
+}
+
+.task-weekday-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+}
+
+/* 执行历史区（§4.7 折叠面板 + 分页 + 状态色点） */
+.task-history-toggle {
+  font-weight: 600;
+}
+
+.task-history-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.task-history-controls select {
+  padding: 5px 10px;
+  min-height: 28px;
+  border: 2px solid var(--line);
+  border-radius: 2px;
+  font-size: 12px;
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.task-history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.task-history-item {
+  border-bottom: 1px dashed var(--line);
+}
+
+/* 行：整行可点展开（button 复位 + flex 布局） */
+.task-history-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 8px 4px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+}
+
+.task-history-row:hover {
+  background: var(--surface-2);
+}
+
+/* 状态色点（ok 绿 · failed 红 · skipped 灰 · running 蓝，M2 token 同源） */
+.task-status-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ink-faint);
+}
+
+.task-status-dot.status-ok {
+  background: var(--ok);
+}
+
+.task-status-dot.status-failed {
+  background: var(--danger);
+}
+
+.task-status-dot.status-skipped {
+  background: var(--ink-faint);
+}
+
+/* running 蓝（§4.7 设计字面；M2 token 无蓝——两主题固定 #4a7fb5） */
+.task-status-dot.status-running {
+  background: #4a7fb5;
+}
+
+.task-history-time {
+  color: var(--ink-faint);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+
+.task-history-summary {
+  flex: 1;
+  min-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-history-status {
+  color: var(--ink-faint);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+
+/* 展开详情：补跑延迟 + 输出尾部（等宽，2KB 内） */
+.task-history-detail {
+  padding: 4px 4px 12px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.task-detail-label {
+  margin: 0;
+  font-size: 11px;
+  color: var(--ink-faint);
+}
+
+.task-output {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 180px;
+  overflow: auto;
 }
 
 /* ---- M7 Todo 插件 ---- */

@@ -44,10 +44,15 @@ export const CELEBRATION_DEFAULT_MS = 3000;
 /**
  * 提醒气泡的消失方式回报（TC-RM-04/03）：
  * - "bubble"：用户点击宠物确认 → Rust `reminders_ack`（acked_at + dismissed_via）；
- * - "auto"：dwell 到期自动消失 → Rust `reminders_dismiss(via='auto')`。
+ * - "auto"：dwell 到期自动消失 → Rust `reminders_dismiss(via='auto')`；
+ * - "snooze"（v2 M4，TC-M4-13）：气泡按钮「稍后 10 分钟」→ Rust
+ *   `reminders_snooze`（log 结案 via='snooze' + snooze_until 写表 + 重发）。
  * 由 reminder-bridge 注册实现（petStore 不直接依赖 Tauri API，vitest 可裸跑）。
  */
-export type ReminderReporter = (logId: number, via: "bubble" | "auto") => void;
+export type ReminderReporter = (
+  logId: number,
+  via: "bubble" | "auto" | "snooze",
+) => void;
 
 interface PetState {
   /** 归一化原始状态（8 种）。 */
@@ -96,6 +101,11 @@ interface PetState {
   resetBubbles: () => void;
   /** M4：点击宠物"已确认"（TC-RM-04）；非提醒气泡时返回 false（交回状态轮换）。 */
   ackReminderBubble: () => boolean;
+  /**
+   * v2 M4（TC-M4-13）：snooze 当前提醒气泡——离场 + 结案 via='snooze'
+   * （Rust 侧写 snooze_until + next_due 置为重发）；非提醒气泡返回 false。
+   */
+  snoozeReminderBubble: () => boolean;
 }
 
 /** 气泡 dwell 计时器（store 外置，避免进入响应式状态）。 */
@@ -110,7 +120,7 @@ export function setReminderReporter(fn: ReminderReporter | null): void {
   reminderReporter = fn;
 }
 
-function reportReminder(b: BubbleItem | null | undefined, via: "bubble" | "auto"): void {
+function reportReminder(b: BubbleItem | null | undefined, via: "bubble" | "auto" | "snooze"): void {
   if (b?.reminder) {
     reminderReporter?.(b.reminder.logId, via);
   }
@@ -229,6 +239,18 @@ export const usePetStore = create<PetState>((set, get) => ({
     const { state, acked } = ackCurrentQ(prev, now);
     set({ bubble: state });
     reportReminder(acked, "bubble"); // TC-RM-04：acked_at + dismissed_via='bubble'
+    armForCurrent(state);
+    return true;
+  },
+  snoozeReminderBubble: () => {
+    // v2 M4（TC-M4-13）：与 ack 同一离场语义，结案 via='snooze'（重发编排全在
+    // Rust 侧——snooze_until 写表 + 内存 next_due 置为）
+    const prev = get().bubble;
+    if (!prev.current?.reminder) return false;
+    const now = Date.now();
+    const { state, acked } = ackCurrentQ(prev, now);
+    set({ bubble: state });
+    reportReminder(acked, "snooze");
     armForCurrent(state);
     return true;
   },

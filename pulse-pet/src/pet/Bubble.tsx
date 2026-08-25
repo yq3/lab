@@ -1,4 +1,5 @@
 import { usePetStore } from "./petStore";
+import { t } from "../lib/i18n";
 
 /**
  * 宠物气泡（v2 M2 排队模型下的显示位，V2-DESIGN §2.6.3）：
@@ -7,18 +8,38 @@ import { usePetStore } from "./petStore";
  * - 视觉走「宠物世界」固定色（`--pet-world-*`，不随主题）：暖白底 + 2px
  *   墨边 + 2px 2px 0 硬阴影 + 像素尖角（45° 旋转小方块）；
  * - critical 级左侧 4px 蜜橘色条（可交互暗示——点宠物确认）；单行省略。
+ * - v2 M4（TC-M4-13）：critical 且有 reminder 载荷时右侧 snooze 按钮
+ *   「稍后 10 分钟」——hover 浮现不喧宾（208px 单行气泡内用 ⏱ 10min 短标 +
+ *   title 完整语义），点击 invoke reminders_snooze 气泡即消；点宠物仍 =
+ *   确认（两动作并存）。exec 结果气泡无 reminder 载荷，天然不显示按钮。
  */
 export default function Bubble() {
   const bubble = usePetStore((s) => s.bubble);
+  const snooze = usePetStore((s) => s.snoozeReminderBubble);
   const cur = bubble.current;
   if (!cur) return null;
+  const showSnooze = cur.level === "critical" && cur.reminder != null;
   return (
     <div
-      className={`pet-bubble level-${cur.level}`}
+      className={`pet-bubble level-${cur.level}${showSnooze ? " snoozable" : ""}`}
       role="status"
       key={cur.id}
     >
       {cur.text}
+      {showSnooze && (
+        <button
+          type="button"
+          className="pet-bubble-snooze"
+          title={t("tasks.snooze")}
+          aria-label={t("tasks.snooze")}
+          onClick={(e) => {
+            e.stopPropagation(); // 不触碰 canvas 点击语义（点宠物仍 = 确认）
+            snooze();
+          }}
+        >
+          ⏱ 10min
+        </button>
+      )}
     </div>
   );
 }
