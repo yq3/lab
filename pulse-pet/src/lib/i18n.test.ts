@@ -120,6 +120,13 @@ describe("字典完备性", () => {
     expect(DICT.zh["tasks.rules.title"]).toBe("例程（{n}）");
     expect(DICT.en["tasks.rules.title"]).toBe("Routines ({n})");
   });
+
+  // v2 M4 R1 补充 2（用户 2026-08-25 二次裁定）：状态芯片 agentTask 同步例程
+  it("M4 R1 补充 2：panel.agentTask 例程（zh）/ Routine（en）", async () => {
+    const { DICT } = await import("./i18n");
+    expect(DICT.zh["panel.agentTask"]).toBe("例程");
+    expect(DICT.en["panel.agentTask"]).toBe("Routine");
+  });
 });
 
 describe("systemLangSafe：默认语言跟随系统", () => {

@@ -402,6 +402,34 @@ export default function Tasks() {
     setForm((f) => ({ ...f, schedule_weekdays: weekdaysToJson(next) }));
   };
 
+  /**
+   * 表单提交/取消按钮组（用户 2026-08-25 二次裁定：**不占独立动作行**，
+   * 并入实际渲染的最后一行字段行右端——表单按 action_type/schedule_kind
+   * 条件显隐，末行随分支变化：once｜interval+exec → 调度行；interval+notify
+   * → 时间窗行；daily → 星期行；todo 编辑态无字段行 → margin-left:auto 在
+   * flex-column 表单内天然右对齐。accent 非默认色保持上一轮方案）。
+   */
+  const formActions = (
+    <div className="task-form-actions">
+      <button className="seg primary" onClick={() => void save()}>
+        {editing ? t("reminders.form.save") : t("reminders.form.create")}
+      </button>
+      {editing && (
+        <button
+          className="seg"
+          onClick={() => {
+            setEditing(null);
+            setForm(emptyForm());
+            setExec(emptyExec());
+            setFormError(null);
+          }}
+        >
+          {t("reminders.form.cancel")}
+        </button>
+      )}
+    </div>
+  );
+
   if (error) {
     return <div className="token-error">{error}</div>;
   }
@@ -731,9 +759,16 @@ export default function Tasks() {
                     {t("reminders.form.fireworksMode")}
                   </label>
                 )}
+                {/* 调度行是末行的分支（once / interval+exec——后面无窗口/星期行）：
+                    按钮并入本行右端 */}
+                {((form.schedule_kind ?? "interval") === "once" ||
+                  ((form.schedule_kind ?? "interval") === "interval" &&
+                    form.action_type === "exec")) &&
+                  formActions}
               </div>
 
-              {/* interval + notify 的时间窗（v1 字段；daily/once/exec 不显示） */}
+              {/* interval + notify 的时间窗（v1 字段；daily/once/exec 不显示）——
+                  该分支的末行：按钮并入右端 */}
               {(form.schedule_kind ?? "interval") === "interval" &&
                 form.action_type === "notify" && (
                   <div className="reminder-form-row">
@@ -753,10 +788,11 @@ export default function Tasks() {
                         onChange={(e) => setForm((f) => ({ ...f, end_time: e.target.value || null }))}
                       />
                     </label>
+                    {formActions}
                   </div>
                 )}
 
-              {/* daily 的星期过滤（不勾 = 每天） */}
+              {/* daily 的星期过滤（不勾 = 每天）——该分支的末行：按钮并入右端 */}
               {(form.schedule_kind ?? "interval") === "daily" && (
                 <div className="task-weekdays">
                   <span className="task-weekdays-label">{t("tasks.schedule.weekdays")}</span>
@@ -766,6 +802,7 @@ export default function Tasks() {
                       {t(`tasks.weekday.${d}`)}
                     </label>
                   ))}
+                  {formActions}
                 </div>
               )}
 
@@ -781,27 +818,9 @@ export default function Tasks() {
             </>
           )}
           {formError && <p className="reminder-form-error">{formError}</p>}
-          {/* 用户 2026-08-25 裁定：新建按钮置表单块右下角 + accent 强调色
-              （独立类 task-form-actions——reminder-form-actions 为 Todo 插件页
-              共用，不波及） */}
-          <div className="task-form-actions">
-            <button className="seg primary" onClick={() => void save()}>
-              {editing ? t("reminders.form.save") : t("reminders.form.create")}
-            </button>
-            {editing && (
-              <button
-                className="seg"
-                onClick={() => {
-                  setEditing(null);
-                  setForm(emptyForm());
-                  setExec(emptyExec());
-                  setFormError(null);
-                }}
-              >
-                {t("reminders.form.cancel")}
-              </button>
-            )}
-          </div>
+          {/* todo 编辑态：无字段行（锁定表单只留提示）——按钮组 margin-left:auto
+              在 flex-column 表单内天然右对齐（其余分支按钮已并入各自末行） */}
+          {form.kind === "todo" && formActions}
         </div>
       </section>
 

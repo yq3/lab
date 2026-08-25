@@ -1181,13 +1181,31 @@ select {
   gap: 8px;
 }
 
-/* ---- v2 M4 R1 补充（用户 2026-08-25 裁定）：例程表单新建按钮右下角 +
- * accent 强调色。独立类——.reminder-form-actions 为 Todo 插件页共用，保持
- * 原样零波及。 ---- */
+/* ---- v2 M4 R1 补充（用户 2026-08-25 二次裁定）：新建/保存按钮**并入表单
+ * 末行字段行右端**（无独立动作行）+ accent 强调色。独立类——
+ * .reminder-form-actions 为 Todo 插件页共用，保持原样零波及。 ---- */
+/* 行内形态：margin-left:auto 在 flex 行（reminder-form-row / task-weekdays）
+ * 内推到右端；inline-flex 随内容宽。 */
 .task-form-actions {
-  display: flex;
+  display: inline-flex;
   gap: 8px;
-  justify-content: flex-end; /* 新建按钮置表单块右下角 */
+  margin-left: auto;
+  /* reminder-form-row 为 align-items:flex-end——按钮组底缘与输入框底缘对齐
+   *（.seg 基类 28px vs 输入 32px，padding 补齐到同一基线） */
+  align-self: flex-end;
+  padding-bottom: 2px;
+}
+
+/* task-weekdays 为 align-items:center——按钮组居中随行（覆盖默认底对齐） */
+.task-weekdays .task-form-actions {
+  align-self: center;
+  padding-bottom: 0;
+}
+
+/* todo 编辑态（无字段行）：flex-column 表单的直接子项，margin-left:auto
+ * 在列向同样推到右缘 = 右下角 */
+.reminder-form > .task-form-actions {
+  display: flex;
 }
 
 .task-form-actions .seg,

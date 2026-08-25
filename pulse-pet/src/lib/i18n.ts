@@ -147,7 +147,7 @@ const zh: Dict = {
 
   // ---- v2 M4：定时任务（tasks.*，V2-DESIGN §4.7）----
   "panel.tab.tasks": "例程",
-  "panel.agentTask": "定时任务",
+  "panel.agentTask": "例程",
   "tasks.rules.title": "例程（{n}）",
   "tasks.actionType": "动作类型",
   "tasks.action.notify": "提醒",
@@ -485,7 +485,7 @@ const en: Dict = {
 
   // ---- v2 M4: scheduled tasks (tasks.*, V2-DESIGN §4.7) ----
   "panel.tab.tasks": "Routines",
-  "panel.agentTask": "Task",
+  "panel.agentTask": "Routine",
   "tasks.rules.title": "Routines ({n})",
   "tasks.actionType": "Action",
   "tasks.action.notify": "Notify",
