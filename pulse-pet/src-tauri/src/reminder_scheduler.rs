@@ -31,9 +31,10 @@
 //! 的 play 请求存 pending，ready 到达即补发。
 
 use crate::plog;
+use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
-use chrono::{DateTime, Local, NaiveDate, NaiveDateTime, SecondsFormat, TimeZone, Timelike};
+use chrono::{DateTime, Datelike, Duration as ChronoDuration, Local, NaiveDate, NaiveDateTime, SecondsFormat, TimeZone, Timelike};
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager};
@@ -50,6 +51,11 @@ pub const DEDUP_WINDOW_MS: i64 = 3 * 60_000;
 pub const DEFAULT_TICK_MS: u64 = 60_000;
 /// upsert 允许的最大间隔（分钟，24h）。
 pub const MAX_INTERVAL_MINUTES: i64 = 1440;
+/// v2 M4（§4.3）：daily/once 补跑宽限窗（notify/exec 同窗——用户单一口径裁定；
+/// interval 维持 v1 错过不补）。超窗 → skipped（exec 落 action_logs，notify 不落）。
+pub const CATCHUP_WINDOW_MS: i64 = 15 * 60_000;
+/// v2 M4（§4.3）：snooze「稍后 10 分钟」窗口。
+pub const SNOOZE_MS: i64 = 10 * 60_000;
 
 /// 触发事件 payload（前端 parseReminderTrigger 按同名字段消费）。
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -76,7 +82,8 @@ pub struct PlayPayload {
     pub target_y: f64,
 }
 
-/// 提醒规则（reminders 表行，DESIGN §5.4；serde 字段与 TS `ReminderRule` 一致）。
+/// 提醒/任务规则（reminders 表行，DESIGN §5.4 / V2-DESIGN §4.2；serde 字段与
+/// TS `ReminderRule` 一致）。v2 M4 +7 列（动作/调度泛化 + snooze/skipped 记账）。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ReminderRule {
     pub id: i64,
@@ -92,13 +99,62 @@ pub struct ReminderRule {
     /// M7：todo 派生提醒的截止时刻（"YYYY-MM-DDTHH:MM"，= todos.due_date）。
     pub todo_due_at: Option<String>,
     pub created_at: String,
+    /// v2 M4：动作类型（'notify' 默认 | 'exec'）。
+    pub action_type: String,
+    /// v2 M4：动作参数 JSON 文本（exec = {"command","cwd?","timeout_minutes?","opencode_auto?"}）。
+    pub action_params: Option<String>,
+    /// v2 M4：调度类型（'interval' 默认 | 'daily' | 'once'；P2-6：daily/once 行
+    /// interval_minutes 恒 0）。
+    pub schedule_kind: String,
+    /// v2 M4：定点时刻（daily → "HH:MM"；once → "YYYY-MM-DDTHH:MM"；interval → NULL）。
+    pub schedule_at: Option<String>,
+    /// v2 M4：daily 的星期过滤 JSON "[1,3,5]"（1=周一…7=周日；NULL/空 = 每天）。
+    pub schedule_weekdays: Option<String>,
+    /// v2 M4：snooze 顺延终点（RFC3339；触发时清空）。
+    pub snooze_until: Option<String>,
+    /// v2 M4：skipped 判定时刻（RFC3339；与 last_triggered_at 分离——P3-2，防
+    /// skipped 写入使 3min dedup 拒绝手动补跑）。
+    pub last_skipped_at: Option<String>,
 }
 
-/// CRUD 入参（id 由 command 参数单独传）。
+/// CRUD 入参（id 由 command 参数单独传）。v2 M4 +5 字段（serde 缺省 → v1
+/// 载荷不带新字段仍可反序列化，notify/interval 默认）。
 #[derive(Debug, Clone, Deserialize)]
 pub struct ReminderInput {
     pub kind: String,
     pub label: String,
+    pub interval_minutes: i64,
+    pub start_time: Option<String>,
+    pub end_time: Option<String>,
+    pub enabled: bool,
+    pub use_fireworks: bool,
+    /// v2 M4：'notify'（缺省）| 'exec'。
+    #[serde(default)]
+    pub action_type: String,
+    /// v2 M4：动作参数 JSON 文本（exec 必填；notify 忽略存 NULL）。
+    #[serde(default)]
+    pub action_params: Option<String>,
+    /// v2 M4：'interval'（缺省）| 'daily' | 'once'。
+    #[serde(default)]
+    pub schedule_kind: String,
+    /// v2 M4：daily → "HH:MM"；once → "YYYY-MM-DDTHH:MM"。
+    #[serde(default)]
+    pub schedule_at: Option<String>,
+    /// v2 M4：daily 的星期过滤 JSON 文本。
+    #[serde(default)]
+    pub schedule_weekdays: Option<String>,
+}
+
+/// normalize 后的规则字段（insert/update 写库的单一来源；kind 切换时无关
+/// 字段在此重置——P2-6）。
+pub struct NormalizedRule {
+    pub kind: String,
+    pub label: String,
+    pub action_type: String,
+    pub action_params: Option<String>,
+    pub schedule_kind: String,
+    pub schedule_at: Option<String>,
+    pub schedule_weekdays: Option<String>,
     pub interval_minutes: i64,
     pub start_time: Option<String>,
     pub end_time: Option<String>,
@@ -208,16 +264,151 @@ pub fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
-/// 计算规则的 next_due（加载/reload 后）：
-/// - `interval <= 0`（todo 一次性，M7/TC-TD-03/06）：
-///     从未触发 → `start_time`（绝对时刻，"YYYY-MM-DDTHH:MM"；已过期则下一 tick
-///   补触发一次）；已触发 → `i64::MAX`（永不再触发，跨重启/reload 均以
-///   `last_triggered_at` 为唯一防重来源，§5.4）；
-/// - 周期规则：anchor = last_triggered_at（缺省 created_at）+ interval；错过不补发
-///   （cand 已过期则顺延到 now + interval，避免重启/停机后瞬间补弹，TC-RM-02 精神）。
+/// epoch 毫秒 → RFC3339 本地时间串（snooze/调度溯源写表用）。
+pub fn ms_to_rfc3339(ms: i64) -> Option<String> {
+    DateTime::from_timestamp_millis(ms).map(|d| {
+        d.with_timezone(&Local)
+            .to_rfc3339_opts(SecondsFormat::Millis, true)
+    })
+}
+
+// ---------------------------------------------------------------------------
+// v2 M4：daily/once 定点调度纯函数（§4.3）
+// ---------------------------------------------------------------------------
+
+/// 星期过滤 JSON "[1,3,5]" → 合法值集合（1=周一…7=周日）；NULL/空/解析失败
+/// → 空 Vec（= 每天，宽容防 panic；写入口 validate 已拒绝非法 JSON）。
+pub fn parse_weekdays(s: Option<&str>) -> Vec<u32> {
+    s.and_then(|s| serde_json::from_str::<Vec<u32>>(s).ok())
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|d| (1..=7).contains(d))
+        .collect()
+}
+
+fn weekday_matches(weekdays: &[u32], date: NaiveDate) -> bool {
+    weekdays.is_empty()
+        || weekdays.contains(&(date.weekday().num_days_from_monday() as u32 + 1))
+}
+
+/// 本地某日 minute_of_day 时刻的 epoch 毫秒（DST 间隙/歧义取首个可行解释）。
+fn local_day_ms(date: NaiveDate, minute_of_day: i64) -> Option<i64> {
+    let dt = date.and_hms_opt(
+        (minute_of_day / 60) as u32,
+        (minute_of_day % 60) as u32,
+        0,
+    )?;
+    let local = Local.from_local_datetime(&dt);
+    local
+        .single()
+        .or_else(|| local.earliest())
+        .map(|d| d.timestamp_millis())
+}
+
+/// 下一个匹配日 HH:MM（严格 > now；最多向后找 8 天，防御性兜底 now）。
+pub fn next_daily_occurrence(now_ms: i64, hhmm: i64, weekdays: &[u32]) -> i64 {
+    let today = Local
+        .timestamp_millis_opt(now_ms)
+        .single()
+        .map(|d| d.date_naive())
+        .unwrap_or_else(|| Local::now().date_naive());
+    for off in 0..=8i64 {
+        let Some(day) = today.checked_add_signed(ChronoDuration::days(off)) else {
+            break;
+        };
+        if !weekday_matches(weekdays, day) {
+            continue;
+        }
+        if let Some(ms) = local_day_ms(day, hhmm) {
+            if ms > now_ms {
+                return ms;
+            }
+        }
+    }
+    now_ms
+}
+
+/// 最近一个 ≤ now 且 ≥ floor 的匹配日 HH:MM（"本周期"锚：floor 通常为
+/// created_at——新规则的首次发生只算创建之后的）。
+pub fn prev_daily_occurrence(
+    now_ms: i64,
+    hhmm: i64,
+    weekdays: &[u32],
+    floor_ms: i64,
+) -> Option<i64> {
+    let today = Local
+        .timestamp_millis_opt(now_ms)
+        .single()
+        .map(|d| d.date_naive())
+        .unwrap_or_else(|| Local::now().date_naive());
+    for off in 0..=7i64 {
+        let day = today.checked_sub_signed(ChronoDuration::days(off))?;
+        if !weekday_matches(weekdays, day) {
+            continue;
+        }
+        if let Some(ms) = local_day_ms(day, hhmm) {
+            if ms <= now_ms && ms >= floor_ms {
+                return Some(ms);
+            }
+        }
+    }
+    None
+}
+
+/// 已处理时刻（last_triggered / last_skipped 的较大者；都没有 → None）。
+fn last_handled_ms(rule: &ReminderRule) -> Option<i64> {
+    let t = rule.last_triggered_at.as_deref().and_then(parse_rfc3339_ms);
+    let s = rule.last_skipped_at.as_deref().and_then(parse_rfc3339_ms);
+    match (t, s) {
+        (Some(t), Some(s)) => Some(t.max(s)),
+        (t, s) => t.or(s),
+    }
+}
+
+/// 触发/跳过/snooze 重发后的常规推进（§4.3；collect_due / force_fire_one /
+/// tasks_skip_once 共用）。todo 派生行 → MAX（M7 一次性语义不变）。
+pub fn advance_after_fire(rule: &ReminderRule, base_ms: i64) -> i64 {
+    if rule.kind == "todo" {
+        return i64::MAX;
+    }
+    match rule.schedule_kind.as_str() {
+        "daily" => {
+            let hhmm = rule
+                .schedule_at
+                .as_deref()
+                .and_then(parse_hhmm)
+                .unwrap_or(0);
+            let wd = parse_weekdays(rule.schedule_weekdays.as_deref());
+            next_daily_occurrence(base_ms, hhmm, &wd)
+        }
+        "once" => i64::MAX,
+        // interval（v1 行为）：锚点顺延
+        _ => base_ms.saturating_add(rule.interval_minutes * 60_000),
+    }
+}
+
+/// 计算规则的 next_due（加载/reload 后；v2 M4 §4.3 按 schedule_kind 分派）：
+/// - **snooze_until 未过期 → 优先于常规计算直接返回**（P1-1：重发本次；非
+///   max——触发后常规 next_due 已是未来，max 会吞掉 snooze）；过期 → 静默
+///   丢弃回落常规（N3 已知边界）；
+/// - `kind == "todo"`（M7 派生行，不迁移）：v1 逻辑不变（interval=0 一次性：
+///   未触发 → start_time 绝对时刻；已触发 → MAX）；
+/// - `interval`：v1 逻辑不变（锚点 + interval；错过不补，TC-RM-02 精神）；
+/// - `daily`：本周期 = 最近一个 ≥ created 且 ≤ now 的匹配日 HH:MM——未处理
+///   （max(last_triggered, last_skipped) 早于它）→ 返回它（可能是过去 → 由
+///   tick 的补跑窗判定：窗内触发 / 超窗 skipped，即 **reload 错过检测 P2-5**，
+///   「今早跑了没」重启后仍可对账）；已处理 → 下一个匹配日；
+/// - `once`：schedule_at 绝对时刻（过去同样交补跑窗判定）；已触发/已跳过
+///   （last_handled ≥ schedule_at）→ `i64::MAX` 终态（跨重启成立，N1 ②）。
 pub fn compute_next_due(rule: &ReminderRule, now_ms: i64) -> i64 {
-    let interval = rule.interval_minutes;
-    if interval <= 0 {
+    // snooze 优先（P1-1）
+    if let Some(s) = rule.snooze_until.as_deref().and_then(parse_rfc3339_ms) {
+        if s > now_ms {
+            return s;
+        }
+        // 过期 → 静默丢弃（N3：notify 无害）
+    }
+    if rule.kind == "todo" {
         if rule
             .last_triggered_at
             .as_deref()
@@ -233,17 +424,51 @@ pub fn compute_next_due(rule: &ReminderRule, now_ms: i64) -> i64 {
             .and_then(parse_due_like_ms)
             .unwrap_or(now_ms);
     }
-    let anchor = rule
-        .last_triggered_at
-        .as_deref()
-        .and_then(parse_rfc3339_ms)
-        .or_else(|| parse_rfc3339_ms(&rule.created_at))
-        .unwrap_or(now_ms);
-    let cand = anchor.saturating_add(interval.saturating_mul(60_000));
-    if cand > now_ms {
-        cand
-    } else {
-        now_ms.saturating_add(interval * 60_000)
+    match rule.schedule_kind.as_str() {
+        "daily" => {
+            let Some(hhmm) = rule.schedule_at.as_deref().and_then(parse_hhmm) else {
+                // 非法 daily 行（不应出现，validate 拦截）→ 保守按已完结处理
+                return i64::MAX;
+            };
+            let wd = parse_weekdays(rule.schedule_weekdays.as_deref());
+            let created = parse_rfc3339_ms(&rule.created_at).unwrap_or(now_ms);
+            if let Some(prev) = prev_daily_occurrence(now_ms, hhmm, &wd, created) {
+                let handled = last_handled_ms(rule);
+                if handled.map_or(true, |h| h < prev) {
+                    return prev; // 本周期未处理（可能已过 → tick 补跑窗判定）
+                }
+            }
+            next_daily_occurrence(now_ms, hhmm, &wd)
+        }
+        "once" => {
+            let Some(at) = rule.schedule_at.as_deref().and_then(parse_due_like_ms) else {
+                return i64::MAX;
+            };
+            match last_handled_ms(rule) {
+                Some(h) if h >= at => i64::MAX,
+                _ => at,
+            }
+        }
+        // interval：v1 逻辑不变（错过不补）
+        _ => {
+            let interval = rule.interval_minutes;
+            if interval <= 0 {
+                // 非 todo 的 0 间隔（不应出现，validate 拦截）→ 一次性处理
+                return i64::MAX;
+            }
+            let anchor = rule
+                .last_triggered_at
+                .as_deref()
+                .and_then(parse_rfc3339_ms)
+                .or_else(|| parse_rfc3339_ms(&rule.created_at))
+                .unwrap_or(now_ms);
+            let cand = anchor.saturating_add(interval.saturating_mul(60_000));
+            if cand > now_ms {
+                cand
+            } else {
+                now_ms.saturating_add(interval * 60_000)
+            }
+        }
     }
 }
 
@@ -280,6 +505,49 @@ pub struct RemindersState {
     /// M4 P2 ④（M7 清偿）：当前播放中的 log id——新一场顶替/超时时对未回报
     /// finished 的旧 log 补 dismissed_via='fireworks'，消除残留 NULL。
     pub fw_active_log: Option<i64>,
+    /// v2 M4（§4.5）：exec 并发满 2 时的内存等待队列（不写 running 行——
+    /// 排队中无进程无 running 行，App 退出/崩溃时自然消失无残留）。
+    pub pending_execs: VecDeque<crate::action_exec::PendingExec>,
+    /// v2 M4：完成回调 → 调度器 select 分支出队的通知通道（spawn_scheduler 注入）。
+    pub slot_free_tx: Option<tokio::sync::mpsc::Sender<()>>,
+    /// v2 M4 R4（committer P2-1）：**exec 槽位预留计数（同步化硬上限）**。
+    /// dispatch/drain 在本 struct 的锁内判定并自增（与 collect_due 同一锁
+    /// 序列化）——批量分派（run_tick 同步循环 / 多线程并发 dispatch）下第
+    /// 3 个必入队不超发；run_task 完成回调锁内递减后经 slot_free 通知出队。
+    /// 取代原 `RunningTasks.len()` 判定（登记表条目在 spawn 任务首个 poll 才
+    /// 异步插入，同步循环里读不到刚分发的任务——竞态软上限）。reload 不重置
+    /// （在飞任务的完成回调仍会递减，重置会破坏记账导致超发）。
+    pub active_execs: usize,
+}
+
+/// 一次 tick 的触发决策（v2 M4：collect_due 返回 (fired, skipped)——skipped
+/// 列表随 fired 一起返回调用方落库，N1）。
+#[derive(Debug, Clone)]
+pub struct FiredRule {
+    pub rule: ReminderRule,
+    /// 原定触发时刻（补跑窗内触发 = 错过的 next_due；准点触发 ≈ 触发时刻；
+    /// exec 写 action_logs.scheduled_at 溯源）。
+    pub scheduled_at_ms: i64,
+}
+
+/// skipped 判定记录（两来源：超窗 / 暂停；调用方写 last_skipped_at + 推进
+/// 已在内存完成 + exec 落 action_logs(status='skipped')）。
+#[derive(Debug, Clone)]
+pub struct SkippedRule {
+    pub id: i64,
+    pub label: String,
+    pub action_type: String,
+    /// 错过的原定时刻。
+    pub scheduled_at_ms: i64,
+    pub reason: SkipReason,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SkipReason {
+    /// 补跑窗外错过（15 分钟）。
+    MissedWindow,
+    /// 暂停期间到期（不跑不补、记 skipped）。
+    Paused,
 }
 
 impl RemindersState {
@@ -307,25 +575,61 @@ impl RemindersState {
         Ok(())
     }
 
-    /// 一次 tick 的到期决策（含暂停顺延、窗口、去重），返回本次触发的规则快照
-    /// （内存中的 last_triggered_at / next_due 已同步推进，db 落库由调用方负责）。
-    pub fn collect_due(&mut self, now_ms: i64, now_ts: &str, minute_of_day: i64) -> Vec<ReminderRule> {
+    /// 一次 tick 的到期决策（v2 M4 §4.3）：
+    /// - **暂停分支按 schedule_kind 分派**（P2-4/P2-6）：interval 类维持 v1
+    ///   顺延；daily/once 到期**不顺延、不触发**，到期即记 skipped（记后推进
+    ///   next_due 防每 tick 重复判定；同款清空未过期 snooze_until，P3-5）；
+    ///   todo 派生行 v1 行为不变（暂停不处置）；
+    /// - 常规分支：窗口（v1）→ **补跑窗**（daily/once：now − next_due ≤ 15min
+    ///   正常触发（last_triggered 记实际时刻）；超窗 skipped + 推进 + 记
+    ///   last_skipped_at）→ 去重 → 触发（next_due 按 kind 推进、清 snooze）。
+    ///
+    /// 返回 `(fired, skipped)`：内存的 last_triggered_at / last_skipped_at /
+    /// next_due 已同步更新，db 落库由调用方（run_tick / persist_skipped）负责。
+    pub fn collect_due(
+        &mut self,
+        now_ms: i64,
+        now_ts: &str,
+        minute_of_day: i64,
+    ) -> (Vec<FiredRule>, Vec<SkippedRule>) {
         if self.paused {
-            // TC-RM-08：暂停期间不触发；到期周期规则倒计时顺延（恢复后不瞬间补弹）。
+            let mut skipped = Vec::new();
             for rs in &mut self.rules {
-                if rs.rule.interval_minutes > 0 && now_ms >= rs.next_due_ms {
-                    rs.next_due_ms = now_ms.saturating_add(rs.rule.interval_minutes * 60_000);
+                if !rs.rule.enabled || rs.rule.kind == "todo" || now_ms < rs.next_due_ms {
+                    continue;
+                }
+                match rs.rule.schedule_kind.as_str() {
+                    "daily" | "once" => {
+                        let sched = rs.next_due_ms;
+                        let rule = rs.rule.clone();
+                        rs.rule.last_skipped_at = Some(now_ts.to_string());
+                        rs.rule.snooze_until = None; // P3-5
+                        rs.next_due_ms = advance_after_fire(&rule, now_ms);
+                        skipped.push(SkippedRule {
+                            id: rule.id,
+                            label: rule.label.clone(),
+                            action_type: rule.action_type.clone(),
+                            scheduled_at_ms: sched,
+                            reason: SkipReason::Paused,
+                        });
+                    }
+                    // interval：v1 顺延（恢复后不瞬间补弹，TC-RM-08）
+                    _ => {
+                        rs.next_due_ms = now_ms.saturating_add(rs.rule.interval_minutes * 60_000);
+                    }
                 }
             }
-            return Vec::new();
+            return (Vec::new(), skipped);
         }
         let mut fired = Vec::new();
+        let mut skipped = Vec::new();
         for rs in &mut self.rules {
             if !rs.rule.enabled || now_ms < rs.next_due_ms {
                 continue;
             }
             // M7：todo 派生规则的 start_time 是绝对时刻（非 HH:MM 窗口），
-            // 到期即触发，不走活跃窗口判定。
+            // 到期即触发，不走活跃窗口判定。daily/once 行 start/end 已被
+            // validate 清空（P2-6），窗口判定天然放行。
             if rs.rule.kind != "todo" {
                 let start = rs.rule.start_time.as_deref().and_then(parse_hhmm);
                 let end = rs.rule.end_time.as_deref().and_then(parse_hhmm);
@@ -333,25 +637,46 @@ impl RemindersState {
                     continue;
                 }
             }
+            let sched = rs.next_due_ms;
+            // 补跑窗（§4.3：daily/once 两 kind、notify/exec 两动作同窗；interval
+            // 维持 v1 错过不补）
+            if rs.rule.kind != "todo"
+                && matches!(rs.rule.schedule_kind.as_str(), "daily" | "once")
+                && now_ms.saturating_sub(sched) > CATCHUP_WINDOW_MS
+            {
+                let rule = rs.rule.clone();
+                rs.rule.last_skipped_at = Some(now_ts.to_string());
+                rs.rule.snooze_until = None; // P3-5：skipped 判定清未过期 snooze
+                rs.next_due_ms = advance_after_fire(&rule, now_ms);
+                skipped.push(SkippedRule {
+                    id: rule.id,
+                    label: rule.label.clone(),
+                    action_type: rule.action_type.clone(),
+                    scheduled_at_ms: sched,
+                    reason: SkipReason::MissedWindow,
+                });
+                continue;
+            }
             let last = rs.rule.last_triggered_at.as_deref().and_then(parse_rfc3339_ms);
             if !dedup_ok(last, now_ms) {
                 continue; // 去重窗口内：不触发也不推进（到点后等去重窗口过去）
             }
             let mut rule = rs.rule.clone();
-            rs.next_due_ms = if rule.interval_minutes > 0 {
-                now_ms.saturating_add(rule.interval_minutes * 60_000)
-            } else {
-                i64::MAX
-            };
+            rs.next_due_ms = advance_after_fire(&rule, now_ms);
             rule.last_triggered_at = Some(now_ts.to_string());
+            rule.snooze_until = None; // 触发清空 snooze（内存；db 由 mark_triggered 清）
             rs.rule = rule.clone();
-            fired.push(rule);
+            fired.push(FiredRule {
+                rule,
+                scheduled_at_ms: sched,
+            });
         }
-        fired
+        (fired, skipped)
     }
 
     /// 手动"试一试"（面板按钮）：跳过倒计时与窗口（预览语义），仍受暂停与
-    /// 3 分钟去重约束；返回 (状态, 触发规则)。
+    /// 3 分钟去重约束；返回 (状态, 触发规则)。v2 M4：推进按 schedule_kind
+    /// 分派（P3-9：exec 行 = 真实执行一次，结果气泡同正常触发）。
     pub fn force_fire_one(
         &mut self,
         id: i64,
@@ -368,19 +693,44 @@ impl RemindersState {
         if !dedup_ok(last, now_ms) {
             return Ok(("dedup", None));
         }
-        rs.next_due_ms = if rs.rule.interval_minutes > 0 {
-            now_ms.saturating_add(rs.rule.interval_minutes * 60_000)
-        } else {
-            i64::MAX
-        };
+        rs.next_due_ms = advance_after_fire(&rs.rule, now_ms);
         rs.rule.last_triggered_at = Some(now_ts.to_string());
         Ok(("fired", Some(rs.rule.clone())))
+    }
+
+    /// 「跳过本次」（§4.3）：内存 next_due 即时推进（interval → +interval；
+    /// daily → 下个匹配日；once → MAX），不触发不记录；**snooze_until 未过期
+    /// 则一并清空（N2：写表 + 内存同清——防 reload 因 snooze 优先级复活被
+    /// 跳过的重发）**。返回是否清了 snooze（调用方据此写表）。
+    pub fn skip_once(&mut self, id: i64, now_ms: i64) -> Result<bool, String> {
+        let Some(rs) = self.rules.iter_mut().find(|rs| rs.rule.id == id) else {
+            return Err(format!("task #{id} 不存在"));
+        };
+        let snooze_active = rs
+            .rule
+            .snooze_until
+            .as_deref()
+            .and_then(parse_rfc3339_ms)
+            .is_some_and(|s| s > now_ms);
+        // 跳过的对象是"下一个到期"：以 max(now, next_due) 为基推进
+        let base = now_ms.max(rs.next_due_ms);
+        rs.next_due_ms = advance_after_fire(&rs.rule, base);
+        if snooze_active {
+            rs.rule.snooze_until = None;
+        }
+        Ok(snooze_active)
     }
 }
 
 // ---------------------------------------------------------------------------
 // db 读写
 // ---------------------------------------------------------------------------
+
+/// 全字段 SELECT（v2 M4 +7 列）。
+const RULE_COLUMNS: &str = "id, kind, label, interval_minutes, start_time, end_time, enabled, \
+     use_fireworks, last_triggered_at, source_todo_id, todo_due_at, created_at, \
+     action_type, action_params, schedule_kind, schedule_at, schedule_weekdays, \
+     snooze_until, last_skipped_at";
 
 fn row_to_rule(row: &rusqlite::Row<'_>) -> rusqlite::Result<ReminderRule> {
     Ok(ReminderRule {
@@ -396,16 +746,21 @@ fn row_to_rule(row: &rusqlite::Row<'_>) -> rusqlite::Result<ReminderRule> {
         source_todo_id: row.get("source_todo_id")?,
         todo_due_at: row.get("todo_due_at")?,
         created_at: row.get("created_at")?,
+        action_type: row.get("action_type")?,
+        action_params: row.get("action_params")?,
+        schedule_kind: row.get("schedule_kind")?,
+        schedule_at: row.get("schedule_at")?,
+        schedule_weekdays: row.get("schedule_weekdays")?,
+        snooze_until: row.get("snooze_until")?,
+        last_skipped_at: row.get("last_skipped_at")?,
     })
 }
 
 pub fn load_rules(conn: &Connection) -> Result<Vec<ReminderRule>, String> {
     let mut stmt = conn
-        .prepare(
-            "SELECT id, kind, label, interval_minutes, start_time, end_time, enabled, \
-             use_fireworks, last_triggered_at, source_todo_id, todo_due_at, created_at \
-             FROM reminders ORDER BY id",
-        )
+        .prepare(&format!(
+            "SELECT {RULE_COLUMNS} FROM reminders ORDER BY id"
+        ))
         .map_err(|e| format!("load reminders: {e}"))?;
     let rows = stmt
         .query_map([], row_to_rule)
@@ -436,23 +791,48 @@ pub fn load_active_rules(conn: &Connection) -> Result<Vec<ReminderRule>, String>
 
 fn rule_by_id(conn: &Connection, id: i64) -> Result<ReminderRule, String> {
     conn.query_row(
-        "SELECT id, kind, label, interval_minutes, start_time, end_time, enabled, \
-         use_fireworks, last_triggered_at, source_todo_id, todo_due_at, created_at \
-         FROM reminders WHERE id = ?1",
+        &format!("SELECT {RULE_COLUMNS} FROM reminders WHERE id = ?1"),
         [id],
         row_to_rule,
     )
     .map_err(|e| format!("read reminder #{id}: {e}"))
 }
 
-/// upsert 校验（与前端 validateReminderInput 同口径）。
-/// M4 P2 ③（M7 清偿）：todo kind 恒 interval=0（一次性，spec §5.4），
-/// start/end 为绝对时刻 "YYYY-MM-DDTHH:MM"（派生规则）；非 todo kind 间隔
-/// 1-1440、start/end 为 HH:MM 窗口。
-pub fn validate_input(input: &ReminderInput) -> Result<String, String> {
+/// v2 M4 normalize + 校验（Rust 权威，前端同规则预检；§4.2 P2-6）：
+/// - action_type ∈ {notify, exec}（缺省 notify）；schedule_kind ∈
+///   {interval, daily, once}（缺省 interval）；
+/// - exec：action_params 必填 JSON 对象且过 ExecExecutor::validate
+///   （JSON 解析失败拒绝，TC-M4-01-4）；kind 强制 custom（notify-kind 仅对
+///   notify 有意义）；清 start/end 窗口；
+/// - **kind 切换重置无关字段**：interval 行清 schedule_at/weekdays；daily/once
+///   行清 start_time/end_time 窗口（防遗留窗口使 in_window 判定卡住导致误
+///   skipped）；
+/// - daily/once 行 interval_minutes 恒 0（P2-6 存储约定）；daily 的
+///   schedule_at = "HH:MM" + weekdays 可选 JSON [1-7]（空 = 每天）；once 的
+///   schedule_at = "YYYY-MM-DDTHH:MM" 且**过去时刻拒绝**（防创建即意外执行）；
+/// - todo 派生行：v1 校验不变（interval 恒 0、绝对时刻），锁定 notify/interval。
+pub fn normalize_input(input: &ReminderInput) -> Result<NormalizedRule, String> {
     const KINDS: &[&str] = &["hydration", "rest", "custom", "todo"];
+    let action_type = match input.action_type.as_str() {
+        "" | "notify" => "notify",
+        "exec" => "exec",
+        other => return Err(format!("action_type 非法：{other}（应为 notify/exec）")),
+    };
+    let schedule_kind = match input.schedule_kind.as_str() {
+        "" | "interval" => "interval",
+        "daily" => "daily",
+        "once" => "once",
+        other => {
+            return Err(format!(
+                "schedule_kind 非法：{other}（应为 interval/daily/once）"
+            ))
+        }
+    };
     if !KINDS.contains(&input.kind.as_str()) {
-        return Err(format!("kind 非法：{}（应为 hydration/rest/custom/todo）", input.kind));
+        return Err(format!(
+            "kind 非法：{}（应为 hydration/rest/custom/todo）",
+            input.kind
+        ));
     }
     // 单行化 + trim（与展示端 sanitizeBubbleText 同口径）
     let label: String = input.label.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -462,8 +842,9 @@ pub fn validate_input(input: &ReminderInput) -> Result<String, String> {
     if label.chars().count() > 140 {
         return Err("label 超长（≤140 字符）".into());
     }
+
+    // todo 派生行：M7 语义不变（锁定 notify / interval / 0）
     if input.kind == "todo" {
-        // M4 P2 ③：todo 恒 0（唯一例外区间，>0 一律拒绝）
         if input.interval_minutes != 0 {
             return Err(format!(
                 "interval_minutes 非法：{}（todo kind 恒为 0，一次性提醒）",
@@ -482,40 +863,198 @@ pub fn validate_input(input: &ReminderInput) -> Result<String, String> {
         };
         check_abs("start_time", &input.start_time)?;
         check_abs("end_time", &input.end_time)?;
-        return Ok(label);
+        return Ok(NormalizedRule {
+            kind: "todo".into(),
+            label,
+            action_type: "notify".into(),
+            action_params: None,
+            schedule_kind: "interval".into(),
+            schedule_at: None,
+            schedule_weekdays: None,
+            interval_minutes: 0,
+            start_time: input.start_time.clone().filter(|s| !s.is_empty()),
+            end_time: input.end_time.clone().filter(|s| !s.is_empty()),
+            enabled: input.enabled,
+            use_fireworks: input.use_fireworks,
+        });
     }
-    if !(1..=MAX_INTERVAL_MINUTES).contains(&input.interval_minutes) {
-        return Err(format!(
-            "interval_minutes 非法：{}（{} kind 应为 1-{}）",
-            input.interval_minutes, input.kind, MAX_INTERVAL_MINUTES
-        ));
+
+    // exec：action_params JSON 解析 + 执行器校验（TC-M4-01-4/07）——经分派
+    // 注册表走 trait validate（§4.4 注册表为唯一分派入口）
+    let mut action_params = None;
+    if action_type == "exec" {
+        let text = input
+            .action_params
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| "exec 需要 action_params（JSON 对象：command 等）".to_string())?;
+        let v = crate::action_exec::parse_exec_params(text)?;
+        let executor = crate::action_exec::executor_for("exec")
+            .ok_or_else(|| "未知动作类型：exec".to_string())?;
+        executor.validate(&v)?;
+        action_params = Some(text.to_string());
     }
-    if let Some(s) = &input.start_time {
-        parse_hhmm(s).ok_or_else(|| format!("start_time 非法：{s}（应为 HH:MM）"))?;
+
+    // 非 todo 的 kind：exec 行强制 custom
+    let kind = if action_type == "exec" {
+        "custom".to_string()
+    } else {
+        input.kind.clone()
+    };
+
+    match schedule_kind {
+        "daily" => {
+            let at = input
+                .schedule_at
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| "schedule_at 不能为空（daily 应为 HH:MM）".to_string())?;
+            if parse_hhmm(at).is_none() {
+                return Err(format!("schedule_at 非法：{at}（daily 应为 HH:MM）"));
+            }
+            let weekdays = normalize_weekdays(input.schedule_weekdays.as_deref())?;
+            Ok(NormalizedRule {
+                kind,
+                label,
+                action_type: action_type.to_string(),
+                action_params,
+                schedule_kind: "daily".into(),
+                schedule_at: Some(at.to_string()),
+                schedule_weekdays: weekdays,
+                interval_minutes: 0, // P2-6
+                start_time: None,     // P2-6：清窗口
+                end_time: None,
+                enabled: input.enabled,
+                use_fireworks: input.use_fireworks,
+            })
+        }
+        "once" => {
+            let at = input
+                .schedule_at
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| "schedule_at 不能为空（once 应为 YYYY-MM-DDTHH:MM）".to_string())?;
+            let at_ms = parse_due_like_ms(at)
+                .ok_or_else(|| format!("schedule_at 非法：{at}（once 应为 YYYY-MM-DDTHH:MM）"))?;
+            if at_ms <= now_ms() {
+                return Err(format!(
+                    "schedule_at 已是过去时刻：{at}（once 须为未来时刻，防创建即意外执行）"
+                ));
+            }
+            Ok(NormalizedRule {
+                kind,
+                label,
+                action_type: action_type.to_string(),
+                action_params,
+                schedule_kind: "once".into(),
+                schedule_at: Some(at.to_string()),
+                schedule_weekdays: None,
+                interval_minutes: 0, // P2-6
+                start_time: None,    // P2-6：清窗口
+                end_time: None,
+                enabled: input.enabled,
+                use_fireworks: input.use_fireworks,
+            })
+        }
+        // interval：v1 语义（1-1440；HH:MM 窗口；清 schedule_at/weekdays）
+        _ => {
+            if !(1..=MAX_INTERVAL_MINUTES).contains(&input.interval_minutes) {
+                return Err(format!(
+                    "interval_minutes 非法：{}（{} kind 应为 1-{}）",
+                    input.interval_minutes, input.kind, MAX_INTERVAL_MINUTES
+                ));
+            }
+            if let Some(s) = &input.start_time {
+                parse_hhmm(s).ok_or_else(|| format!("start_time 非法：{s}（应为 HH:MM）"))?;
+            }
+            if let Some(e) = &input.end_time {
+                parse_hhmm(e).ok_or_else(|| format!("end_time 非法：{e}（应为 HH:MM）"))?;
+            }
+            // exec 行不消费时间窗（表单不提供）：清掉
+            let (st, en) = if action_type == "exec" {
+                (None, None)
+            } else {
+                (
+                    input.start_time.clone().filter(|s| !s.is_empty()),
+                    input.end_time.clone().filter(|s| !s.is_empty()),
+                )
+            };
+            Ok(NormalizedRule {
+                kind,
+                label,
+                action_type: action_type.to_string(),
+                action_params,
+                schedule_kind: "interval".into(),
+                schedule_at: None,      // P2-6：interval 行清定点字段
+                schedule_weekdays: None,
+                interval_minutes: input.interval_minutes,
+                start_time: st,
+                end_time: en,
+                enabled: input.enabled,
+                use_fireworks: input.use_fireworks,
+            })
+        }
     }
-    if let Some(e) = &input.end_time {
-        parse_hhmm(e).ok_or_else(|| format!("end_time 非法：{e}（应为 HH:MM）"))?;
+}
+
+/// weekdays JSON 文本 → 规范化（空数组/None → None = 每天；非法元素/格式拒绝）。
+fn normalize_weekdays(s: Option<&str>) -> Result<Option<String>, String> {
+    let Some(text) = s.map(str::trim).filter(|t| !t.is_empty()) else {
+        return Ok(None);
+    };
+    let parsed: Vec<i64> = serde_json::from_str(text)
+        .map_err(|e| format!("schedule_weekdays 非法：{e}（应为 JSON 数组如 [1,3,5]）"))?;
+    let mut days: Vec<u32> = Vec::new();
+    for d in parsed {
+        if !(1..=7).contains(&d) {
+            return Err(format!("schedule_weekdays 元素非法：{d}（应为 1-7，1=周一…7=周日）"));
+        }
+        let d = d as u32;
+        if !days.contains(&d) {
+            days.push(d);
+        }
     }
-    Ok(label)
+    if days.is_empty() {
+        return Ok(None); // 空 = 每天
+    }
+    days.sort_unstable();
+    serde_json::to_string(&days)
+        .map(Some)
+        .map_err(|e| format!("serialize weekdays: {e}"))
+}
+
+/// upsert 校验（v1 兼容入口：返回 normalize 后的 label；insert/update 走
+/// `normalize_input` 全字段；测试与外部校验入口保留）。
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn validate_input(input: &ReminderInput) -> Result<String, String> {
+    normalize_input(input).map(|n| n.label)
 }
 
 pub fn insert_rule(conn: &Connection, input: &ReminderInput) -> Result<ReminderRule, String> {
-    let label = validate_input(input)?;
+    let n = normalize_input(input)?;
     let now = now_rfc3339();
-    let start = input.start_time.as_deref().filter(|s| !s.is_empty());
-    let end = input.end_time.as_deref().filter(|s| !s.is_empty());
     conn.execute(
         "INSERT INTO reminders (kind, label, interval_minutes, start_time, end_time, \
-         enabled, use_fireworks, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+         enabled, use_fireworks, created_at, action_type, action_params, schedule_kind, \
+         schedule_at, schedule_weekdays) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, \
+         ?11, ?12, ?13)",
         params![
-            input.kind,
-            label,
-            input.interval_minutes,
-            start,
-            end,
-            input.enabled as i64,
-            input.use_fireworks as i64,
-            now
+            n.kind,
+            n.label,
+            n.interval_minutes,
+            n.start_time,
+            n.end_time,
+            n.enabled as i64,
+            n.use_fireworks as i64,
+            now,
+            n.action_type,
+            n.action_params,
+            n.schedule_kind,
+            n.schedule_at,
+            n.schedule_weekdays,
         ],
     )
     .map_err(|e| format!("insert reminder: {e}"))?;
@@ -527,26 +1066,32 @@ pub fn update_rule(
     id: i64,
     input: &ReminderInput,
 ) -> Result<ReminderRule, String> {
-    let label = validate_input(input)?;
-    let start = input.start_time.as_deref().filter(|s| !s.is_empty());
-    let end = input.end_time.as_deref().filter(|s| !s.is_empty());
-    let n = conn
+    let n = normalize_input(input)?;
+    let rows = conn
         .execute(
             "UPDATE reminders SET kind = ?1, label = ?2, interval_minutes = ?3, \
-             start_time = ?4, end_time = ?5, enabled = ?6, use_fireworks = ?7 WHERE id = ?8",
+             start_time = ?4, end_time = ?5, enabled = ?6, use_fireworks = ?7, \
+             action_type = ?9, action_params = ?10, schedule_kind = ?11, \
+             schedule_at = ?12, schedule_weekdays = ?13, snooze_until = NULL \
+             WHERE id = ?8",
             params![
-                input.kind,
-                label,
-                input.interval_minutes,
-                start,
-                end,
-                input.enabled as i64,
-                input.use_fireworks as i64,
-                id
+                n.kind,
+                n.label,
+                n.interval_minutes,
+                n.start_time,
+                n.end_time,
+                n.enabled as i64,
+                n.use_fireworks as i64,
+                id,
+                n.action_type,
+                n.action_params,
+                n.schedule_kind,
+                n.schedule_at,
+                n.schedule_weekdays,
             ],
         )
         .map_err(|e| format!("update reminder #{id}: {e}"))?;
-    if n == 0 {
+    if rows == 0 {
         return Err(format!("reminder #{id} 不存在"));
     }
     rule_by_id(conn, id)
@@ -580,10 +1125,11 @@ pub fn ack_log(conn: &Connection, log_id: i64, acked_at: &str) -> Result<(), Str
     Ok(())
 }
 
-/// 自动消失 / 烟花结束回报（via = "auto" | "fireworks"；TC-RM-03/09）。
+/// 自动消失 / 烟花结束 / snooze 结案回报（via = "auto" | "fireworks" | "snooze"；
+/// TC-RM-03/09 + v2 M4 TC-M4-13）。
 pub fn dismiss_log(conn: &Connection, log_id: i64, via: &str) -> Result<(), String> {
-    if via != "auto" && via != "fireworks" {
-        return Err(format!("dismissed_via 非法：{via}（应为 auto/fireworks）"));
+    if via != "auto" && via != "fireworks" && via != "snooze" {
+        return Err(format!("dismissed_via 非法：{via}（应为 auto/fireworks/snooze）"));
     }
     conn.execute(
         "UPDATE reminder_logs SET dismissed_via = ?2 WHERE id = ?1 AND dismissed_via IS NULL",
@@ -593,14 +1139,153 @@ pub fn dismiss_log(conn: &Connection, log_id: i64, via: &str) -> Result<(), Stri
     Ok(())
 }
 
-/// 按天更新 last_triggered_at（触发路径落库）。
+/// 按天更新 last_triggered_at（触发路径落库）。v2 M4：触发即清 snooze_until
+/// （§4.3——snooze 重发触发时清空，按 kind 常规推进已由内存完成）。
 pub fn mark_triggered(conn: &Connection, id: i64, ts: &str) -> Result<(), String> {
     conn.execute(
-        "UPDATE reminders SET last_triggered_at = ?2 WHERE id = ?1",
+        "UPDATE reminders SET last_triggered_at = ?2, snooze_until = NULL WHERE id = ?1",
         params![id, ts],
     )
     .map_err(|e| format!("mark triggered #{id}: {e}"))?;
     Ok(())
+}
+
+/// v2 M4（N1/P3-5）：skipped 判定落库——写 last_skipped_at（与 last_triggered
+/// 分离，防 3min dedup 拒绝手动补跑）+ 清 snooze_until（未过期同清）。
+/// next_due 推进不持久化（内存态；reload 由 last_skipped_at 重算，与 v1
+/// last_triggered 同构）。
+pub fn mark_skipped(conn: &Connection, id: i64, ts: &str) -> Result<(), String> {
+    conn.execute(
+        "UPDATE reminders SET last_skipped_at = ?2, snooze_until = NULL WHERE id = ?1",
+        params![id, ts],
+    )
+    .map_err(|e| format!("mark skipped #{id}: {e}"))?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// v2 M4：action_logs（exec 执行历史；notify 维持 reminder_logs 不双写）
+// ---------------------------------------------------------------------------
+
+/// action_logs 行（serde 与 TS `ActionLog` 一致）。
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct ActionLog {
+    pub id: i64,
+    pub reminder_id: i64,
+    /// 冗余快照（规则删除后类型仍可读）。
+    pub action_type: String,
+    pub status: String,
+    /// i18n 模板键（`task.summary.*`；参数化键 `key:arg`——P3-3 展示按语言渲染）。
+    pub summary: String,
+    pub output_tail: Option<String>,
+    pub exit_code: Option<i32>,
+    pub started_at: String,
+    pub finished_at: Option<String>,
+    pub scheduled_at: Option<String>,
+}
+
+/// insert running 态日志（spawn 时刻写；summary 置空串，终态回写补齐）。
+pub fn insert_action_log_running(
+    conn: &Connection,
+    reminder_id: i64,
+    action_type: &str,
+    started_at: &str,
+    scheduled_at: &str,
+) -> Result<i64, String> {
+    conn.execute(
+        "INSERT INTO action_logs (reminder_id, action_type, status, summary, started_at, scheduled_at) \
+         VALUES (?1, ?2, 'running', '', ?3, ?4)",
+        params![reminder_id, action_type, started_at, scheduled_at],
+    )
+    .map_err(|e| format!("insert action_log: {e}"))?;
+    Ok(conn.last_insert_rowid())
+}
+
+/// insert skipped 态日志（超窗/暂停两来源；finished_at = 判定时刻）。
+pub fn insert_action_log_skipped(
+    conn: &Connection,
+    reminder_id: i64,
+    summary_key: &str,
+    scheduled_at: &str,
+    finished_at: &str,
+) -> Result<i64, String> {
+    conn.execute(
+        "INSERT INTO action_logs (reminder_id, action_type, status, summary, started_at, \
+         finished_at, scheduled_at) VALUES (?1, 'exec', 'skipped', ?2, ?3, ?3, ?4)",
+        params![reminder_id, summary_key, finished_at, scheduled_at],
+    )
+    .map_err(|e| format!("insert skipped action_log: {e}"))?;
+    Ok(conn.last_insert_rowid())
+}
+
+/// 终态回写（ok/failed；v2 M4 执行链完成路径）。
+/// R2（TC-M4-15-1 P2 竞态修复）：**`WHERE status='running'` 守卫**——只写仍
+/// 在 running 的行。退出处置（abort）先行结案为 interrupted 后，被杀进程
+/// 唤醒的完成回调在此被拦下（0 行更新），「App 退出中断」summary 不被
+/// 通用 failed 覆盖；反向（自然完成先落库）同理不被 abort 覆盖——两个
+/// 写入方以行状态为单调屏障，天然与 N7 登记表语义互补。
+pub fn finish_action_log_with(
+    conn: &Connection,
+    log_id: i64,
+    status: &str,
+    summary: &str,
+    output_tail: Option<&str>,
+    exit_code: Option<i32>,
+    finished_at: &str,
+) -> Result<(), String> {
+    conn.execute(
+        "UPDATE action_logs SET status = ?2, summary = ?3, output_tail = ?4, \
+         exit_code = ?5, finished_at = ?6 WHERE id = ?1 AND status = 'running'",
+        params![log_id, status, summary, output_tail, exit_code, finished_at],
+    )
+    .map_err(|e| format!("finish action_log {log_id}: {e}"))?;
+    Ok(())
+}
+
+/// 历史页分页查询（倒序 50/页；reminder_id 可选过滤）。
+pub fn list_action_logs(
+    conn: &Connection,
+    reminder_id: Option<i64>,
+    page: u64,
+) -> Result<(Vec<ActionLog>, i64), String> {
+    const PAGE_SIZE: i64 = 50;
+    let page = page.max(1);
+    let offset = (page as i64 - 1) * PAGE_SIZE;
+    let (where_clause, bind_id): (&str, Option<i64>) = match reminder_id {
+        Some(id) => ("WHERE reminder_id = ?1", Some(id)),
+        None => ("", None),
+    };
+    let total: i64 = conn
+        .query_row(
+            &format!("SELECT COUNT(*) FROM action_logs {where_clause}"),
+            rusqlite::params_from_iter(bind_id),
+            |r| r.get(0),
+        )
+        .map_err(|e| format!("count action_logs: {e}"))?;
+    let mut stmt = conn
+        .prepare(&format!(
+            "SELECT id, reminder_id, action_type, status, summary, output_tail, exit_code, \
+             started_at, finished_at, scheduled_at FROM action_logs {where_clause} \
+             ORDER BY id DESC LIMIT {PAGE_SIZE} OFFSET {offset}"
+        ))
+        .map_err(|e| format!("list action_logs: {e}"))?;
+    let rows = stmt
+        .query_map(rusqlite::params_from_iter(bind_id), |row| {
+            Ok(ActionLog {
+                id: row.get(0)?,
+                reminder_id: row.get(1)?,
+                action_type: row.get(2)?,
+                status: row.get(3)?,
+                summary: row.get(4)?,
+                output_tail: row.get(5)?,
+                exit_code: row.get(6)?,
+                started_at: row.get(7)?,
+                finished_at: row.get(8)?,
+                scheduled_at: row.get(9)?,
+            })
+        })
+        .map_err(|e| format!("list action_logs: {e}"))?;
+    Ok((rows.filter_map(|r| r.ok()).collect(), total))
 }
 
 /// 历史统计（TC-RM-13）：按 kind 聚合（today = 本地当日触发数）。
@@ -660,8 +1345,10 @@ pub fn set_fireworks_global(conn: &Connection, on: bool) {
 // 触发编排（tick 与 trigger_now 共用）
 // ---------------------------------------------------------------------------
 
-/// 触发落库 + 发事件（`reminder://trigger` 广播，pet 窗口消费）。
-fn fire_and_notify(app: &tauri::AppHandle, fired: &[ReminderRule]) {
+/// notify 触发落库 + 发事件（`reminder://trigger` 广播，pet 窗口消费）。
+/// v2 M4：仅 notify 走本路径（exec 走 action_exec 执行链——action_logs 记账，
+/// 不写 reminder_logs，§4.13 不双写）。泛型 Runtime：mock runtime 可直调。
+fn fire_and_notify<R: tauri::Runtime>(app: &tauri::AppHandle<R>, fired: &[ReminderRule]) {
     let Some(db) = app.try_state::<Mutex<Connection>>() else {
         return;
     };
@@ -696,6 +1383,42 @@ fn fire_and_notify(app: &tauri::AppHandle, fired: &[ReminderRule]) {
             rule.id, rule.kind, rule.label, rule.use_fireworks, log_id, ts
         );
     }
+}
+
+/// skipped 判定落库（N1 闭环的调用方半段）：写 last_skipped_at + 清 snooze；
+/// exec 型落 action_logs(status='skipped')，notify 型不落库（错过无害）。
+fn persist_skipped<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    skipped: &[SkippedRule],
+    now_ts: &str,
+) {
+    let Some(db) = app.try_state::<Mutex<Connection>>() else {
+        return;
+    };
+    let Ok(conn) = db.lock() else {
+        return;
+    };
+    for s in skipped {
+        let _ = mark_skipped(&conn, s.id, now_ts);
+        if s.action_type == "exec" {
+            let key = match s.reason {
+                SkipReason::MissedWindow => crate::action_exec::SUMMARY_MISSED,
+                SkipReason::Paused => crate::action_exec::SUMMARY_PAUSED,
+            };
+            let sched = ms_to_rfc3339(s.scheduled_at_ms)
+                .unwrap_or_else(|| now_ts.to_string());
+            if let Err(e) = insert_action_log_skipped(&conn, s.id, key, &sched, now_ts) {
+                plog!("[pulsepet] insert skipped log for #{} failed: {e}", s.id);
+            }
+        }
+        plog!(
+            "[pulsepet] task #{} ({:?}) skipped ({:?})",
+            s.id,
+            s.label,
+            s.reason
+        );
+    }
+    plog!("[pulsepet] {} task(s) skipped (missed window/paused) recorded", skipped.len());
 }
 
 /// 计算烟花 play payload（DESIGN §5.3 用户补充需求）：
@@ -876,9 +1599,14 @@ pub fn tick_ms() -> u64 {
         .unwrap_or(DEFAULT_TICK_MS)
 }
 
-/// 启动调度循环：tokio interval + `MissedTickBehavior::Skip`（TC-RM-02）。
+/// 启动调度循环：tokio interval + `MissedTickBehavior::Skip`（TC-RM-02）；
+/// v2 M4 select 完成通知通道——exec 完成回调出队等待任务（pending_execs）。
 pub fn spawn_scheduler(app: tauri::AppHandle, state: Arc<Mutex<RemindersState>>) {
     tauri::async_runtime::spawn(async move {
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<()>(16);
+        if let Ok(mut st) = state.lock() {
+            st.slot_free_tx = Some(tx);
+        }
         let mut interval =
             tokio::time::interval(std::time::Duration::from_millis(tick_ms()));
         // 睡眠恢复不补发：错过的 tick 直接跳过，等下一个整 tick（TC-RM-02/C10）
@@ -887,24 +1615,63 @@ pub fn spawn_scheduler(app: tauri::AppHandle, state: Arc<Mutex<RemindersState>>)
         interval.tick().await;
         plog!("[pulsepet] reminder scheduler started (tick {}ms)", tick_ms());
         loop {
-            interval.tick().await;
-            run_tick(&app, &state);
+            tokio::select! {
+                _ = interval.tick() => run_tick(&app, &state),
+                _ = rx.recv() => crate::action_exec::drain_pending_execs(&app, &state),
+            }
         }
     });
 }
 
-fn run_tick(app: &tauri::AppHandle, state: &Arc<Mutex<RemindersState>>) {
+fn run_tick<R: tauri::Runtime>(app: &tauri::AppHandle<R>, state: &Arc<Mutex<RemindersState>>) {
     let now = now_ms();
     let ts = now_rfc3339();
     let minute = now_minute_of_day();
-    let fired = {
+    let (fired, skipped) = {
         let Ok(mut st) = state.lock() else {
             return;
         };
         st.collect_due(now, &ts, minute)
     };
-    if !fired.is_empty() {
-        fire_and_notify(app, &fired);
+    if !skipped.is_empty() {
+        persist_skipped(app, &skipped, &ts);
+    }
+    // 触发分派（§4.3）：notify → 既有气泡/烟花链路；exec → ActionExecutor 链
+    let notify: Vec<ReminderRule> = fired
+        .iter()
+        .filter(|f| f.rule.action_type != "exec")
+        .map(|f| f.rule.clone())
+        .collect();
+    if !notify.is_empty() {
+        fire_and_notify(app, &notify);
+    }
+    for f in fired.iter().filter(|f| f.rule.action_type == "exec") {
+        // R5（tester R4 P2）：**排队中去重**——collect_due fire 与 dispatch 落库
+        // 之间被 CRUD reload 插入时，reload 重建的内存无 handled 标记 → 该规则
+        // next_due 回到过去时刻 → 下个 tick 重复 fire。此处按 id 查等待队列：
+        // 已排队 = 本周期已认领，跳过分派并补 mark_triggered 落库（handled
+        // 持久化，此后任意 reload 不再复活）。
+        let already_pending = state
+            .lock()
+            .map(|st| {
+                st.pending_execs
+                    .iter()
+                    .any(|p| p.rule.id == f.rule.id)
+            })
+            .unwrap_or(false);
+        if already_pending {
+            if let Some(db) = app.try_state::<Mutex<Connection>>() {
+                if let Ok(conn) = db.lock() {
+                    let _ = mark_triggered(&conn, f.rule.id, &ts);
+                }
+            }
+            plog!(
+                "[pulsepet] exec task #{} already pending, skip re-dispatch (reload race guard)",
+                f.rule.id
+            );
+            continue;
+        }
+        crate::action_exec::dispatch_exec(app, state, &f.rule, f.scheduled_at_ms);
     }
 }
 
@@ -1006,20 +1773,35 @@ pub fn reminders_stats(app: tauri::AppHandle) -> Result<Vec<ReminderStat>, Strin
 }
 
 /// 手动触发（面板"试一试"）：返回 "fired" | "dedup" | "paused"。
+/// v2 M4（P3-9）：exec 行 = 真实执行一次（接 ActionExecutor 分派，受暂停/
+/// 去重约束，结果气泡同正常触发）；notify 行走既有气泡/烟花链路。
+/// 泛型 Runtime：可在 tauri::test mock runtime 下直调（todos 命令先例）。
 #[tauri::command]
-pub fn reminders_trigger_now(
-    app: tauri::AppHandle,
+pub fn reminders_trigger_now<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     state: tauri::State<'_, Arc<Mutex<RemindersState>>>,
     id: i64,
 ) -> Result<String, String> {
     let now = now_ms();
     let ts = now_rfc3339();
+    let sched = state
+        .lock()
+        .map_err(|e| format!("state lock: {e}"))?
+        .rules
+        .iter()
+        .find(|rs| rs.rule.id == id)
+        .map(|rs| rs.next_due_ms)
+        .unwrap_or(now);
     let (status, rule) = state
         .lock()
         .map_err(|e| format!("state lock: {e}"))?
         .force_fire_one(id, now, &ts)?;
     if let Some(rule) = rule {
-        fire_and_notify(&app, &[rule]);
+        if rule.action_type == "exec" {
+            crate::action_exec::dispatch_exec(&app, state.inner(), &rule, sched);
+        } else {
+            fire_and_notify(&app, &[rule]);
+        }
     }
     Ok(status.to_string())
 }
@@ -1038,6 +1820,111 @@ pub fn reminders_dismiss(app: tauri::AppHandle, log_id: i64, via: String) -> Res
     let db = app.state::<Mutex<Connection>>();
     let conn = db.lock().map_err(|e| format!("db lock: {e}"))?;
     dismiss_log(&conn, log_id, &via)
+}
+
+/// v2 M4 snooze（TC-M4-13，仅 notify）：气泡按钮「稍后 10 分钟」→
+/// **语义 = 重发本次（P1-1）**——snooze_until = now+10min 写表（持久化，
+/// 10min 内重启重发仍有效）+ 当前 log 结案 dismissed_via='snooze' + 内存
+/// next_due 直接置为 snooze_until（优先于常规计算）。重发触发时清空
+/// snooze_until（mark_triggered）按 kind 常规推进。
+#[tauri::command]
+pub fn reminders_snooze<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: tauri::State<'_, Arc<Mutex<RemindersState>>>,
+    log_id: i64,
+) -> Result<(), String> {
+    let now = now_ms();
+    let ts = now_rfc3339();
+    let until_ms = now + SNOOZE_MS;
+    let until_ts = ms_to_rfc3339(until_ms).unwrap_or_else(|| ts.clone());
+    let reminder_id = {
+        let db = app.state::<Mutex<Connection>>();
+        let conn = db.lock().map_err(|e| format!("db lock: {e}"))?;
+        let rid: i64 = conn
+            .query_row(
+                "SELECT reminder_id FROM reminder_logs WHERE id = ?1",
+                [log_id],
+                |r| r.get(0),
+            )
+            .map_err(|e| format!("reminder_log {log_id} 不存在：{e}"))?;
+        let rule = rule_by_id(&conn, rid)?;
+        if rule.action_type != "notify" {
+            return Err("仅提醒支持稍后（exec 结果气泡无 snooze）".into());
+        }
+        conn.execute(
+            "UPDATE reminders SET snooze_until = ?2 WHERE id = ?1",
+            params![rid, until_ts],
+        )
+        .map_err(|e| format!("snooze reminder #{rid}: {e}"))?;
+        dismiss_log(&conn, log_id, "snooze")?;
+        rid
+    };
+    // 内存 next_due 置为 snooze_until（直接置为，非 max）
+    let mut st = state.lock().map_err(|e| format!("state lock: {e}"))?;
+    if let Some(rs) = st.rules.iter_mut().find(|rs| rs.rule.id == reminder_id) {
+        rs.next_due_ms = until_ms;
+        rs.rule.snooze_until = Some(until_ts.clone());
+    }
+    plog!("[pulsepet] reminder #{} snoozed (log {log_id}) until {until_ts}", reminder_id);
+    Ok(())
+}
+
+/// v2 M4「跳过本次」（TC-M4-14）：内存 next_due 即时推进（interval → +interval；
+/// daily → 下个匹配日；once → MAX），不触发不记录；snooze_until 未过期一并
+/// 清空（N2：写表 + 内存同清）。已知边界（P3-4）：once 跳过后在补跑窗内
+/// 重启 App → reload 检测会补跑（跳过标记未持久化，接受）。
+#[tauri::command]
+pub fn tasks_skip_once<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: tauri::State<'_, Arc<Mutex<RemindersState>>>,
+    id: i64,
+) -> Result<(), String> {
+    let now = now_ms();
+    let clear_snooze = state
+        .lock()
+        .map_err(|e| format!("state lock: {e}"))?
+        .skip_once(id, now)?;
+    if clear_snooze {
+        let db = app.state::<Mutex<Connection>>();
+        let conn = db.lock().map_err(|e| format!("db lock: {e}"))?;
+        conn.execute(
+            "UPDATE reminders SET snooze_until = NULL WHERE id = ?1",
+            [id],
+        )
+        .map_err(|e| format!("clear snooze for #{id}: {e}"))?;
+    }
+    plog!("[pulsepet] task #{id} skipped once (snooze cleared: {clear_snooze})");
+    Ok(())
+}
+
+/// v2 M4 执行历史分页查询（TC-M4-16）：倒序 50 条/页，reminder_id 可选过滤。
+#[tauri::command]
+pub fn action_logs_list(
+    app: tauri::AppHandle,
+    reminder_id: Option<i64>,
+    page: Option<u64>,
+) -> Result<ActionLogPage, String> {
+    let db = app.state::<Mutex<Connection>>();
+    let conn = db.lock().map_err(|e| format!("db lock: {e}"))?;
+    let (rows, total) = list_action_logs(&conn, reminder_id, page.unwrap_or(1))?;
+    Ok(ActionLogPage {
+        rows,
+        total,
+        page: page.unwrap_or(1).max(1),
+        page_size: ACTION_LOG_PAGE_SIZE,
+    })
+}
+
+/// 单页行数（§4.7 执行历史区：50 条/页）。
+pub const ACTION_LOG_PAGE_SIZE: i64 = 50;
+
+/// 分页返回结构（与 TS `ActionLogPage` 一致）。
+#[derive(Debug, Clone, Serialize)]
+pub struct ActionLogPage {
+    pub rows: Vec<ActionLog>,
+    pub total: i64,
+    pub page: u64,
+    pub page_size: i64,
 }
 
 /// pet 窗口请求放烟花（TC-RM-09）：定位发射点 → show fireworks 窗口 → 下发 play。
@@ -1310,6 +2197,11 @@ mod tests {
             end_time: None,
             enabled: true,
             use_fireworks: false,
+            action_type: String::new(),
+            action_params: None,
+            schedule_kind: String::new(),
+            schedule_at: None,
+            schedule_weekdays: None,
         }
     }
 
@@ -1369,13 +2261,13 @@ mod tests {
 
     // ---- compute_next_due / dedup（TC-RM-01/02/05） ----
 
-    #[test]
-    fn next_due_never_triggered_anchors_at_created() {
-        let rule = ReminderRule {
-            id: 1,
-            kind: "hydration".into(),
-            label: "该喝水啦 💧".into(),
-            interval_minutes: 30,
+    /// v2 M4 字段缺省尾巴（struct update 语法用；老测试只关心 v1 字段）。
+    fn m4_fields() -> ReminderRule {
+        ReminderRule {
+            id: 0,
+            kind: "custom".into(),
+            label: String::new(),
+            interval_minutes: 0,
             start_time: None,
             end_time: None,
             enabled: true,
@@ -1383,7 +2275,26 @@ mod tests {
             last_triggered_at: None,
             source_todo_id: None,
             todo_due_at: None,
+            created_at: String::new(),
+            action_type: "notify".into(),
+            action_params: None,
+            schedule_kind: "interval".into(),
+            schedule_at: None,
+            schedule_weekdays: None,
+            snooze_until: None,
+            last_skipped_at: None,
+        }
+    }
+
+    #[test]
+    fn next_due_never_triggered_anchors_at_created() {
+        let rule = ReminderRule {
+            id: 1,
+            kind: "hydration".into(),
+            label: "该喝水啦 💧".into(),
+            interval_minutes: 30,
             created_at: rfc(1000),
+            ..m4_fields()
         };
         // created + 30min 在未来 → 保留；now=0 时 created(1000)+1800000 > 0
         assert_eq!(compute_next_due(&rule, 0), 1000 + 1_800_000);
@@ -1398,14 +2309,9 @@ mod tests {
             kind: "rest".into(),
             label: "休息".into(),
             interval_minutes: 30,
-            start_time: None,
-            end_time: None,
-            enabled: true,
-            use_fireworks: false,
             last_triggered_at: Some(rfc(1_000_000)),
-            source_todo_id: None,
-            todo_due_at: None,
             created_at: rfc(0),
+            ..m4_fields()
         };
         // reload 于 last+10min：next_due = last+30min（不被 reload 重置，TC-RM-07）
         assert_eq!(compute_next_due(&rule, 1_000_000 + 600_000), 1_000_000 + 1_800_000);
@@ -1429,14 +2335,10 @@ mod tests {
             kind: "todo".into(),
             label: "交报告".into(),
             interval_minutes: 0,
-            start_time: None,
-            end_time: None,
-            enabled: true,
-            use_fireworks: false,
             last_triggered_at: None,
             source_todo_id: Some(42),
-            todo_due_at: None,
             created_at: rfc(0),
+            ..m4_fields()
         };
         // 从未触发 → 立即到期（进入窗口即触发一次）
         assert_eq!(compute_next_due(&rule, 5000), 5000);
@@ -1465,6 +2367,7 @@ mod tests {
             fw_pending: None,
             fw_gen: 0,
             fw_active_log: None,
+            ..Default::default()
         }
     }
 
@@ -1474,15 +2377,18 @@ mod tests {
             kind: "hydration".into(),
             label: "该喝水啦 💧".into(),
             interval_minutes: interval,
-            start_time: None,
-            end_time: None,
-            enabled: true,
-            use_fireworks: false,
-            last_triggered_at: None,
-            source_todo_id: None,
-            todo_due_at: None,
             created_at: rfc(0),
+            ..m4_fields()
         }
+    }
+
+    /// 测试便捷：collect_due → fired 规则 Vec（skipped 断言单独取 .1）。
+    fn fire(st: &mut RemindersState, now: i64, minute: i64) -> Vec<ReminderRule> {
+        st.collect_due(now, &rfc(now), minute)
+            .0
+            .into_iter()
+            .map(|f| f.rule)
+            .collect()
     }
 
     #[test]
@@ -1490,13 +2396,13 @@ mod tests {
         let now = 1_000_000;
         let mut st = state_with(base_rule(1, 30), now);
         st.rules[0].next_due_ms = now; // 到期
-        let fired = st.collect_due(now, &rfc(now), 600);
+        let fired = fire(&mut st, now, 600);
         assert_eq!(fired.len(), 1);
         assert_eq!(fired[0].id, 1);
         assert_eq!(fired[0].last_triggered_at.as_deref(), Some(rfc(now).as_str()));
         // 触发后 next_due 推进：同一时刻不再触发
         assert!(st.rules[0].next_due_ms > now);
-        assert!(st.collect_due(now, &rfc(now), 600).is_empty());
+        assert!(fire(&mut st, now, 600).is_empty());
     }
 
     #[test]
@@ -1508,18 +2414,18 @@ mod tests {
         let mut st = state_with(rule, now);
         st.rules[0].next_due_ms = now;
         // 08:00（窗口外）不触发，倒计时保持到期（等窗口打开）
-        assert!(st.collect_due(now, &rfc(now), 8 * 60).is_empty());
+        assert!(fire(&mut st, now, 8 * 60).is_empty());
         assert_eq!(st.rules[0].next_due_ms, now);
         // 09:00 进入窗口 → 触发
-        assert_eq!(st.collect_due(now, &rfc(now), 9 * 60).len(), 1);
+        assert_eq!(fire(&mut st, now, 9 * 60).len(), 1);
         // 跨午夜窗口 22:00-06:00：12:00 不触发
         let mut rule2 = base_rule(2, 30);
         rule2.start_time = Some("22:00".into());
         rule2.end_time = Some("06:00".into());
         let mut st2 = state_with(rule2, now);
         st2.rules[0].next_due_ms = now;
-        assert!(st2.collect_due(now, &rfc(now), 12 * 60).is_empty());
-        assert_eq!(st2.collect_due(now, &rfc(now), 23 * 60).len(), 1);
+        assert!(fire(&mut st2, now, 12 * 60).is_empty());
+        assert_eq!(fire(&mut st2, now, 23 * 60).len(), 1);
     }
 
     #[test]
@@ -1528,14 +2434,11 @@ mod tests {
         let now = 1_000_000;
         let mut st = state_with(base_rule(1, 1), now);
         st.rules[0].next_due_ms = now;
-        assert_eq!(st.collect_due(now, &rfc(now), 600).len(), 1);
+        assert_eq!(fire(&mut st, now, 600).len(), 1);
         // +2min：next_due（now+1min）已过，但去重拦截
-        assert!(st.collect_due(now + 120_000, &rfc(now + 120_000), 600).is_empty());
+        assert!(fire(&mut st, now + 120_000, 600).is_empty());
         // +3min 整：去重窗口过去 → 再触发
-        assert_eq!(
-            st.collect_due(now + 180_000, &rfc(now + 180_000), 600).len(),
-            1
-        );
+        assert_eq!(fire(&mut st, now + 180_000, 600).len(), 1);
     }
 
     #[test]
@@ -1545,7 +2448,7 @@ mod tests {
         rule.enabled = false;
         let mut st = state_with(rule, now);
         st.rules[0].next_due_ms = now;
-        assert!(st.collect_due(now, &rfc(now), 600).is_empty());
+        assert!(fire(&mut st, now, 600).is_empty());
     }
 
     #[test]
@@ -1555,17 +2458,20 @@ mod tests {
         st.rules[0].next_due_ms = now;
         // 暂停：到期不触发，倒计时顺延 now+30min
         st.paused = true;
-        assert!(st.collect_due(now, &rfc(now), 600).is_empty());
+        let (fired, skipped) = st.collect_due(now, &rfc(now), 600);
+        assert!(fired.is_empty());
+        assert!(skipped.is_empty(), "interval 类暂停不记 skipped（v1 顺延）");
         assert_eq!(st.rules[0].next_due_ms, now + 1_800_000);
         // 暂停期间每 tick 顺延：仅在再次到期的 tick 才继续顺延（1 分钟后未到期 → 保持）
-        assert!(st.collect_due(now + 60_000, &rfc(now + 60_000), 600).is_empty());
+        let (fired, skipped) = st.collect_due(now + 60_000, &rfc(now + 60_000), 600);
+        assert!(fired.is_empty() && skipped.is_empty());
         assert_eq!(st.rules[0].next_due_ms, now + 1_800_000);
         // 取消暂停：顺延点之前不触发
         st.paused = false;
         let due = st.rules[0].next_due_ms;
-        assert!(st.collect_due(due - 1, &rfc(due - 1), 600).is_empty());
+        assert!(fire(&mut st, due - 1, 600).is_empty());
         // 到顺延点 → 恢复触发
-        assert_eq!(st.collect_due(due, &rfc(due), 600).len(), 1);
+        assert_eq!(fire(&mut st, due, 600).len(), 1);
     }
 
     #[test]
@@ -1576,11 +2482,11 @@ mod tests {
         rule.source_todo_id = Some(3);
         let mut st = state_with(rule, now);
         st.rules[0].next_due_ms = now; // 从未触发 → 立即到期
-        assert_eq!(st.collect_due(now, &rfc(now), 600).len(), 1);
+        assert_eq!(fire(&mut st, now, 600).len(), 1);
         assert_eq!(st.rules[0].next_due_ms, i64::MAX);
         // 后续 tick / 更晚时刻均不再触发（不误重复）
-        assert!(st.collect_due(now + 60_000, &rfc(now + 60_000), 600).is_empty());
-        assert!(st.collect_due(now + 6_000_000, &rfc(now + 6_000_000), 600).is_empty());
+        assert!(fire(&mut st, now + 60_000, 600).is_empty());
+        assert!(fire(&mut st, now + 6_000_000, 600).is_empty());
     }
 
     #[test]
@@ -1903,13 +2809,11 @@ mod tests {
             label: "交报告".into(),
             interval_minutes: 0,
             start_time: Some("2026-08-18T15:25".into()),
-            end_time: None,
-            enabled: true,
-            use_fireworks: false,
             last_triggered_at: None,
             source_todo_id: Some(3),
             todo_due_at: Some("2026-08-18T15:30".into()),
             created_at: rfc(0),
+            ..m4_fields()
         };
         assert_eq!(compute_next_due(&rule, 0), start_ms);
         // start 已过（停机错过）→ 下一 tick 补触发一次（仍只一次）
@@ -1929,24 +2833,23 @@ mod tests {
             label: "交报告".into(),
             interval_minutes: 0,
             start_time: Some("2026-08-18T15:25".into()),
-            end_time: None,
-            enabled: true,
-            use_fireworks: false,
             last_triggered_at: None,
             source_todo_id: Some(4),
             todo_due_at: Some("2026-08-18T15:30".into()),
             created_at: rfc(0),
+            ..m4_fields()
         };
         let mut st = state_with(rule, 0);
         // 未到点（含 start_time 是绝对时刻而非 HH:MM 窗口的判定）→ 不触发
-        assert!(st.collect_due(start_ms - 1, &rfc(start_ms - 1), 0).is_empty());
+        assert!(st.collect_due(start_ms - 1, &rfc(start_ms - 1), 0).0.is_empty());
         // 到点 → 触发一次；之后（即便再过很久）不再触发（TC-TD-06）
-        let fired = st.collect_due(start_ms, &rfc(start_ms), 0);
+        let (fired, skipped) = st.collect_due(start_ms, &rfc(start_ms), 0);
         assert_eq!(fired.len(), 1);
-        assert_eq!(fired[0].kind, "todo");
-        assert_eq!(fired[0].todo_due_at.as_deref(), Some("2026-08-18T15:30"));
+        assert_eq!(fired[0].rule.kind, "todo");
+        assert_eq!(fired[0].rule.todo_due_at.as_deref(), Some("2026-08-18T15:30"));
+        assert!(skipped.is_empty(), "todo 派生行不参与 skipped 记账");
         assert_eq!(st.rules[0].next_due_ms, i64::MAX);
-        assert!(st.collect_due(start_ms + 3_600_000, &rfc(start_ms + 3_600_000), 0).is_empty());
+        assert!(st.collect_due(start_ms + 3_600_000, &rfc(start_ms + 3_600_000), 0).0.is_empty());
     }
 
     #[test]
@@ -1967,7 +2870,7 @@ mod tests {
         assert!(validate_input(&input("todo", "交报告", 0)).is_ok());
         assert!(validate_input(&input("todo", "交报告", 1)).is_err());
         assert!(validate_input(&input("todo", "交报告", 30)).is_err());
-        // 派生规则的 start_time 是绝对时刻（非 HH:MM），必须被 upsert 入口接受
+        // 派生规则的 start_time 是绝对时刻（非 HH:MM 窗口），必须被 upsert 入口接受
         let mut abs = input("todo", "交报告", 0);
         abs.start_time = Some("2026-08-18T15:25".into());
         assert!(validate_input(&abs).is_ok());
@@ -1977,5 +2880,1029 @@ mod tests {
         // 非 todo kind 间隔下限仍为 1（interval=0 拒绝）
         assert!(validate_input(&input("custom", "x", 0)).is_err());
         assert!(validate_input(&input("hydration", "x", 1)).is_ok());
+    }
+
+    // =========================================================================
+    // v2 M4（TC-M4-03/04/07/13/14/16）：daily/once 调度 + 补跑窗 + snooze +
+    // skipped 闭环 + 跳过 + validate 重置 + action_logs
+    // =========================================================================
+
+    /// 本地时区当日 10:00 的 epoch ms（+days 天偏移）。
+    fn daily_at(days_offset: i64, hour: u32, min: u32) -> i64 {
+        let today = Local::now().date_naive();
+        let day = today
+            .checked_add_signed(ChronoDuration::days(days_offset))
+            .unwrap();
+        Local
+            .with_ymd_and_hms(day.year(), day.month(), day.day(), hour, min, 0)
+            .unwrap()
+            .timestamp_millis()
+    }
+
+    /// daily/once 规则构造器（notify 缺省；exec 传 action_type）。
+    fn daily_rule(id: i64, hhmm: &str, weekdays: Option<&str>) -> ReminderRule {
+        ReminderRule {
+            id,
+            kind: "custom".into(),
+            label: "定点任务".into(),
+            interval_minutes: 0,
+            schedule_kind: "daily".into(),
+            schedule_at: Some(hhmm.into()),
+            schedule_weekdays: weekdays.map(|s| s.to_string()),
+            created_at: rfc(daily_at(-7, 0, 0)), // 一周前创建
+            ..m4_fields()
+        }
+    }
+
+    fn once_rule(id: i64, at_ms: i64) -> ReminderRule {
+        ReminderRule {
+            id,
+            kind: "custom".into(),
+            label: "一次性任务".into(),
+            interval_minutes: 0,
+            schedule_kind: "once".into(),
+            schedule_at: Some(
+                DateTime::from_timestamp_millis(at_ms)
+                    .unwrap()
+                    .with_timezone(&Local)
+                    .format("%Y-%m-%dT%H:%M")
+                    .to_string(),
+            ),
+            created_at: rfc(at_ms - 86_400_000),
+            ..m4_fields()
+        }
+    }
+
+    /// 今天星期（1=周一…7=周日）。
+    fn today_weekday() -> u32 {
+        Local::now().date_naive().weekday().num_days_from_monday() as u32 + 1
+    }
+
+    // ---- TC-M4-03-1：daily next_due ----
+
+    #[test]
+    fn daily_next_due_today_future_and_past() {
+        // 干净状态（昨日 10:05 已触发）：now = 今日 09:00（未到）→ 今日 10:00
+        let now = daily_at(0, 9, 0);
+        let mut r1 = daily_rule(1, "10:00", None);
+        r1.last_triggered_at = Some(rfc(daily_at(-1, 10, 5)));
+        assert_eq!(compute_next_due(&r1, now), daily_at(0, 10, 0));
+        // 当日已过（now = 今日 11:00，今日 10:00 未处理）→ 返回今日 10:00（过去，
+        // 交 tick 补跑窗判定）；昨日已处理不构成干扰
+        let now = daily_at(0, 11, 0);
+        let mut r2 = daily_rule(2, "10:00", None);
+        r2.last_triggered_at = Some(rfc(daily_at(-1, 10, 5)));
+        assert_eq!(
+            compute_next_due(&r2, now),
+            daily_at(0, 10, 0),
+            "本周期未处理 → 过去时刻（补跑窗判定入口）"
+        );
+        // 今日已处理 → 次日
+        let mut r3 = daily_rule(3, "10:00", None);
+        r3.last_triggered_at = Some(rfc(daily_at(0, 10, 5)));
+        assert_eq!(compute_next_due(&r3, now), daily_at(1, 10, 0));
+    }
+
+    #[test]
+    fn daily_next_due_weekdays_filter() {
+        // 星期过滤不含今天 → 跳到下个匹配日；NULL = 每天（干净状态：昨日已触发）
+        let today = today_weekday();
+        let next_weekday = (today % 7) + 1; // 明天的星期编号
+        let now = daily_at(0, 9, 0);
+        let handled = Some(rfc(daily_at(-1, 10, 5)));
+        // 过滤 = [next_weekday]：今天不匹配 → 下个匹配日（1-7 天内）
+        let mut r = daily_rule(1, "10:00", Some(&format!("[{next_weekday}]")));
+        r.last_triggered_at = handled.clone();
+        let due = compute_next_due(&r, now);
+        assert!(
+            due > now && due <= now + 8 * 86_400_000,
+            "下个匹配日在未来 8 天内"
+        );
+        // due 那天的星期确实匹配
+        let due_date = Local.timestamp_millis_opt(due).single().unwrap().date_naive();
+        assert_eq!(due_date.weekday().num_days_from_monday() as u32 + 1, next_weekday);
+        // NULL / 空数组 = 每天（今天匹配 → 今日）
+        let mut r2 = daily_rule(2, "10:00", Some("[]"));
+        r2.last_triggered_at = handled;
+        assert_eq!(compute_next_due(&r2, now), daily_at(0, 10, 0));
+    }
+
+    // ---- TC-M4-03-2：once next_due / 终态 ----
+
+    #[test]
+    fn once_next_due_future_and_terminal() {
+        let at = daily_at(1, 21, 0); // 明晚 21:00
+        let rule = once_rule(1, at);
+        assert_eq!(compute_next_due(&rule, at - 3_600_000), at, "未来时刻 → schedule_at");
+        // 已触发 → MAX（终态，跨重启成立——last_triggered ≥ schedule_at）
+        let mut fired = rule.clone();
+        fired.last_triggered_at = Some(rfc(at));
+        assert_eq!(compute_next_due(&fired, at + 60_000), i64::MAX);
+        // 已跳过（last_skipped_at）同样终态
+        let mut skipped = rule;
+        skipped.last_skipped_at = Some(rfc(at));
+        assert_eq!(compute_next_due(&skipped, at + 60_000), i64::MAX);
+    }
+
+    // ---- TC-M4-03-4：snooze 重发语义（P1-1 回归钉子） ----
+
+    #[test]
+    fn snooze_overrides_regular_next_due_and_clears_on_fire() {
+        let at = daily_at(1, 21, 0);
+        let mut rule = once_rule(1, at);
+        // 触发后常规 next_due 已是未来（once → MAX），snooze 必须"直接置为"才能重发
+        rule.last_triggered_at = Some(rfc(at));
+        let snooze_until = at + 10 * 60_000;
+        rule.snooze_until = Some(rfc(snooze_until));
+        assert_eq!(
+            compute_next_due(&rule, at + 60_000),
+            snooze_until,
+            "snooze_until 未过期优先于常规计算（非 max——P1-1）"
+        );
+        // 过期 → 静默丢弃回落常规（N3 已知边界）
+        assert_eq!(
+            compute_next_due(&rule, snooze_until + 1),
+            i64::MAX,
+            "过期 snooze 丢弃 → once 已触发的常规值 MAX"
+        );
+    }
+
+    #[test]
+    fn snooze_daily_refire_advances_to_next_match() {
+        // daily + snooze：重发后（snooze 已清、last_triggered=重发时刻）→ 下个匹配日
+        let at = daily_at(0, 10, 0);
+        let mut rule = daily_rule(1, "10:00", None);
+        rule.snooze_until = Some(rfc(at + 600_000));
+        assert_eq!(compute_next_due(&rule, at + 60_000), at + 600_000);
+        // 模拟重发触发：snooze 清空 + last_triggered = 重发时刻（10:10）
+        rule.snooze_until = None;
+        rule.last_triggered_at = Some(rfc(at + 600_000));
+        assert_eq!(
+            compute_next_due(&rule, at + 600_000),
+            daily_at(1, 10, 0),
+            "daily 重发后 → 下个匹配日"
+        );
+    }
+
+    #[test]
+    fn snooze_interval_chain_shifts_by_ten_minutes() {
+        // interval ≥10min：重发链整体顺延（重发时刻为新锚点）
+        let t0 = 1_000_000i64;
+        let mut rule = base_rule(1, 30);
+        rule.last_triggered_at = Some(rfc(t0));
+        let snooze_until = t0 + 10 * 60_000;
+        rule.snooze_until = Some(rfc(snooze_until));
+        assert_eq!(compute_next_due(&rule, t0 + 60_000), snooze_until);
+        // 重发触发（10:10）→ 常规推进 30min：11:40 的锚点链（非原 10:30 链）
+        rule.snooze_until = None;
+        rule.last_triggered_at = Some(rfc(snooze_until));
+        assert_eq!(
+            compute_next_due(&rule, snooze_until),
+            snooze_until + 1_800_000,
+            "interval 重发后锚点链后移 10min"
+        );
+    }
+
+    // ---- TC-M4-03-5：reload 错过检测（P2-5，经 compute_next_due 的 daily 分支） ----
+
+    #[test]
+    fn daily_reload_missed_window_returns_past_due() {
+        // App 关闭跨过 schedule_at：本周期（今天 10:00）未处理 → next_due = 今天 10:00
+        //（过去的时刻，由 tick 补跑窗判定：窗内补跑 / 超窗 skipped）
+        let now = daily_at(0, 10, 5); // 过了 5 分钟重启
+        assert_eq!(compute_next_due(&daily_rule(1, "10:00", None), now), daily_at(0, 10, 0));
+        // last_triggered 已晚于 schedule_at（今早已跑）→ 不误报，给下个匹配日
+        let mut r = daily_rule(2, "10:00", None);
+        r.last_triggered_at = Some(rfc(daily_at(0, 10, 0)));
+        assert_eq!(compute_next_due(&r, now), daily_at(1, 10, 0));
+        // 已 skipped 同样不误报（N1 ①）
+        let mut r = daily_rule(3, "10:00", None);
+        r.last_skipped_at = Some(rfc(daily_at(0, 10, 1)));
+        assert_eq!(compute_next_due(&r, now), daily_at(1, 10, 0));
+    }
+
+    // ---- TC-M4-03-6：interval 分支 v1 断言全量保留（回归，上组测试已覆盖核心） ----
+
+    #[test]
+    fn interval_branch_v1_semantics_untouched() {
+        // 错过不补：anchor 过期 → now + interval
+        let rule = base_rule(1, 30);
+        assert_eq!(compute_next_due(&rule, 10_000_000), 10_000_000 + 1_800_000);
+        // snooze 过期回落 interval 常规
+        let mut r = base_rule(2, 30);
+        r.snooze_until = Some(rfc(1_000));
+        assert_eq!(compute_next_due(&r, 10_000_000), 10_000_000 + 1_800_000);
+    }
+
+    // ---- TC-M4-04：collect_due 补跑窗 + skipped 闭环 ----
+
+    #[test]
+    fn catchup_window_boundary_14m59s_fires_15m01s_skips() {
+        // 窗内（14m59s）→ 正常触发
+        let at = daily_at(0, 10, 0);
+        let mut st = state_with(daily_rule(1, "10:00", None), at);
+        st.rules[0].next_due_ms = at;
+        let (fired, skipped) = st.collect_due(at + CATCHUP_WINDOW_MS - 1_000, &rfc(at), 600);
+        assert_eq!(fired.len(), 1, "14m59s → 触发（补跑）");
+        assert!(skipped.is_empty());
+        // 超窗（15m01s）→ skipped + 推进 + 记 last_skipped_at
+        let mut st = state_with(daily_rule(2, "10:00", None), at);
+        st.rules[0].next_due_ms = at;
+        let ts = rfc(at + CATCHUP_WINDOW_MS + 1_000);
+        let (fired, skipped) = st.collect_due(at + CATCHUP_WINDOW_MS + 1_000, &ts, 600);
+        assert!(fired.is_empty(), "15m01s → 不触发");
+        assert_eq!(skipped.len(), 1);
+        assert_eq!(skipped[0].id, 2);
+        assert_eq!(skipped[0].reason, SkipReason::MissedWindow);
+        assert_eq!(skipped[0].scheduled_at_ms, at, "记原定时刻（溯源）");
+        // 闭环：内存写 last_skipped_at + 推进 next_due（daily → 下个匹配日）
+        assert_eq!(st.rules[0].rule.last_skipped_at.as_deref(), Some(ts.as_str()));
+        assert_eq!(st.rules[0].next_due_ms, daily_at(1, 10, 0));
+        // 同一 tick 不再判定（下一 tick 到期前无动作）
+        let (fired2, skipped2) = st.collect_due(at + CATCHUP_WINDOW_MS + 61_000, &rfc(at), 600);
+        assert!(fired2.is_empty() && skipped2.is_empty(), "记后推进 → 不重复判定");
+    }
+
+    #[test]
+    fn once_skipped_writes_last_skipped_and_stays_max_across_reload() {
+        // once 超窗 skipped → 内存 MAX；落库（mark_skipped）后 reload 仍 MAX（N1 ②）
+        //（once 创建须未来时刻——用明日 10:00；到期判定用手动置过的 next_due）
+        let at = daily_at(1, 10, 0);
+        let c = conn();
+        let mut inp = input("custom", "一次性任务", 30);
+        inp.interval_minutes = 30; // once normalize 会强制 0
+        inp.schedule_kind = "once".into();
+        inp.schedule_at = Some(
+            DateTime::from_timestamp_millis(at)
+                .unwrap()
+                .with_timezone(&Local)
+                .format("%Y-%m-%dT%H:%M")
+                .to_string(),
+        );
+        let r = insert_rule(&c, &inp).unwrap();
+        let mut st = RemindersState::load(&c).unwrap();
+        // 模拟超窗 tick：next_due 已过 15 分钟（now = at + 窗 + 1min）
+        let ts = rfc(at + CATCHUP_WINDOW_MS + 60_000);
+        st.rules[0].next_due_ms = at;
+        let (fired, skipped) = st.collect_due(at + CATCHUP_WINDOW_MS + 60_000, &ts, 600);
+        assert_eq!(skipped.len(), 1);
+        assert!(fired.is_empty());
+        // 调用方落库（N1：skipped 列表随 fired 一起返回）
+        mark_skipped(&c, r.id, &ts).unwrap();
+        // reload（等价重启）→ once 终态 MAX 不复活
+        let st2 = RemindersState::load(&c).unwrap();
+        assert_eq!(st2.rules[0].next_due_ms, i64::MAX, "once skipped 重启仍 MAX");
+        // 醒来 3 分钟内手动补跑：dedup 判定源 last_triggered 为空 → 不被拒（P3-2）
+        let mut st3 = RemindersState::load(&c).unwrap();
+        let (_, rule) = st3.force_fire_one(r.id, now_ms(), &rfc(now_ms())).unwrap();
+        assert!(rule.is_some(), "skipped 后手动补跑不被 dedup 拒绝");
+    }
+
+    #[test]
+    fn paused_daily_once_records_skipped_and_resumes_without_catchup() {
+        // 暂停分支：daily/once 到期记 skipped（含原定时刻）+ 推进 + 清 snooze；
+        // 恢复后不补跑（完全冻结）；interval 维持顺延
+        let at = daily_at(0, 10, 0);
+        let mut rule = daily_rule(1, "10:00", None);
+        rule.snooze_until = Some(rfc(at + 600_000)); // 未过期 snooze 应被清（P3-5）
+        let mut st = state_with(rule, at);
+        st.rules[0].next_due_ms = at;
+        st.paused = true;
+        let ts = rfc(at + 60_000);
+        let (fired, skipped) = st.collect_due(at + 60_000, &ts, 600);
+        assert!(fired.is_empty());
+        assert_eq!(skipped.len(), 1, "daily 暂停到期记 skipped");
+        assert_eq!(skipped[0].reason, SkipReason::Paused);
+        assert_eq!(st.rules[0].rule.snooze_until, None, "记 skipped 清未过期 snooze（P3-5）");
+        assert_eq!(st.rules[0].next_due_ms, daily_at(1, 10, 0), "记后推进（防每 tick 重复）");
+        // 暂停期间每 tick 只记一次
+        let (f2, s2) = st.collect_due(at + 120_000, &rfc(at + 120_000), 600);
+        assert!(f2.is_empty() && s2.is_empty());
+        // 恢复后不补跑（推进后的到期点之前不触发）
+        st.paused = false;
+        assert!(fire(&mut st, at + 180_000, 600).is_empty(), "恢复后不补跑");
+        // interval 类维持 v1 顺延（同 tick 内不记 skipped）
+        let mut sti = state_with(base_rule(9, 30), 1_000_000);
+        sti.rules[0].next_due_ms = 1_000_000;
+        sti.paused = true;
+        let (fi, si) = sti.collect_due(1_000_000, &rfc(1_000_000), 600);
+        assert!(fi.is_empty() && si.is_empty(), "interval 暂停顺延不记 skipped");
+        assert_eq!(sti.rules[0].next_due_ms, 1_000_000 + 1_800_000);
+    }
+
+    // ---- TC-M4-04-5：并发上限 2 + pending_execs 等待队列 ----
+
+    #[test]
+    fn dispatch_exec_queues_third_beyond_limit() {
+        use crate::action_exec::RunningTasks;
+        // R4（P2-1）：满员态 = active_execs 计数（槽位预留同步化）——预置
+        // 2 个在飞槽位 → 第 3 个 dispatch 必进 pending_execs（不写 running）
+        let app = tauri::test::mock_app();
+        let handle = app.handle();
+        handle.manage(Arc::new(Mutex::new(RunningTasks::default())));
+        // conn 也 manage（start_exec_run 会写库——满员分支不会走到）
+        let c = Connection::open_in_memory().unwrap();
+        crate::db::migrate(&c).unwrap();
+        handle.manage(Mutex::new(c));
+        // 调度器 state：预占 2 槽（等价两条在飞 exec）+ 规则在内存
+        //（run_tick 分派形态：dispatch 的规则必在 st.rules；drain 的 P3-1
+        // stale 校验按 id 查内存表）
+        let mut rule = daily_rule(1, "10:00", None);
+        rule.action_type = "exec".into();
+        rule.action_params = Some(r#"{"command":"sleep 30"}"#.into());
+        let sched = Arc::new(Mutex::new(RemindersState {
+            active_execs: crate::action_exec::MAX_CONCURRENT_EXECS,
+            rules: vec![RuleState {
+                rule: rule.clone(),
+                next_due_ms: 42_000,
+            }],
+            ..Default::default()
+        }));
+        crate::action_exec::dispatch_exec(handle, &sched, &rule, 12345);
+        {
+            let st = sched.lock().unwrap();
+            assert_eq!(st.pending_execs.len(), 1, "第 3 个任务进等待队列");
+            assert_eq!(st.pending_execs[0].rule.id, 1);
+            assert_eq!(st.pending_execs[0].scheduled_at_ms, 12345);
+        }
+        // drain：槽位仍满 → 不出队
+        crate::action_exec::drain_pending_execs(handle, &sched);
+        assert_eq!(sched.lock().unwrap().pending_execs.len(), 1);
+        // 释放一个槽位（run_task 完成回调的锁内递减语义）→ drain 出队
+        sched.lock().unwrap().active_execs -= 1;
+        crate::action_exec::drain_pending_execs(handle, &sched);
+        assert!(
+            sched.lock().unwrap().pending_execs.is_empty(),
+            "空位出现 → 出队"
+        );
+        assert_eq!(
+            sched.lock().unwrap().active_execs,
+            crate::action_exec::MAX_CONCURRENT_EXECS,
+            "出队即占槽（计数回满）"
+        );
+        // spawn 已发生：running 日志已写（mock app 直连同一 conn）；sleep 30
+        // 不会先于断言完成 → running 态稳定可断言
+        let db = handle.state::<Mutex<Connection>>();
+        let conn = db.lock().unwrap();
+        let (status,): (String,) = conn
+            .query_row("SELECT status FROM action_logs ORDER BY id DESC LIMIT 1", [], |r| {
+                Ok((r.get(0)?,))
+            })
+            .unwrap();
+        assert_eq!(status, "running", "出队即写 running（spawn 时刻）");
+        drop(conn);
+        // 清理：杀掉测试拉起的进程——**先等登记就绪**（R5 P3-2：spawn 任务
+        // 首 poll 才插入登记表，不等会 drain 空 → sleep 30 孤儿泄漏）
+        {
+            use tauri::Manager;
+            let reg = handle.state::<Arc<Mutex<crate::action_exec::RunningTasks>>>();
+            for _ in 0..100 {
+                if reg.lock().unwrap().len() >= 1 {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            let mut r = reg.lock().unwrap();
+            for (_, proc_) in r.tasks.drain() {
+                crate::action_exec::kill_process_tree(proc_.pid);
+            }
+        }
+        let _ = rule;
+    }
+
+    /// R4 批量钉子（committer P2-1 必补）：**单 tick 3 个 due exec 同步循环
+    /// 分派**（run_tick 形态）→ 恰 2 运行 + 1 排队——旧实现读
+    /// `RunningTasks.len()`（登记要等 spawn 首 poll 才插入），同步循环里
+    /// 3 次 dispatch 全部读到 0 → 超发 3 个 running；新实现 active_execs
+    /// 在 sched 锁内同步自增，第 3 个必入队。drain 满员不超发同步钉住。
+    #[test]
+    fn batch_dispatch_three_due_execs_two_run_one_pending() {
+        use crate::action_exec::{RunningTasks, MAX_CONCURRENT_EXECS};
+        let app = tauri::test::mock_app();
+        let handle = app.handle();
+        handle.manage(Arc::new(Mutex::new(RunningTasks::default())));
+        let c = Connection::open_in_memory().unwrap();
+        crate::db::migrate(&c).unwrap();
+        handle.manage(Mutex::new(c));
+        let sched = Arc::new(Mutex::new(RemindersState::default()));
+        // 3 条 exec 规则（同 tick 到期——多条 daily 同 HH:MM / 连环补跑形态）
+        let mk = |id: i64, cmd: &str| {
+            let mut r = daily_rule(id, "10:00", None);
+            r.action_type = "exec".into();
+            r.action_params = Some(format!(r#"{{"command":"{cmd}"}}"#).into());
+            r
+        };
+        // sleep 45：断言期进程稳定存活 + 清理万一漏杀时 45s 自愈（不长命孤儿）
+        let rules = vec![
+            mk(1, "sleep 45"),
+            mk(2, "sleep 45"),
+            mk(3, "sleep 45"),
+        ];
+        // run_tick 的同步循环形态：顺序 dispatch，无 await
+        for r in &rules {
+            crate::action_exec::dispatch_exec(handle, &sched, r, 42_000);
+        }
+        {
+            let st = sched.lock().unwrap();
+            assert_eq!(st.active_execs, MAX_CONCURRENT_EXECS, "恰占 2 槽");
+            assert_eq!(st.pending_execs.len(), 1, "第 3 个进等待队列");
+            assert_eq!(st.pending_execs[0].rule.id, 3, "排队的是最后分派的");
+        }
+        // 无第三行 running（排队的未写库）
+        let running_count = |handle: &tauri::AppHandle<tauri::test::MockRuntime>| -> i64 {
+            use tauri::Manager;
+            let db = handle.state::<Mutex<Connection>>();
+            let conn = db.lock().unwrap();
+            conn.query_row(
+                "SELECT COUNT(*) FROM action_logs WHERE status = 'running'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(running_count(handle), 2, "恰 2 行 running（第 3 个不写）");
+        // drain 超发场景：槽位已满 → 不出队、不新增 running
+        crate::action_exec::drain_pending_execs(handle, &sched);
+        assert_eq!(sched.lock().unwrap().pending_execs.len(), 1, "满员 drain 不出队");
+        assert_eq!(running_count(handle), 2, "满员 drain 不新增 running");
+        // 清理：先清队列（防杀进程唤醒完成回调 → 递减 → drain 启动第 3 个），
+        // 再等登记就绪杀进程组
+        sched.lock().unwrap().pending_execs.clear();
+        {
+            use tauri::Manager;
+            let reg = handle.state::<Arc<Mutex<RunningTasks>>>();
+            for _ in 0..100 {
+                if reg.lock().unwrap().len() >= 2 {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            let mut r = reg.lock().unwrap();
+            for (_, proc_) in r.tasks.drain() {
+                crate::action_exec::kill_process_tree(proc_.pid);
+            }
+        }
+    }
+
+    /// R4 顺手修复 P3-1：等待队列的 stale 快照——规则删除（reload 后不在
+    /// 内存）的排队条目出队时丢弃，不执行已删规则、不占槽。
+    #[test]
+    fn drain_drops_stale_rule_snapshots() {
+        use crate::action_exec::RunningTasks;
+        let app = tauri::test::mock_app();
+        let handle = app.handle();
+        handle.manage(Arc::new(Mutex::new(RunningTasks::default())));
+        let c = Connection::open_in_memory().unwrap();
+        crate::db::migrate(&c).unwrap();
+        handle.manage(Mutex::new(c));
+        let live = {
+            let mut r = daily_rule(7, "10:00", None);
+            r.action_type = "exec".into();
+            r.action_params = Some(r#"{"command":"sleep 45"}"#.into());
+            r
+        };
+        let mut stale = daily_rule(999, "10:00", None);
+        stale.action_type = "exec".into();
+        stale.action_params = Some(r#"{"command":"sleep 45"}"#.into());
+        let sched = Arc::new(Mutex::new(RemindersState {
+            // 内存规则表只含 live（id=7）——999 已删除
+            rules: vec![RuleState {
+                rule: live.clone(),
+                next_due_ms: i64::MAX,
+            }],
+            pending_execs: vec![
+                crate::action_exec::PendingExec {
+                    rule: stale,
+                    scheduled_at_ms: 7_000,
+                },
+                crate::action_exec::PendingExec {
+                    rule: live.clone(),
+                    scheduled_at_ms: 8_000,
+                },
+            ]
+            .into(),
+            ..Default::default()
+        }));
+        crate::action_exec::drain_pending_execs(handle, &sched);
+        {
+            let st = sched.lock().unwrap();
+            assert!(st.pending_execs.is_empty(), "队列排空（stale 丢弃 + live 启动）");
+            assert_eq!(st.active_execs, 1, "仅 live 占槽");
+        }
+        use tauri::Manager;
+        let db = handle.state::<Mutex<Connection>>();
+        let conn = db.lock().unwrap();
+        let (cnt, only_id): (i64, i64) = conn
+            .query_row(
+                "SELECT COUNT(*), MAX(reminder_id) FROM action_logs WHERE status = 'running'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(cnt, 1, "只启动 1 个（stale 未执行）");
+        assert_eq!(only_id, 7, "启动的是 live 规则");
+        drop(conn);
+        // 清理
+        {
+            let reg = handle.state::<Arc<Mutex<RunningTasks>>>();
+            for _ in 0..100 {
+                if reg.lock().unwrap().len() >= 1 {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            let mut r = reg.lock().unwrap();
+            for (_, proc_) in r.tasks.drain() {
+                crate::action_exec::kill_process_tree(proc_.pid);
+            }
+        }
+    }
+
+    /// R5（tester R4 P2）：**排队中规则 reload 后不重复 fire**——实机缺陷形态：
+    /// 3 条 once 同分钟触发，第 3 条排队；排队期间 CRUD reload 重建内存（排队
+    /// 条目 handled 只在内存）→ next_due 回过去时刻 → 下 tick 重复 fire →
+    /// 队列同规则重复条目 → 双重执行。修复 = dispatch_exec 入口无条件
+    /// mark_triggered 落库（排队分支持久化）+ run_tick 分派前按 id 查 pending
+    /// 去重（毫秒窗口兜底）。对照断言：非排队规则（disabled daily）reload 后
+    /// 照常重算（过去时刻补跑判定入口不回归）。
+    #[test]
+    fn queued_rule_reload_does_not_refire_or_duplicate() {
+        use crate::action_exec::RunningTasks;
+        let app = tauri::test::mock_app();
+        let handle = app.handle();
+        let c = conn();
+        // 3 条 once exec 同刻（now+120s：分钟截断后必然严格未来、过 validate
+        // 未来校验；next_due 手动置过去模拟到点）+ 1 条 disabled daily（对照）
+        let at_local = {
+            let at = now_ms() + 120_000;
+            DateTime::from_timestamp_millis(at)
+                .unwrap()
+                .with_timezone(&Local)
+                .format("%Y-%m-%dT%H:%M")
+                .to_string()
+        };
+        let mut ids = Vec::new();
+        for i in 0..3 {
+            let mut inp = input("custom", &format!("排队钉子 {i}"), 30);
+            inp.schedule_kind = "once".into();
+            inp.schedule_at = Some(at_local.clone());
+            inp.action_type = "exec".into();
+            inp.action_params = Some(r#"{"command":"sleep 20"}"#.into());
+            ids.push(insert_rule(&c, &inp).unwrap().id);
+        }
+        // at 置真实过去（insert 需未来过 validate；UPDATE 绕行模拟"已到点"——
+        // 实机缺陷形态即 at 为过去时刻）
+        let at_past = {
+            let at = now_ms() - 120_000;
+            DateTime::from_timestamp_millis(at)
+                .unwrap()
+                .with_timezone(&Local)
+                .format("%Y-%m-%dT%H:%M")
+                .to_string()
+        };
+        for id in &ids {
+            c.execute(
+                "UPDATE reminders SET schedule_at = ?2 WHERE id = ?1",
+                params![id, at_past],
+            )
+            .unwrap();
+        }
+        let mut daily_inp = input("custom", "对照（停用 daily）", 30);
+        daily_inp.schedule_kind = "daily".into();
+        daily_inp.schedule_at = Some("09:00".into());
+        daily_inp.enabled = false;
+        let daily_id = insert_rule(&c, &daily_inp).unwrap().id;
+
+        let sched = Arc::new(Mutex::new(RemindersState::load(&c).unwrap()));
+        handle.manage(Arc::new(Mutex::new(RunningTasks::default())));
+        handle.manage(Mutex::new(c));
+
+        // 模拟到点：3 条 once 的 next_due 置过去
+        {
+            let mut st = sched.lock().unwrap();
+            for rs in st.rules.iter_mut() {
+                if rs.rule.schedule_kind == "once" {
+                    rs.next_due_ms = now_ms() - 1_000;
+                }
+            }
+        }
+        // tick1：3 个 exec fire → 2 启动 + 1 排队
+        run_tick(handle, &sched);
+        {
+            let st = sched.lock().unwrap();
+            assert_eq!(st.active_execs, 2, "恰 2 槽");
+            assert_eq!(st.pending_execs.len(), 1, "第 3 个排队");
+        }
+        let daily_due_before: i64 = {
+            let st = sched.lock().unwrap();
+            st.rules
+                .iter()
+                .find(|rs| rs.rule.id == daily_id)
+                .unwrap()
+                .next_due_ms
+        };
+        assert!(
+            daily_due_before > now_ms() && daily_due_before != i64::MAX,
+            "对照 daily（未处理，created=刚才）常规值 = 次日 09:00"
+        );
+
+        // ---- 排队期间 CRUD reload（缺陷触发条件）----
+        {
+            let db = handle.state::<Mutex<Connection>>();
+            let conn = db.lock().unwrap();
+            sched.lock().unwrap().reload(&conn).unwrap();
+        }
+        // 修复点 1：排队条目 handled 已落库 → reload 重算 once → MAX（不复活）
+        {
+            let st = sched.lock().unwrap();
+            for id in &ids {
+                let due = st
+                    .rules
+                    .iter()
+                    .find(|rs| rs.rule.id == *id)
+                    .unwrap()
+                    .next_due_ms;
+                assert_eq!(due, i64::MAX, "once #{id} reload 后不复活（handled 持久化）");
+            }
+            // 对照：非排队 daily 照常重算（常规值不受排队保护波及）
+            let daily_due = st
+                .rules
+                .iter()
+                .find(|rs| rs.rule.id == daily_id)
+                .unwrap()
+                .next_due_ms;
+            assert_eq!(
+                daily_due, daily_due_before,
+                "非排队规则 reload 语义不回归（重算结果一致）"
+            );
+        }
+
+        // tick2：无重复 fire → 队列无重复条目、无新 running
+        run_tick(handle, &sched);
+        {
+            let st = sched.lock().unwrap();
+            assert_eq!(st.pending_execs.len(), 1, "队列无重复条目");
+            assert_eq!(st.pending_execs[0].rule.id, ids[2], "排队的仍是原第 3 条");
+        }
+        // db：3 条 once 的 handled 标记全落库（dispatch 时刻）
+        {
+            let db = handle.state::<Mutex<Connection>>();
+            let conn = db.lock().unwrap();
+            for id in &ids {
+                let (lt,): (Option<String>,) = conn
+                    .query_row(
+                        "SELECT last_triggered_at FROM reminders WHERE id = ?1",
+                        [id],
+                        |r| Ok((r.get(0)?,)),
+                    )
+                    .unwrap();
+                assert!(lt.is_some(), "once #{id} handled 已持久化");
+            }
+        }
+
+        // 清理：清队列（防出队）+ 等登记就绪 + 杀进程组
+        sched.lock().unwrap().pending_execs.clear();
+        {
+            use tauri::Manager;
+            let reg = handle.state::<Arc<Mutex<RunningTasks>>>();
+            for _ in 0..100 {
+                if reg.lock().unwrap().len() >= 2 {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            let mut r = reg.lock().unwrap();
+            for (_, proc_) in r.tasks.drain() {
+                crate::action_exec::kill_process_tree(proc_.pid);
+            }
+        }
+    }
+
+    // ---- TC-M4-07：validate kind 切换重置无关字段 ----
+
+    #[test]
+    fn normalize_resets_unrelated_fields_on_kind_switch() {
+        let c = conn();
+        // interval 行：schedule_at/weekdays 清空
+        let mut inp = input("custom", "任务", 30);
+        inp.schedule_kind = "interval".into();
+        inp.schedule_at = Some("10:00".into()); // 应被清
+        inp.schedule_weekdays = Some("[1,3]".into()); // 应被清
+        let r1 = insert_rule(&c, &inp).unwrap();
+        assert_eq!(r1.schedule_at, None);
+        assert_eq!(r1.schedule_weekdays, None);
+        assert_eq!(r1.interval_minutes, 30);
+        // daily 行：start/end 窗口清空 + interval 恒 0
+        let mut inp = input("custom", "定点", 30); // interval>0 传入
+        inp.schedule_kind = "daily".into();
+        inp.schedule_at = Some("09:00".into());
+        inp.start_time = Some("08:00".into()); // 应被清（防 in_window 卡住误 skipped）
+        inp.end_time = Some("22:00".into());
+        inp.schedule_weekdays = Some("[1,3,5]".into());
+        let r2 = insert_rule(&c, &inp).unwrap();
+        assert_eq!(r2.interval_minutes, 0, "P2-6：daily 行 interval 恒 0");
+        assert_eq!(r2.start_time, None);
+        assert_eq!(r2.end_time, None);
+        assert_eq!(r2.schedule_weekdays.as_deref(), Some("[1,3,5]"));
+        // once 行：过去时刻拒绝
+        let mut past = input("custom", "过期", 0);
+        past.schedule_kind = "once".into();
+        past.schedule_at = Some("2020-01-01T09:00".into());
+        assert!(insert_rule(&c, &past).is_err(), "once 过去时刻 validate 拒绝");
+        // weekdays 非法元素拒绝 / JSON 拒绝
+        let mut badw = input("custom", "x", 0);
+        badw.schedule_kind = "daily".into();
+        badw.schedule_at = Some("09:00".into());
+        badw.schedule_weekdays = Some("[0,8]".into());
+        assert!(insert_rule(&c, &badw).is_err());
+        badw.schedule_weekdays = Some("not json".into());
+        assert!(insert_rule(&c, &badw).is_err());
+        // exec：action_params JSON 解析失败拒绝（TC-M4-01-4）
+        let mut bade = input("custom", "执行", 0);
+        bade.schedule_kind = "once".into();
+        bade.schedule_at = Some("2030-01-01T09:00".into());
+        bade.action_type = "exec".into();
+        bade.action_params = Some("{not json".into());
+        assert!(insert_rule(&c, &bade).is_err(), "action_params JSON 失败拒绝");
+        // exec 正常：kind 强制 custom + 参数原样存
+        bade.action_params = Some(r#"{"command":"echo hi","timeout_minutes":10}"#.into());
+        let r3 = insert_rule(&c, &bade).unwrap();
+        assert_eq!(r3.action_type, "exec");
+        assert_eq!(r3.kind, "custom");
+        assert!(r3.action_params.as_deref().unwrap().contains("echo hi"));
+        // notify 缺省字段兼容：v1 载荷（无新字段）→ notify/interval
+        let r4 = insert_rule(&c, &input("hydration", "喝水", 30)).unwrap();
+        assert_eq!(r4.action_type, "notify");
+        assert_eq!(r4.schedule_kind, "interval");
+    }
+
+    // ---- TC-M4-13/14：snooze / skip_once（状态机 + 命令） ----
+
+    #[test]
+    fn skip_once_advances_by_kind_and_clears_snooze() {
+        // daily：next_due → 下个匹配日；snooze 未过期 → 一并清（N2 内存侧）
+        let at = daily_at(0, 10, 0);
+        let mut rule = daily_rule(1, "10:00", None);
+        rule.snooze_until = Some(rfc(at + 600_000));
+        let mut st = state_with(rule, at);
+        st.rules[0].next_due_ms = at;
+        let cleared = st.skip_once(1, at - 60_000).unwrap();
+        assert!(cleared, "snooze 未过期 → 通知写表清除");
+        assert_eq!(st.rules[0].rule.snooze_until, None);
+        assert_eq!(st.rules[0].next_due_ms, daily_at(1, 10, 0), "跳过 → 下个匹配日");
+        // 本周期不再触发
+        let (fired, skipped) = st.collect_due(at + 3_600_000, &rfc(at), 600);
+        assert!(fired.is_empty() && skipped.is_empty(), "跳过不触发不记录");
+        // once → MAX
+        let mut st2 = state_with(once_rule(2, daily_at(1, 21, 0)), 1);
+        st2.rules[0].next_due_ms = daily_at(1, 21, 0);
+        assert!(!st2.skip_once(2, 1).unwrap(), "无 snooze → 不写表");
+        assert_eq!(st2.rules[0].next_due_ms, i64::MAX);
+        // interval → +interval
+        let mut st3 = state_with(base_rule(3, 30), 1_000_000);
+        st3.rules[0].next_due_ms = 1_000_000;
+        st3.skip_once(3, 1_000_000).unwrap();
+        assert_eq!(st3.rules[0].next_due_ms, 1_000_000 + 1_800_000);
+        // 不存在 id → Err
+        assert!(st.skip_once(999, 1).is_err());
+    }
+
+    #[test]
+    fn reminders_snooze_command_writes_until_and_closes_log() {
+        // 命令级（mock runtime）：写 snooze_until + log 结案 via='snooze' +
+        // 内存 next_due 置为
+        let app = tauri::test::mock_app();
+        let handle = app.handle();
+        let c = conn();
+        let r = insert_rule(&c, &input("hydration", "喝水", 30)).unwrap();
+        let log_id = insert_log(&c, r.id, &rfc(1000)).unwrap();
+        let mut st = RemindersState::load(&c).unwrap();
+        st.rules[0].next_due_ms = 500;
+        handle.manage(Arc::new(Mutex::new(st)));
+        handle.manage(Mutex::new(c));
+        reminders_snooze(
+            handle.clone(),
+            handle.state::<Arc<Mutex<RemindersState>>>(),
+            log_id,
+        )
+        .unwrap();
+        let (until,): (Option<String>,) = {
+            let db = handle.state::<Mutex<Connection>>();
+            let conn = db.lock().unwrap();
+            conn.query_row("SELECT snooze_until FROM reminders WHERE id = ?1", [r.id], |row| {
+                Ok((row.get(0)?,))
+            })
+            .unwrap()
+        };
+        assert!(until.is_some(), "snooze_until 已写表（持久化）");
+        let via: String = {
+            let db = handle.state::<Mutex<Connection>>();
+            let conn = db.lock().unwrap();
+            conn.query_row(
+                "SELECT dismissed_via FROM reminder_logs WHERE id = ?1",
+                [log_id],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(via, "snooze", "当前 log 结案 via='snooze'");
+        let st = handle.state::<Arc<Mutex<RemindersState>>>();
+        let s = st.lock().unwrap();
+        let until_ms = parse_rfc3339_ms(until.as_deref().unwrap()).unwrap();
+        assert_eq!(
+            s.rules[0].next_due_ms, until_ms,
+            "内存 next_due 置为 snooze_until（直接置为，非 max——P1-1）"
+        );
+        // exec 型拒绝 snooze（仅 notify）
+        let c2 = conn();
+        let mut inp = input("custom", "执行", 0);
+        inp.schedule_kind = "once".into();
+        inp.schedule_at = Some("2030-01-01T09:00".into());
+        inp.action_type = "exec".into();
+        inp.action_params = Some(r#"{"command":"echo x"}"#.into());
+        let r2 = insert_rule(&c2, &inp).unwrap();
+        let log2 = insert_log(&c2, r2.id, &rfc(1000)).unwrap();
+        let app2 = tauri::test::mock_app();
+        let h2 = app2.handle();
+        h2.manage(Arc::new(Mutex::new(RemindersState::default())));
+        h2.manage(Mutex::new(c2));
+        assert!(reminders_snooze(
+            h2.clone(),
+            h2.state::<Arc<Mutex<RemindersState>>>(),
+            log2
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn tasks_skip_once_command_clears_snooze_in_db() {
+        let app = tauri::test::mock_app();
+        let handle = app.handle();
+        let c = conn();
+        // interval 行插入（normalize 校验 1-1440），再 UPDATE 成 daily + snooze
+        let r = insert_rule(&c, &input("custom", "定点", 30)).unwrap();
+        c.execute(
+            "UPDATE reminders SET schedule_kind = 'daily', schedule_at = '10:00', \
+             snooze_until = ?2 WHERE id = ?1",
+            params![r.id, rfc(now_ms() + 600_000)],
+        )
+        .unwrap();
+        let mut st = RemindersState::load(&c).unwrap();
+        // 直接构造 snooze 未过期的内存态
+        st.rules[0].rule.snooze_until = Some(rfc(now_ms() + 600_000));
+        st.rules[0].next_due_ms = now_ms() + 600_000;
+        handle.manage(Arc::new(Mutex::new(st)));
+        handle.manage(Mutex::new(c));
+        tasks_skip_once(
+            handle.clone(),
+            handle.state::<Arc<Mutex<RemindersState>>>(),
+            r.id,
+        )
+        .unwrap();
+        let (until,): (Option<String>,) = {
+            let db = handle.state::<Mutex<Connection>>();
+            let conn = db.lock().unwrap();
+            conn.query_row("SELECT snooze_until FROM reminders WHERE id = ?1", [r.id], |row| {
+                Ok((row.get(0)?,))
+            })
+            .unwrap()
+        };
+        assert_eq!(until, None, "N2：写表同清（防 reload 复活）");
+    }
+
+    // ---- TC-M4-16：action_logs 增删查全链路 + 悬空保留 ----
+
+    #[test]
+    fn action_logs_crud_pagination_and_orphan_survival() {
+        let c = conn();
+        let r = insert_rule(&c, &input("custom", "执行", 30)).unwrap();
+        // 60 条 ok 日志 + 1 条 running
+        for i in 0..60 {
+            finish_action_log_with(
+                &c,
+                insert_action_log_running(&c, r.id, "exec", &rfc(1000 + i), &rfc(1000 + i))
+                    .unwrap(),
+                "ok",
+                crate::action_exec::SUMMARY_OK,
+                Some(&format!("tail-{i}")),
+                Some(0),
+                &rfc(2000 + i),
+            )
+            .unwrap();
+        }
+        insert_action_log_running(&c, r.id, "exec", &rfc(999_000), &rfc(999_000)).unwrap();
+        // 第 1 页：倒序（最新 running 在前）50 条
+        let (page1, total) = list_action_logs(&c, None, 1).unwrap();
+        assert_eq!(total, 61);
+        assert_eq!(page1.len(), 50);
+        assert_eq!(page1[0].status, "running", "倒序：id 最大（running 那条）在前");
+        assert_eq!(page1[1].output_tail.as_deref(), Some("tail-59"));
+        // 第 2 页：11 条
+        let (page2, _) = list_action_logs(&c, None, 2).unwrap();
+        assert_eq!(page2.len(), 11);
+        assert_eq!(page2.last().unwrap().output_tail.as_deref(), Some("tail-0"));
+        // 按规则过滤
+        let (filtered, ftotal) = list_action_logs(&c, Some(r.id), 1).unwrap();
+        assert_eq!(ftotal, 61);
+        assert_eq!(filtered.len(), 50);
+        // 删除规则 → 历史保留（悬空 reminder_id + 冗余快照可读）
+        delete_rule(&c, r.id).unwrap();
+        let (after, atotal) = list_action_logs(&c, None, 1).unwrap();
+        assert_eq!(atotal, 61, "规则删除后历史保留");
+        assert_eq!(after[0].action_type, "exec", "action_type 冗余快照可读");
+        // skipped 插入（超窗两来源共用形状）
+        let _ = insert_action_log_skipped(
+            &c,
+            999,
+            crate::action_exec::SUMMARY_MISSED,
+            &rfc(1000),
+            &rfc(2000),
+        )
+        .unwrap();
+        let (rows, total) = list_action_logs(&c, None, 1).unwrap();
+        assert_eq!(total, 62);
+        assert_eq!(rows[0].status, "skipped", "倒序：最新 skipped 在首页首位");
+    }
+
+    // ---- R2（TC-M4-15-1 P2）：finish_action_log_with 的 running 守卫 ----
+
+    #[test]
+    fn finish_action_log_with_guarded_by_running_status() {
+        // 守卫钉子：已离开 running 态的行（如 abort 先行结案 interrupted、
+        // 或已完成 ok）不被后续完成回写覆盖——两个写入方以行状态为屏障
+        let c = conn();
+        let log_id = insert_action_log_running(&c, 1, "exec", &rfc(1000), &rfc(1000)).unwrap();
+        // running → 首次正常回写成功
+        finish_action_log_with(
+            &c, log_id, "ok", crate::action_exec::SUMMARY_OK, Some("out"), Some(0), &rfc(2000),
+        )
+        .unwrap();
+        // 迟到的第二次回写（failed）被守卫拦下：仍是 ok
+        finish_action_log_with(
+            &c, log_id, "failed", crate::action_exec::SUMMARY_FAILED, None, Some(9), &rfc(3000),
+        )
+        .unwrap();
+        let (status, summary, exit_code): (String, String, Option<i32>) = c
+            .query_row(
+                "SELECT status, summary, exit_code FROM action_logs WHERE id = ?1",
+                [log_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(status, "ok", "已结案行不被二次回写覆盖");
+        assert_eq!(summary, crate::action_exec::SUMMARY_OK);
+        assert_eq!(exit_code, Some(0), "旧值全保留（守卫 = 整行不动）");
+        // abort 结案（interrupted）后的完成回写同样被拦——action_exec 侧的
+        // 真实进程竞态钉子覆盖该主场景，此处钉纯 SQL 语义
+        let log2 = insert_action_log_running(&c, 2, "exec", &rfc(1000), &rfc(1000)).unwrap();
+        c.execute(
+            "UPDATE action_logs SET status = 'failed', summary = ?2 WHERE id = ?1",
+            params![log2, crate::action_exec::SUMMARY_INTERRUPTED],
+        )
+        .unwrap();
+        finish_action_log_with(
+            &c, log2, "failed", crate::action_exec::SUMMARY_FAILED, None, None, &rfc(4000),
+        )
+        .unwrap();
+        let summary2: String = c
+            .query_row("SELECT summary FROM action_logs WHERE id = ?1", [log2], |r| r.get(0))
+            .unwrap();
+        assert_eq!(summary2, crate::action_exec::SUMMARY_INTERRUPTED, "interrupted 不被通用 failed 覆盖");
+    }
+
+    // ---- 模板命令：exec trigger_now 走分派（试一试 = 真实执行，P3-9） ----
+
+    #[test]
+    fn trigger_now_exec_dispatch_writes_running_log() {
+        let app = tauri::test::mock_app();
+        let handle = app.handle();
+        let c = conn();
+        let mut inp = input("custom", "执行任务", 30);
+        inp.schedule_kind = "once".into();
+        inp.schedule_at = Some("2030-01-01T09:00".into());
+        inp.action_type = "exec".into();
+        inp.action_params = Some(r#"{"command":"echo test-ran"}"#.into());
+        let r = insert_rule(&c, &inp).unwrap();
+        let st = Arc::new(Mutex::new(RemindersState::load(&c).unwrap()));
+        handle.manage(st);
+        // RunningTasks 登记（dispatch_exec 读取；issue #9：先 manage 再触发）
+        handle.manage(Arc::new(Mutex::new(crate::action_exec::RunningTasks::default())));
+        handle.manage(Mutex::new(c));
+        let status = reminders_trigger_now(
+            handle.clone(),
+            handle.state::<Arc<Mutex<RemindersState>>>(),
+            r.id,
+        )
+        .unwrap();
+        assert_eq!(status, "fired");
+        // dispatch_exec 已 insert running 日志（mock runtime 下 spawn 可能未完成，
+        // 但 running 行同步写——钉住分派确实发生）
+        let (n,): (i64,) = {
+            let db = handle.state::<Mutex<Connection>>();
+            let conn = db.lock().unwrap();
+            conn.query_row("SELECT COUNT(*) FROM action_logs", [], |row| Ok((row.get(0)?,)))
+                .unwrap()
+        };
+        assert!(n >= 1, "exec 试一试真实执行（写 action_logs）");
     }
 }

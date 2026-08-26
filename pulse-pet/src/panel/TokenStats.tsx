@@ -3,10 +3,9 @@ import {
   fetchTokenRows,
   formatCost,
   formatTokens,
+  isTauriRuntime,
   localDateStr,
-  localDayEndMs,
-  localDayStartMs,
-  rangeForPreset,
+  resolveQueryRange,
   sumRows,
   type GroupBy,
   type StatsError,
@@ -95,19 +94,14 @@ export default function TokenStats() {
   /** 模型筛选（作用域仅柱图，SCOPE E；null 键 = 「未知模型」桶）。 */
   const [selectedModels, setSelectedModels] = useState<Set<ModelKey> | null>(null);
 
-  // 跨度计算：预设含当天；自定义从/至均为整天边界（含当天）
-  const range = useMemo(() => {
-    if (preset === "custom") {
-      const fromMs = Math.min(localDayStartMs(fromStr), localDayStartMs(toStr));
-      const toMs = Math.max(localDayEndMs(fromStr), localDayEndMs(toStr));
-      return { fromMs, toMs };
-    }
-    return rangeForPreset(preset);
-  }, [preset, fromStr, toStr]);
-
   const load = useCallback(async () => {
     setLoading(true);
     try {
+      // v2 M4 R3（tester R2 P2 修复）：查询窗口**每次 load 重算**——此前 range
+      // 在挂载时 useMemo 定格（面板 hide/show 不重挂载），活跃会话 time_updated
+      // 越过定格 toMs 后被整体排除且 Refresh 不可追回；preset 的 to 随调用时刻
+      // 前进，custom（用户指定区间）整天边界语义不变（resolveQueryRange）。
+      const range = resolveQueryRange(preset, fromStr, toStr);
       // 时序/汇总维度 + 固定 session 维度（会话列表，TC-TK-09 ④）
       const [dim, sess] = await Promise.all([
         fetchTokenRows(range.fromMs, range.toMs, dimension as GroupBy),
@@ -123,10 +117,37 @@ export default function TokenStats() {
     } finally {
       setLoading(false);
     }
-  }, [range.fromMs, range.toMs, dimension]);
+  }, [preset, fromStr, toStr, dimension]);
 
   useEffect(() => {
     void load();
+  }, [load]);
+
+  /**
+   * v2 M4 并入修复（M3 移交 P2，TC-M3-11/12）：面板 Token 页数据定格——
+   * load 仅挂载执行 + panel visible:false 隐藏创建即挂载 → 长运行 App 首开
+   * 面板数据为启动时刻快照。仿 Settings.tsx tauri://focus 双触发：面板重新
+   * 可见（重开必触发）时刷新——「今日」默认跨度下首开即近实时值。
+   */
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    let unlisten: (() => void) | undefined;
+    let alive = true;
+    void import("@tauri-apps/api/window")
+      .then(({ getCurrentWindow }) =>
+        getCurrentWindow().onFocusChanged(({ payload: focused }) => {
+          if (focused) void load();
+        }),
+      )
+      .then((un) => {
+        if (alive) unlisten = un;
+        else un();
+      })
+      .catch((e) => console.error("[pulsepet] token focus refresh bind failed:", e));
+    return () => {
+      alive = false;
+      unlisten?.();
+    };
   }, [load]);
 
   // 数据/维度切换 → 模型筛选重置为全勾（新跨度 chip 集合变化）

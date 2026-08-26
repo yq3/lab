@@ -171,6 +171,41 @@ select {
   border-left-color: #d96c2c;
 }
 
+/* ---- v2 M4（TC-M4-13）：critical 提醒气泡的 snooze 按钮（hover 浮现） ---- */
+/* 可 snooze 气泡：文案右留按钮位；按钮默认隐形，hover 气泡时浮现（不喧宾） */
+.pet-bubble.snoozable {
+  padding-right: 30px;
+}
+
+.pet-bubble-snooze {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  appearance: none;
+  border: 2px solid var(--pet-world-line);
+  background: var(--pet-world-surface);
+  color: #29241d;
+  font-size: 11px;
+  font-family: inherit;
+  line-height: 1;
+  padding: 4px 6px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease-out;
+  white-space: nowrap;
+}
+
+.pet-bubble:hover .pet-bubble-snooze,
+.pet-bubble-snooze:focus-visible {
+  opacity: 1;
+}
+
+.pet-bubble-snooze:hover {
+  background: #ef8b4d; /* 蜜橘 hover（pet-world 物件固定色系） */
+  color: #17130f;
+}
+
 /* ---- 宠物右键菜单（v2 M2 同语言翻新：暖白 + 2px 墨边 + 硬阴影 + 直角项；
    行为零改动，clamp/关闭逻辑在 pet-menu.ts / PetMenu.tsx） ---- */
 .pet-menu {
@@ -1146,6 +1181,58 @@ select {
   gap: 8px;
 }
 
+/* ---- v2 M4 R1 补充（用户 2026-08-25 二次裁定）：新建/保存按钮**并入表单
+ * 末行字段行右端**（无独立动作行）+ accent 强调色。独立类——
+ * .reminder-form-actions 为 Todo 插件页共用，保持原样零波及。 ---- */
+/* 行内形态：margin-left:auto 在 flex 行（reminder-form-row / task-weekdays）
+ * 内推到右端；inline-flex 随内容宽。 */
+.task-form-actions {
+  display: inline-flex;
+  gap: 8px;
+  margin-left: auto;
+  /* reminder-form-row 为 align-items:flex-end——按钮组底缘与输入框底缘对齐
+   *（.seg 基类 28px vs 输入 32px，padding 补齐到同一基线） */
+  align-self: flex-end;
+  padding-bottom: 2px;
+}
+
+/* task-weekdays 为 align-items:center——按钮组居中随行（覆盖默认底对齐） */
+.task-weekdays .task-form-actions {
+  align-self: center;
+  padding-bottom: 0;
+}
+
+/* todo 编辑态（无字段行）：flex-column 表单的直接子项，margin-left:auto
+ * 在列向同样推到右缘 = 右下角 */
+.reminder-form > .task-form-actions {
+  display: flex;
+}
+
+.task-form-actions .seg,
+.task-form-actions .primary {
+  min-height: 32px;
+  padding: 5px 16px;
+  font-size: 13px;
+}
+
+/* 主按钮（新建/保存例程）：M2 accent 强调（浅色蜜橘 / 深色项圈青——各主题
+ * 自己的强调色，非默认 ink 主按钮），前景 surface（浅色橙底暖白字 / 深色
+ * 青底炭字，两主题对比均达标），hover 加深走 accent-ink；硬阴影对齐 M2
+ * 按钮语言（与激活 tab 的 accent 阴影同族）。 */
+.task-form-actions .primary {
+  background: var(--accent);
+  color: var(--surface);
+  border: 2px solid var(--accent);
+  box-shadow: var(--shadow-hard);
+  cursor: pointer;
+}
+
+.task-form-actions .primary:hover {
+  background: var(--accent-ink);
+  border-color: var(--accent-ink);
+  color: var(--surface);
+}
+
 /* 主按钮：32px 与输入框齐高（视觉权重对齐表单） */
 .reminder-form-actions .seg,
 .reminder-form-actions .primary {
@@ -1185,6 +1272,221 @@ select {
   color: var(--bg);
   font-size: 13px;
   box-shadow: var(--shadow-hard);
+}
+
+/* ---- v2 M4：定时任务（Tasks.tsx——徽标/模板块/星期/历史区，落 M2 token） ---- */
+
+/* 动作徽标（💧 notify / ⚡ exec / 📋 todo 派生）：固定宽不让行距跳动 */
+.task-badge {
+  flex: none;
+  width: 22px;
+  text-align: center;
+  font-size: 14px;
+}
+
+/* opencode 例程模板块（§4.6）：surface-2 底 + 虚线边（hint 同族容器） */
+.task-tpl-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--surface-2);
+  border: 1px dashed var(--line);
+}
+
+.task-tpl-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+.task-tpl-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* --auto 勾选后的危险色警示（R7：危险须可辨） */
+.task-tpl-row .danger-check,
+.task-tpl-row .danger-check input {
+  color: var(--danger);
+}
+
+.task-danger-hint {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--danger);
+}
+
+/* 等宽多行 command / 指令 / 输出（exec 的技术字面量） */
+.task-textarea,
+.task-output {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  border: 2px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 10px;
+}
+
+.task-textarea:focus,
+.task-output:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.task-command-label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+/* 星期过滤勾选行（daily） */
+.task-weekdays {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  font-size: 12px;
+}
+
+.task-weekdays-label {
+  color: var(--ink-soft);
+}
+
+.task-weekday-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+}
+
+/* 执行历史区（§4.7 折叠面板 + 分页 + 状态色点） */
+.task-history-toggle {
+  font-weight: 600;
+}
+
+.task-history-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.task-history-controls select {
+  padding: 5px 10px;
+  min-height: 28px;
+  border: 2px solid var(--line);
+  border-radius: 2px;
+  font-size: 12px;
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.task-history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.task-history-item {
+  border-bottom: 1px dashed var(--line);
+}
+
+/* 行：整行可点展开（button 复位 + flex 布局） */
+.task-history-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 8px 4px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+}
+
+.task-history-row:hover {
+  background: var(--surface-2);
+}
+
+/* 状态色点（ok 绿 · failed 红 · skipped 灰 · running 蓝，M2 token 同源） */
+.task-status-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ink-faint);
+}
+
+.task-status-dot.status-ok {
+  background: var(--ok);
+}
+
+.task-status-dot.status-failed {
+  background: var(--danger);
+}
+
+.task-status-dot.status-skipped {
+  background: var(--ink-faint);
+}
+
+/* running 蓝（§4.7 设计字面；M2 token 无蓝——两主题固定 #4a7fb5） */
+.task-status-dot.status-running {
+  background: #4a7fb5;
+}
+
+.task-history-time {
+  color: var(--ink-faint);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+
+.task-history-summary {
+  flex: 1;
+  min-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-history-status {
+  color: var(--ink-faint);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+
+/* 展开详情：补跑延迟 + 输出尾部（等宽，2KB 内） */
+.task-history-detail {
+  padding: 4px 4px 12px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.task-detail-label {
+  margin: 0;
+  font-size: 11px;
+  color: var(--ink-faint);
+}
+
+.task-output {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 180px;
+  overflow: auto;
 }
 
 /* ---- M7 Todo 插件 ---- */

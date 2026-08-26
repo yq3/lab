@@ -23,6 +23,12 @@ export type ReminderKind = "hydration" | "rest" | "custom";
 /** Rust 侧允许的全部 kind（读取/展示用）。 */
 export type ReminderKindAll = ReminderKind | "todo";
 
+/** v2 M4：动作类型（§4.2）。 */
+export type ActionType = "notify" | "exec";
+
+/** v2 M4：调度类型（§4.2，weekly 并入 daily 的 weekdays 过滤）。 */
+export type ScheduleKind = "interval" | "daily" | "once";
+
 export interface ReminderRule {
   id: number;
   kind: ReminderKindAll;
@@ -37,9 +43,27 @@ export interface ReminderRule {
   /** M7：todo 派生提醒的截止时刻（"YYYY-MM-DDTHH:MM"）；非 todo 为 null。 */
   todo_due_at: string | null;
   created_at: string;
+  /** v2 M4：动作类型（'notify' | 'exec'）。 */
+  action_type: ActionType;
+  /** v2 M4：动作参数 JSON 文本（exec = {command, cwd?, timeout_minutes?, opencode_auto?}）。 */
+  action_params: string | null;
+  /** v2 M4：调度类型（'interval' | 'daily' | 'once'；daily/once 行 interval 恒 0）。 */
+  schedule_kind: ScheduleKind;
+  /** v2 M4：daily → "HH:MM"；once → "YYYY-MM-DDTHH:MM"；interval → null。 */
+  schedule_at: string | null;
+  /** v2 M4：daily 的星期过滤 JSON "[1,3,5]"（1=周一…7=周日；null/空 = 每天）。 */
+  schedule_weekdays: string | null;
+  /** v2 M4：snooze 顺延终点（RFC3339；触发时清空）。 */
+  snooze_until: string | null;
+  /** v2 M4：skipped 判定时刻（与 last_triggered_at 分离，P3-2）。 */
+  last_skipped_at: string | null;
 }
 
-/** CRUD 入参（与 Rust `ReminderInput` 对应；kind=todo 仅出现在编辑派生规则时）。 */
+/**
+ * CRUD 入参（与 Rust `ReminderInput` 对应）。v2 M4 +5 字段全可选——旧调用
+ * （v1 载荷/测试 helper）不带新字段时 JSON 序列化丢弃 → Rust serde default
+ * 取 notify/interval，v1 行为不变。
+ */
 export interface ReminderInput {
   kind: ReminderKindAll;
   label: string;
@@ -48,6 +72,16 @@ export interface ReminderInput {
   end_time: string | null;
   enabled: boolean;
   use_fireworks: boolean;
+  /** v2 M4：缺省 notify。 */
+  action_type?: ActionType;
+  /** v2 M4：动作参数 JSON 文本（exec 必填）。 */
+  action_params?: string | null;
+  /** v2 M4：缺省 interval。 */
+  schedule_kind?: ScheduleKind;
+  /** v2 M4：daily → "HH:MM"；once → "YYYY-MM-DDTHH:MM"。 */
+  schedule_at?: string | null;
+  /** v2 M4：daily 的星期过滤 JSON 文本。 */
+  schedule_weekdays?: string | null;
 }
 
 export interface ReminderStat {
@@ -129,6 +163,7 @@ export const MAX_INTERVAL_MINUTES = 1440;
  * 规则行 → 表单值（M4 P2 ②，M7 清偿）：**保留原始 kind**（todo 派生规则不再
  * 降级为 custom——快捷开关/编辑不得改写 kind，source_todo_id 在 Rust update
  * 不触碰该列天然保留）；interval=0（todo 单次）原样带回由校验放行。
+ * v2 M4：动作/调度新字段一并带回（快捷开关路径不丢 exec/定点语义）。
  */
 export function ruleToForm(r: ReminderRule): ReminderInput {
   return {
@@ -139,6 +174,11 @@ export function ruleToForm(r: ReminderRule): ReminderInput {
     end_time: r.end_time,
     enabled: r.enabled,
     use_fireworks: r.use_fireworks,
+    action_type: r.action_type,
+    action_params: r.action_params,
+    schedule_kind: r.schedule_kind,
+    schedule_at: r.schedule_at,
+    schedule_weekdays: r.schedule_weekdays,
   };
 }
 
@@ -167,6 +207,55 @@ export function validateReminderInput(input: ReminderInput, lang?: Lang): string
     };
     return checkAbs(input.start_time, whatStart()) ?? checkAbs(input.end_time, whatEnd());
   }
+
+  // ---- v2 M4：动作/调度泛化校验（与 Rust normalize_input 同规则；Rust 为权威） ----
+
+  const actionType = input.action_type ?? "notify";
+  if (actionType !== "notify" && actionType !== "exec") {
+    return t("tasks.validation.actionBad", undefined, lang);
+  }
+  const scheduleKind = input.schedule_kind ?? "interval";
+  if (scheduleKind !== "interval" && scheduleKind !== "daily" && scheduleKind !== "once") {
+    return t("tasks.validation.scheduleBad", undefined, lang);
+  }
+
+  // exec：action_params JSON 解析 + 执行器校验（TC-M4-01-4/07）
+  if (actionType === "exec") {
+    const text = (input.action_params ?? "").trim();
+    if (!text) return t("tasks.validation.paramsMissing", undefined, lang);
+    let params: unknown;
+    try {
+      params = JSON.parse(text);
+    } catch {
+      return t("tasks.validation.paramsMissing", undefined, lang);
+    }
+    const err = validateExecParams(params as Record<string, unknown>, lang);
+    if (err) return err;
+  }
+
+  if (scheduleKind === "daily") {
+    const at = (input.schedule_at ?? "").trim();
+    if (!at) return t("tasks.validation.atRequired", undefined, lang);
+    if (!/^\d{2}:\d{2}$/.test(at) || !hhmmOk(at)) {
+      return t("tasks.validation.atFormat", undefined, lang);
+    }
+    const wdErr = validateWeekdays(input.schedule_weekdays, lang);
+    if (wdErr) return wdErr;
+    return null; // daily：interval/窗口字段由 Rust normalize 重置（前端不校验）
+  }
+  if (scheduleKind === "once") {
+    const at = (input.schedule_at ?? "").trim();
+    if (!at) return t("tasks.validation.atRequired", undefined, lang);
+    if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(at)) {
+      return t("tasks.validation.dtFormat", undefined, lang);
+    }
+    const ms = Date.parse(at); // 本地时区解析（无 Z 后缀）
+    if (Number.isNaN(ms)) return t("tasks.validation.dtFormat", undefined, lang);
+    if (ms <= Date.now()) return t("tasks.validation.dtPast", undefined, lang);
+    return null;
+  }
+
+  // interval：v1 语义（1-1440；HH:MM 窗口；exec 行不消费窗口——由 Rust 重置）
   if (input.interval_minutes < 1 || input.interval_minutes > MAX_INTERVAL_MINUTES) {
     return t("reminders.validation.intervalBad", { max: MAX_INTERVAL_MINUTES }, lang);
   }
@@ -179,10 +268,57 @@ export function validateReminderInput(input: ReminderInput, lang?: Lang): string
     if (h > 23 || min > 59) return t("reminders.validation.timeRange", { what }, lang);
     return null;
   };
+  if (actionType === "exec") return null; // exec+interval：窗口不校验（Rust 清空）
   const startErr = checkHhmm(input.start_time, whatStart());
   if (startErr) return startErr;
   const endErr = checkHhmm(input.end_time, whatEnd());
   if (endErr) return endErr;
+  return null;
+}
+
+function hhmmOk(s: string): boolean {
+  const m = /^(\d{2}):(\d{2})$/.exec(s);
+  if (!m) return false;
+  return Number(m[1]) <= 23 && Number(m[2]) <= 59;
+}
+
+/** exec action_params 校验（与 Rust ExecExecutor::validate_params 同规则）。 */
+export function validateExecParams(
+  params: Record<string, unknown>,
+  lang?: Lang,
+): string | null {
+  const command = typeof params.command === "string" ? params.command : "";
+  if (!command.trim()) return t("tasks.validation.commandEmpty", undefined, lang);
+  if (command.length > 2000) return t("tasks.validation.commandLong", undefined, lang);
+  if (params.cwd != null && typeof params.cwd === "string" && params.cwd.trim()) {
+    // 存在性/目录性只做宽松提示（Rust 权威校验；浏览器端无法同步判定）
+    void 0;
+  }
+  if (params.timeout_minutes != null) {
+    const v = params.timeout_minutes;
+    if (typeof v !== "number" || !Number.isInteger(v) || v < 1 || v > 120) {
+      return t("tasks.validation.timeoutBad", undefined, lang);
+    }
+  }
+  if (params.opencode_auto != null && typeof params.opencode_auto !== "boolean") {
+    return t("tasks.validation.autoBad", undefined, lang);
+  }
+  return null;
+}
+
+/** weekdays JSON 文本校验（1-7、合法数组）。 */
+export function validateWeekdays(s: string | null | undefined, lang?: Lang): string | null {
+  const text = (s ?? "").trim();
+  if (!text) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return t("tasks.validation.weekdaysBad", undefined, lang);
+  }
+  if (!Array.isArray(parsed) || !parsed.every((d) => typeof d === "number" && d >= 1 && d <= 7 && Number.isInteger(d))) {
+    return t("tasks.validation.weekdaysBad", undefined, lang);
+  }
   return null;
 }
 
@@ -228,6 +364,156 @@ export function formatLogTime(ts: string | null): string {
   if (Number.isNaN(d.getTime())) return ts;
   const p = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+// ---- v2 M4：动作徽标 + 调度摘要 + opencode 模板（§4.6/§4.7） ----
+
+/** 动作徽标：💧 notify / ⚡ exec（todo 派生行 📋 保持 M2 展示）。 */
+export function actionBadge(rule: Pick<ReminderRule, "kind" | "action_type">): string {
+  if (rule.kind === "todo") return "📋";
+  return rule.action_type === "exec" ? "⚡" : "💧";
+}
+
+/** 动作徽标 title 说明（悬停提示）。 */
+export function actionBadgeTitle(rule: Pick<ReminderRule, "kind" | "action_type">, lang?: Lang): string {
+  if (rule.kind === "todo") return t("reminders.kind.todoDerived", undefined, lang);
+  return t(
+    rule.action_type === "exec" ? "tasks.badge.exec" : "tasks.badge.notify",
+    undefined,
+    lang,
+  );
+}
+
+/** weekdays JSON → 数字数组（空/解析失败 = 每天空数组）。 */
+export function parseWeekdays(s: string | null | undefined): number[] {
+  if (!s) return [];
+  try {
+    const arr = JSON.parse(s);
+    if (!Array.isArray(arr)) return [];
+    return arr.filter((d) => typeof d === "number" && d >= 1 && d <= 7);
+  } catch {
+    return [];
+  }
+}
+
+/** weekdays 数字数组 → 规范 JSON 文本（空数组 = null = 每天）。 */
+export function weekdaysToJson(days: number[]): string | null {
+  const uniq = [...new Set(days)].filter((d) => d >= 1 && d <= 7).sort((a, b) => a - b);
+  return uniq.length ? JSON.stringify(uniq) : null;
+}
+
+/**
+ * 调度摘要（列表行 · §4.7）：「每 30 分钟 · 09:00-18:00」/「每天 09:00」/
+ * 「周三、五 09:00」/「一次 · 08-25 21:00」；todo 派生行走既有截止展示。
+ */
+export function scheduleSummary(
+  rule: Pick<
+    ReminderRule,
+    "kind" | "interval_minutes" | "start_time" | "end_time" | "schedule_kind" |
+    "schedule_at" | "schedule_weekdays"
+  >,
+  lang?: Lang,
+): string {
+  const wdNames = parseWeekdays(rule.schedule_weekdays).map(
+    (d) => t(`tasks.weekday.${d}`, undefined, lang),
+  );
+  switch (rule.schedule_kind) {
+    case "daily": {
+      const at = rule.schedule_at ?? "";
+      if (!wdNames.length) return t("tasks.summary.daily", { at }, lang);
+      return t("tasks.summary.dailyDays", { days: wdNames.join("、"), at }, lang);
+    }
+    case "once": {
+      // "YYYY-MM-DDTHH:MM" → "MM-DD HH:MM"（就近可读）
+      const at = (rule.schedule_at ?? "").replace(/^(\d{4})-(\d{2}-\d{2})T/, "$2 ");
+      return t("tasks.summary.once", { at }, lang);
+    }
+    default: {
+      // interval + 可选时间窗
+      const base = formatInterval(rule.interval_minutes, lang);
+      const win = formatWindow(rule.start_time, rule.end_time, lang);
+      if (rule.start_time || rule.end_time) {
+        return `${base} · ${win}`;
+      }
+      return base;
+    }
+  }
+}
+
+/**
+ * opencode 例程模板拼接（§4.6，纯填表辅助——执行层不感知 opencode）：
+ * `opencode run --title "pulsepet 例程: <任务名>" [--auto] "<指令>"`；
+ * 不用 --dir（cwd 字段即工作目录）。
+ */
+export function buildOpencodeCommand(
+  taskName: string,
+  instruction: string,
+  auto: boolean,
+): string {
+  const title = `pulsepet 例程: ${taskName.trim()}`;
+  const instr = instruction.trim();
+  const autoFlag = auto ? " --auto" : "";
+  return `opencode run --title ${shellQuote(title)}${autoFlag} ${shellQuote(instr)}`;
+}
+
+/** POSIX 单引号安全引用（sh -c 双层语义下最稳的引用形态）。 */
+export function shellQuote(s: string): string {
+  return `'${s.replace(/'/g, `'\\''`)}'`;
+}
+
+/**
+ * action_logs.summary 模板键 → 当前语言渲染（与 Rust i18n::render_task_summary
+ * 同口径；参数化键 `task.summary.timeout:N`）。
+ */
+export function renderTaskSummary(
+  stored: string,
+  exitCode?: number | null,
+  lang?: Lang,
+): string {
+  const timeoutMatch = /^task\.summary\.timeout:(\d+)$/.exec(stored);
+  if (timeoutMatch) {
+    return t("task.summary.timeout", { n: timeoutMatch[1] }, lang);
+  }
+  switch (stored) {
+    case "task.summary.ok":
+      return t("task.summary.ok", undefined, lang);
+    case "task.summary.failed":
+      return exitCode != null
+        ? t("task.summary.failed", { n: exitCode }, lang)
+        : t("task.summary.failedNoCode", undefined, lang);
+    case "task.summary.missed":
+      return t("task.summary.missed", undefined, lang);
+    case "task.summary.paused":
+      return t("task.summary.paused", undefined, lang);
+    case "task.summary.interrupted":
+      return t("task.summary.interrupted", undefined, lang);
+    case "task.summary.stale":
+      return t("task.summary.stale", undefined, lang);
+    default:
+      return stored; // 未知键原样（可观测不静默）
+  }
+}
+
+/** action_logs 行（Rust ActionLog serde 同名字段）。 */
+export interface ActionLog {
+  id: number;
+  reminder_id: number;
+  action_type: string;
+  status: string;
+  summary: string;
+  output_tail: string | null;
+  exit_code: number | null;
+  started_at: string;
+  finished_at: string | null;
+  scheduled_at: string | null;
+}
+
+/** action_logs_list 分页返回（Rust ActionLogPage）。 */
+export interface ActionLogPage {
+  rows: ActionLog[];
+  total: number;
+  page: number;
+  page_size: number;
 }
 
 // ---- 触发事件解析（纯函数，供 bridge/单测） ----
@@ -336,4 +622,31 @@ export async function triggerReminderNow(id: number): Promise<string> {
   if (!isTauriRuntime()) throw notInApp();
   const { invoke } = await import("@tauri-apps/api/core");
   return invoke<string>("reminders_trigger_now", { id });
+}
+
+/** v2 M4：snooze「稍后 10 分钟」（仅 notify；气泡按钮 invoke）。 */
+export async function snoozeReminder(logId: number): Promise<void> {
+  if (!isTauriRuntime()) throw notInApp();
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke("reminders_snooze", { logId });
+}
+
+/** v2 M4：「跳过本次」（行操作；不触发不记录）。 */
+export async function skipTaskOnce(id: number): Promise<void> {
+  if (!isTauriRuntime()) throw notInApp();
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke("tasks_skip_once", { id });
+}
+
+/** v2 M4：执行历史分页查询（倒序 50 条/页；reminderId 可选过滤）。 */
+export async function fetchActionLogs(
+  reminderId: number | null,
+  page: number,
+): Promise<ActionLogPage> {
+  if (!isTauriRuntime()) throw notInApp();
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<ActionLogPage>("action_logs_list", {
+    reminderId,
+    page: page ?? 1,
+  });
 }

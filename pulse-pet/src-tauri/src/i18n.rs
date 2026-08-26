@@ -264,6 +264,59 @@ impl Lang {
             Lang::En => "Installed; restart your CC session to activate it",
         }
     }
+
+    // ---- v2 M4：定时任务 summary 模板（§4.8 P3-3——存模板键，展示按当前
+    //      语言渲染；action_logs.summary 列 + 结果气泡 text 消费）----
+
+    /// action_logs.summary 存储键 → 当前语言渲染。参数化键：failed 用
+    /// exit_code；timeout 的分钟数以 `key:N` 形式内嵌（与 TS 侧
+    /// renderTaskSummary 同口径）。未知键原样返回（可观测不静默）。
+    pub fn render_task_summary(&self, stored: &str, exit_code: Option<i32>) -> String {
+        match stored.split_once(':') {
+            Some(("task.summary.timeout", n)) => {
+                let n = n.trim();
+                match self {
+                    Lang::Zh => format!("超时（{n} 分钟）被终止"),
+                    Lang::En => format!("Timed out (terminated after {n} min)"),
+                }
+            }
+            _ if stored == "task.summary.ok" => match self {
+                Lang::Zh => "任务完成".into(),
+                Lang::En => "Task finished".into(),
+            },
+            _ if stored == "task.summary.failed" => match (self, exit_code) {
+                (Lang::Zh, Some(n)) => format!("失败（退出码 {n}）"),
+                (Lang::En, Some(n)) => format!("Failed (exit code {n})"),
+                (Lang::Zh, None) => "失败".into(),
+                (Lang::En, None) => "Failed".into(),
+            },
+            _ if stored == "task.summary.missed" => match self {
+                Lang::Zh => "错过补跑窗（15 分钟）".into(),
+                Lang::En => "Missed catch-up window (15 min)".into(),
+            },
+            _ if stored == "task.summary.paused" => match self {
+                Lang::Zh => "暂停期间跳过".into(),
+                Lang::En => "Skipped while paused".into(),
+            },
+            _ if stored == "task.summary.interrupted" => match self {
+                Lang::Zh => "App 退出中断".into(),
+                Lang::En => "Interrupted on app exit".into(),
+            },
+            _ if stored == "task.summary.stale" => match self {
+                Lang::Zh => "上次运行未完结（启动清理）".into(),
+                Lang::En => "Unfinished run from last session (cleaned)".into(),
+            },
+            _ => stored.to_string(),
+        }
+    }
+
+    /// 结果气泡 text = 任务名 + summary（lib 层拼接，§4.5 P3-3）。
+    pub fn task_result_text(&self, label: &str, summary: &str) -> String {
+        match self {
+            Lang::Zh => format!("{label}：{summary}"),
+            Lang::En => format!("{label}: {summary}"),
+        }
+    }
 }
 
 /// setup 时恢复持久化语言（无值 / 非法值保持默认 zh，由前端按系统语言接管）。
@@ -437,5 +490,58 @@ mod tests {
         assert!(Lang::En.intg_installed().contains("Installed"));
         assert!(Lang::Zh.intg_error("boom").contains("boom"));
         assert!(Lang::En.intg_error("boom").starts_with("Check failed"));
+    }
+
+    // ---- v2 M4（TC-M4-17）：task summary 模板键双语渲染 ----
+
+    #[test]
+    fn task_summary_templates_bilingual() {
+        set(Lang::Zh);
+        assert_eq!(current().render_task_summary("task.summary.ok", None), "任务完成");
+        assert_eq!(
+            current().render_task_summary("task.summary.failed", Some(3)),
+            "失败（退出码 3）"
+        );
+        assert_eq!(
+            current().render_task_summary("task.summary.timeout:1", None),
+            "超时（1 分钟）被终止"
+        );
+        assert_eq!(
+            current().render_task_summary("task.summary.missed", None),
+            "错过补跑窗（15 分钟）"
+        );
+        assert_eq!(
+            current().render_task_summary("task.summary.paused", None),
+            "暂停期间跳过"
+        );
+        assert_eq!(
+            current().render_task_summary("task.summary.interrupted", None),
+            "App 退出中断"
+        );
+        assert_eq!(
+            current().task_result_text("数 md 文件", "任务完成"),
+            "数 md 文件：任务完成"
+        );
+        set(Lang::En);
+        assert_eq!(
+            current().render_task_summary("task.summary.ok", None),
+            "Task finished"
+        );
+        assert_eq!(
+            current().render_task_summary("task.summary.failed", Some(3)),
+            "Failed (exit code 3)"
+        );
+        assert_eq!(
+            current().render_task_summary("task.summary.timeout:10", None),
+            "Timed out (terminated after 10 min)"
+        );
+        assert_eq!(
+            current().task_result_text("count md files", "Task finished"),
+            "count md files: Task finished"
+        );
+        // 未知键原样返回（可观测不静默）；failed 无退出码兜底
+        assert_eq!(current().render_task_summary("task.summary.unknown", None), "task.summary.unknown");
+        assert_eq!(current().render_task_summary("task.summary.failed", None), "Failed");
+        set(Lang::Zh); // 恢复默认
     }
 }

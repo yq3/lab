@@ -15,11 +15,6 @@ export const TODAY_CACHE_MS = 30_000;
 
 let cache: { at: number; data: TodayStats } | null = null;
 
-/** 清空缓存（测试用）。 */
-export function resetTodayCache(): void {
-  cache = null;
-}
-
 /** 今日聚合（30s 缓存内直接复用；错误结构化透传——菜单/卡片错误态来源）。 */
 export async function fetchTodayStatsCached(now = Date.now()): Promise<TodayStats> {
   if (cache && now - cache.at < TODAY_CACHE_MS) {
