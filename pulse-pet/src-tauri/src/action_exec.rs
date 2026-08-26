@@ -606,65 +606,98 @@ pub fn abort_all_on_exit<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
 
 /// 到期分派 exec（tick / 试一试共用）：并发满 2 → 进 `pending_execs` 等待队列
 /// （不写 running 行；空位出现由完成回调经 channel 通知出队）。
+///
+/// R4（committer P2-1）：**槽位预留同步化**——上限判定与自增都在 `sched`
+/// 锁内一次完成（与 collect_due 同锁序列化），批量分派下第 3 个必入队。
+/// 原 `RunningTasks.len()` 判定是竞态软上限：登记表条目要等 spawn 任务
+/// 首个 poll（cmd.spawn 之后）才插入，run_tick 的同步循环里多次 dispatch
+/// 读到的 len 均未含刚分发的任务（多线程 runtime 下时而过界时而入队）。
 pub fn dispatch_exec<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     sched: &Arc<Mutex<RemindersState>>,
     rule: &ReminderRule,
     scheduled_at_ms: i64,
 ) {
-    use tauri::Manager;
-    let registry = app
-        .state::<Arc<Mutex<RunningTasks>>>()
-        .inner()
-        .clone();
-    let running = registry
-        .lock()
-        .map(|r| r.tasks.len())
-        .unwrap_or(0);
-    if running >= MAX_CONCURRENT_EXECS {
-        if let Ok(mut st) = sched.lock() {
+    enum Decision {
+        Started,
+        Queued(usize),
+    }
+    let decision = {
+        let mut st = sched
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        if st.active_execs >= MAX_CONCURRENT_EXECS {
             st.pending_execs.push_back(PendingExec {
                 rule: rule.clone(),
                 scheduled_at_ms,
             });
+            Decision::Queued(st.pending_execs.len())
+        } else {
+            st.active_execs += 1; // 槽位先占（spawn 尚未插入登记表也不影响判定）
+            Decision::Started
+        }
+    };
+    match decision {
+        Decision::Queued(len) => {
             plog!(
                 "[pulsepet] exec queue full ({}), task #{} pending (queue {})",
-                running,
+                MAX_CONCURRENT_EXECS,
                 rule.id,
-                st.pending_execs.len()
+                len
             );
         }
-        return;
+        Decision::Started => {
+            if !start_exec_run(app, rule.clone(), scheduled_at_ms) {
+                // 启动失败（insert running 失败等）：归还槽位，等待队列不受影响
+                let mut st = sched.lock().unwrap_or_else(|p| p.into_inner());
+                st.active_execs = st.active_execs.saturating_sub(1);
+            }
+        }
     }
-    start_exec_run(app, rule.clone(), scheduled_at_ms);
 }
 
 /// 完成回调出队：空位可能多个，循环出队到满/空（channel 每次完成通知一次）。
+/// R4：出队判定同样走 `active_execs`（sched 锁内 pop+自增原子配对）；
+/// P3-1 顺手修复：出队时校验规则仍在内存（stale 快照——规则删除/reload 后
+/// 队列残留的条目直接丢弃，不再执行已删规则）。
 pub fn drain_pending_execs<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     sched: &Arc<Mutex<RemindersState>>,
 ) {
-    use tauri::Manager;
-    let registry = app
-        .state::<Arc<Mutex<RunningTasks>>>()
-        .inner()
-        .clone();
     loop {
-        let running = registry.lock().map(|r| r.tasks.len()).unwrap_or(0);
-        if running >= MAX_CONCURRENT_EXECS {
-            break;
-        }
         let next = sched
             .lock()
             .ok()
-            .and_then(|mut st| st.pending_execs.pop_front());
+            .and_then(|mut st| {
+                if st.active_execs >= MAX_CONCURRENT_EXECS {
+                    return None;
+                }
+                loop {
+                    let Some(p) = st.pending_execs.pop_front() else {
+                        return None;
+                    };
+                    if st.rules.iter().any(|rs| rs.rule.id == p.rule.id) {
+                        st.active_execs += 1;
+                        return Some(p);
+                    }
+                    // 规则已删除（或 reload 后不在内存）：丢弃 stale 快照
+                    plog!(
+                        "[pulsepet] exec dequeued but rule #{} gone, dropping stale pending",
+                        p.rule.id
+                    );
+                }
+            });
         let Some(p) = next else { break };
         plog!(
             "[pulsepet] exec dequeued: task #{} (scheduled {:?})",
             p.rule.id,
             ms_to_rfc3339(p.scheduled_at_ms)
         );
-        start_exec_run(app, p.rule, p.scheduled_at_ms);
+        if !start_exec_run(app, p.rule, p.scheduled_at_ms) {
+            let mut st = sched.lock().unwrap_or_else(|p| p.into_inner());
+            st.active_execs = st.active_execs.saturating_sub(1);
+            break; // 启动失败（db 异常）：本轮停手，下一 tick/通知兜底
+        }
     }
 }
 
@@ -677,22 +710,24 @@ pub struct PendingExec {
 }
 
 /// 真正启动一次 exec：insert running 日志 → 伪 session Working → spawn 执行。
+/// R4：返回是否成功启动（true = run_task 已 spawn，完成回调会释放槽位；
+/// false = 启动失败——调用方须归还 `active_execs` 槽位，防泄漏导致永久降并发）。
 fn start_exec_run<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     rule: ReminderRule,
     scheduled_at_ms: i64,
-) {
+) -> bool {
     use tauri::Manager;
     let started = now_rfc3339();
     let log_id = {
         let db = app.state::<Mutex<Connection>>();
-        let Ok(conn) = db.lock() else { return };
+        let Ok(conn) = db.lock() else { return false };
         let sched_ts = ms_to_rfc3339(scheduled_at_ms).unwrap_or_else(|| started.clone());
         match insert_action_log_running(&conn, rule.id, &rule.action_type, &started, &sched_ts) {
             Ok(id) => id,
             Err(e) => {
                 plog!("[pulsepet] exec insert running log failed: {e}");
-                return;
+                return false;
             }
         }
     };
@@ -716,6 +751,7 @@ fn start_exec_run<R: tauri::Runtime>(
         .inner()
         .clone();
     tauri::async_runtime::spawn(run_task(app.clone(), rule, log_id, registry));
+    true
 }
 
 /// 单次执行全链路：执行（15s 心跳保鲜）→ 回写 action_logs → 终态 apply →
@@ -799,6 +835,15 @@ async fn run_task<R: tauri::Runtime>(
         outcome.status.as_str(),
         outcome.exit_code
     );
+    // R4（committer P2-1）：槽位释放——先锁内递减再通知出队（递减与通知
+    // 顺序配对：drain 在 sched 锁内读到的 active 必已含本次释放）。
+    {
+        use tauri::Manager;
+        if let Some(sched) = app.try_state::<Arc<Mutex<RemindersState>>>() {
+            let mut st = sched.lock().unwrap_or_else(|p| p.into_inner());
+            st.active_execs = st.active_execs.saturating_sub(1);
+        }
+    }
     notify_slot_free(&app);
 }
 

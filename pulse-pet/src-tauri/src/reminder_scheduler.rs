@@ -510,6 +510,14 @@ pub struct RemindersState {
     pub pending_execs: VecDeque<crate::action_exec::PendingExec>,
     /// v2 M4：完成回调 → 调度器 select 分支出队的通知通道（spawn_scheduler 注入）。
     pub slot_free_tx: Option<tokio::sync::mpsc::Sender<()>>,
+    /// v2 M4 R4（committer P2-1）：**exec 槽位预留计数（同步化硬上限）**。
+    /// dispatch/drain 在本 struct 的锁内判定并自增（与 collect_due 同一锁
+    /// 序列化）——批量分派（run_tick 同步循环 / 多线程并发 dispatch）下第
+    /// 3 个必入队不超发；run_task 完成回调锁内递减后经 slot_free 通知出队。
+    /// 取代原 `RunningTasks.len()` 判定（登记表条目在 spawn 任务首个 poll 才
+    /// 异步插入，同步循环里读不到刚分发的任务——竞态软上限）。reload 不重置
+    /// （在飞任务的完成回调仍会递减，重置会破坏记账导致超发）。
+    pub active_execs: usize,
 }
 
 /// 一次 tick 的触发决策（v2 M4：collect_due 返回 (fired, skipped)——skipped
@@ -3157,25 +3165,30 @@ mod tests {
 
     #[test]
     fn dispatch_exec_queues_third_beyond_limit() {
-        use crate::action_exec::{RunningProc, RunningTasks};
-        // 登记 2 个运行句柄 → 第 3 个进 pending_execs（不写 running 由
-        // insert 顺序保证——dispatch_exec 满员时直接入队返回）
+        use crate::action_exec::RunningTasks;
+        // R4（P2-1）：满员态 = active_execs 计数（槽位预留同步化）——预置
+        // 2 个在飞槽位 → 第 3 个 dispatch 必进 pending_execs（不写 running）
         let app = tauri::test::mock_app();
         let handle = app.handle();
-        let registry = Arc::new(Mutex::new(RunningTasks::default()));
-        registry.lock().unwrap().tasks.insert(101, RunningProc { pid: 11111 });
-        registry.lock().unwrap().tasks.insert(102, RunningProc { pid: 22222 });
-        handle.manage(registry);
+        handle.manage(Arc::new(Mutex::new(RunningTasks::default())));
         // conn 也 manage（start_exec_run 会写库——满员分支不会走到）
         let c = Connection::open_in_memory().unwrap();
         crate::db::migrate(&c).unwrap();
         handle.manage(Mutex::new(c));
-        // 调度器 state（含 pending_execs）；任务为 exec 型（sleep 保证出队后
-        // running 态持续——run_task 完成回写不会先于断言发生）
-        let sched = Arc::new(Mutex::new(RemindersState::default()));
+        // 调度器 state：预占 2 槽（等价两条在飞 exec）+ 规则在内存
+        //（run_tick 分派形态：dispatch 的规则必在 st.rules；drain 的 P3-1
+        // stale 校验按 id 查内存表）
         let mut rule = daily_rule(1, "10:00", None);
         rule.action_type = "exec".into();
         rule.action_params = Some(r#"{"command":"sleep 30"}"#.into());
+        let sched = Arc::new(Mutex::new(RemindersState {
+            active_execs: crate::action_exec::MAX_CONCURRENT_EXECS,
+            rules: vec![RuleState {
+                rule: rule.clone(),
+                next_due_ms: 42_000,
+            }],
+            ..Default::default()
+        }));
         crate::action_exec::dispatch_exec(handle, &sched, &rule, 12345);
         {
             let st = sched.lock().unwrap();
@@ -3183,21 +3196,20 @@ mod tests {
             assert_eq!(st.pending_execs[0].rule.id, 1);
             assert_eq!(st.pending_execs[0].scheduled_at_ms, 12345);
         }
-        // drain：登记表仍满 → 不出队
+        // drain：槽位仍满 → 不出队
         crate::action_exec::drain_pending_execs(handle, &sched);
         assert_eq!(sched.lock().unwrap().pending_execs.len(), 1);
-        // 释放一个空位 → drain 出队（进入 start_exec_run：写 running 日志 + spawn）
-        handle
-            .state::<Arc<Mutex<RunningTasks>>>()
-            .inner()
-            .lock()
-            .unwrap()
-            .tasks
-            .remove(&101);
+        // 释放一个槽位（run_task 完成回调的锁内递减语义）→ drain 出队
+        sched.lock().unwrap().active_execs -= 1;
         crate::action_exec::drain_pending_execs(handle, &sched);
         assert!(
             sched.lock().unwrap().pending_execs.is_empty(),
             "空位出现 → 出队"
+        );
+        assert_eq!(
+            sched.lock().unwrap().active_execs,
+            crate::action_exec::MAX_CONCURRENT_EXECS,
+            "出队即占槽（计数回满）"
         );
         // spawn 已发生：running 日志已写（mock app 直连同一 conn）；sleep 30
         // 不会先于断言完成 → running 态稳定可断言
@@ -3209,6 +3221,7 @@ mod tests {
             })
             .unwrap();
         assert_eq!(status, "running", "出队即写 running（spawn 时刻）");
+        drop(conn);
         // 清理：杀掉测试拉起的进程（登记表里有句柄，模拟退出处置）
         {
             use tauri::Manager;
@@ -3219,6 +3232,153 @@ mod tests {
             }
         }
         let _ = rule;
+    }
+
+    /// R4 批量钉子（committer P2-1 必补）：**单 tick 3 个 due exec 同步循环
+    /// 分派**（run_tick 形态）→ 恰 2 运行 + 1 排队——旧实现读
+    /// `RunningTasks.len()`（登记要等 spawn 首 poll 才插入），同步循环里
+    /// 3 次 dispatch 全部读到 0 → 超发 3 个 running；新实现 active_execs
+    /// 在 sched 锁内同步自增，第 3 个必入队。drain 满员不超发同步钉住。
+    #[test]
+    fn batch_dispatch_three_due_execs_two_run_one_pending() {
+        use crate::action_exec::{RunningTasks, MAX_CONCURRENT_EXECS};
+        let app = tauri::test::mock_app();
+        let handle = app.handle();
+        handle.manage(Arc::new(Mutex::new(RunningTasks::default())));
+        let c = Connection::open_in_memory().unwrap();
+        crate::db::migrate(&c).unwrap();
+        handle.manage(Mutex::new(c));
+        let sched = Arc::new(Mutex::new(RemindersState::default()));
+        // 3 条 exec 规则（同 tick 到期——多条 daily 同 HH:MM / 连环补跑形态）
+        let mk = |id: i64, cmd: &str| {
+            let mut r = daily_rule(id, "10:00", None);
+            r.action_type = "exec".into();
+            r.action_params = Some(format!(r#"{{"command":"{cmd}"}}"#).into());
+            r
+        };
+        let rules = vec![
+            mk(1, "sleep 598"),
+            mk(2, "sleep 597"),
+            mk(3, "sleep 596"),
+        ];
+        // run_tick 的同步循环形态：顺序 dispatch，无 await
+        for r in &rules {
+            crate::action_exec::dispatch_exec(handle, &sched, r, 42_000);
+        }
+        {
+            let st = sched.lock().unwrap();
+            assert_eq!(st.active_execs, MAX_CONCURRENT_EXECS, "恰占 2 槽");
+            assert_eq!(st.pending_execs.len(), 1, "第 3 个进等待队列");
+            assert_eq!(st.pending_execs[0].rule.id, 3, "排队的是最后分派的");
+        }
+        // 无第三行 running（排队的未写库）
+        let running_count = |handle: &tauri::AppHandle<tauri::test::MockRuntime>| -> i64 {
+            use tauri::Manager;
+            let db = handle.state::<Mutex<Connection>>();
+            let conn = db.lock().unwrap();
+            conn.query_row(
+                "SELECT COUNT(*) FROM action_logs WHERE status = 'running'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(running_count(handle), 2, "恰 2 行 running（第 3 个不写）");
+        // drain 超发场景：槽位已满 → 不出队、不新增 running
+        crate::action_exec::drain_pending_execs(handle, &sched);
+        assert_eq!(sched.lock().unwrap().pending_execs.len(), 1, "满员 drain 不出队");
+        assert_eq!(running_count(handle), 2, "满员 drain 不新增 running");
+        // 清理：先清队列（防杀进程唤醒完成回调 → 递减 → drain 启动第 3 个），
+        // 再等登记就绪杀进程组
+        sched.lock().unwrap().pending_execs.clear();
+        {
+            use tauri::Manager;
+            let reg = handle.state::<Arc<Mutex<RunningTasks>>>();
+            for _ in 0..100 {
+                if reg.lock().unwrap().len() >= 2 {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            let mut r = reg.lock().unwrap();
+            for (_, proc_) in r.tasks.drain() {
+                crate::action_exec::kill_process_tree(proc_.pid);
+            }
+        }
+    }
+
+    /// R4 顺手修复 P3-1：等待队列的 stale 快照——规则删除（reload 后不在
+    /// 内存）的排队条目出队时丢弃，不执行已删规则、不占槽。
+    #[test]
+    fn drain_drops_stale_rule_snapshots() {
+        use crate::action_exec::RunningTasks;
+        let app = tauri::test::mock_app();
+        let handle = app.handle();
+        handle.manage(Arc::new(Mutex::new(RunningTasks::default())));
+        let c = Connection::open_in_memory().unwrap();
+        crate::db::migrate(&c).unwrap();
+        handle.manage(Mutex::new(c));
+        let live = {
+            let mut r = daily_rule(7, "10:00", None);
+            r.action_type = "exec".into();
+            r.action_params = Some(r#"{"command":"sleep 595"}"#.into());
+            r
+        };
+        let mut stale = daily_rule(999, "10:00", None);
+        stale.action_type = "exec".into();
+        stale.action_params = Some(r#"{"command":"sleep 594"}"#.into());
+        let sched = Arc::new(Mutex::new(RemindersState {
+            // 内存规则表只含 live（id=7）——999 已删除
+            rules: vec![RuleState {
+                rule: live.clone(),
+                next_due_ms: i64::MAX,
+            }],
+            pending_execs: vec![
+                crate::action_exec::PendingExec {
+                    rule: stale,
+                    scheduled_at_ms: 7_000,
+                },
+                crate::action_exec::PendingExec {
+                    rule: live.clone(),
+                    scheduled_at_ms: 8_000,
+                },
+            ]
+            .into(),
+            ..Default::default()
+        }));
+        crate::action_exec::drain_pending_execs(handle, &sched);
+        {
+            let st = sched.lock().unwrap();
+            assert!(st.pending_execs.is_empty(), "队列排空（stale 丢弃 + live 启动）");
+            assert_eq!(st.active_execs, 1, "仅 live 占槽");
+        }
+        use tauri::Manager;
+        let db = handle.state::<Mutex<Connection>>();
+        let conn = db.lock().unwrap();
+        let (cnt, only_id): (i64, i64) = conn
+            .query_row(
+                "SELECT COUNT(*), MAX(reminder_id) FROM action_logs WHERE status = 'running'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(cnt, 1, "只启动 1 个（stale 未执行）");
+        assert_eq!(only_id, 7, "启动的是 live 规则");
+        drop(conn);
+        // 清理
+        {
+            let reg = handle.state::<Arc<Mutex<RunningTasks>>>();
+            for _ in 0..100 {
+                if reg.lock().unwrap().len() >= 1 {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            let mut r = reg.lock().unwrap();
+            for (_, proc_) in r.tasks.drain() {
+                crate::action_exec::kill_process_tree(proc_.pid);
+            }
+        }
     }
 
     // ---- TC-M4-07：validate kind 切换重置无关字段 ----
