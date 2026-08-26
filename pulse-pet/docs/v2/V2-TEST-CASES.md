@@ -487,12 +487,12 @@
   4. `action_params` JSON 解析失败 → validate 拒绝保存（存量行不可能有，新写路径全过 validate）。
 
 ### TC-M4-02 合并「定时任务」tab（实机）
-
 - **步骤**：打开合并后的「定时任务」tab，查看列表与新建表单。
+
 - **预期**：
-  1. 核心 tab「提醒」改名「定时任务」（`panel.tab.tasks`），位置不变；`panel://tab` 兼容旧值 `reminders` 映射直达；
+  1. 核心 tab「提醒」改名「例程」（2026-08-25 R1 后用户裁定修订：原「定时任务」再改「例程」，en 建议 Routines 实施定；`panel.tab.tasks` 键不变仅改 i18n 值），位置不变；`panel://tab` 兼容旧值 `reminders` 映射直达；「Todo」tab 中文显示名同步改「待办」（en 保持 Todo，同裁定）；
   2. 一张列表：每行动作徽标（💧 notify / ⚡ exec，title 说明）+ 名称 + 调度摘要（「每 30 分钟 · 09:00-18:00」/「每天 09:00」/「周三、五 09:00」/「一次 · 08-25 21:00」）+ 启用开关 + 行操作（编辑 / 试一试 / 跳过本次 / 删除两步确认）；todo 派生行保持 M2 展示（可见惰性 + 徽标）；
-  3. 表单按 `action_type` 条件显隐字段（notify：kind / 文案 / 调度 / 烟花；exec：任务名 / opencode 模板块 / command / cwd / 超时 / 调度）；Rust `validate` 为权威、前端同规则预检（v1 模式）；
+  3. 表单按 `action_type` 条件显隐字段（notify：kind / 文案 / 调度 / 烟花；exec：任务名 / opencode 模板块 / command / cwd / 超时 / 调度）；表单标题「新建例程」（原「新建提醒」，同裁定修订）；「新建」按钮**与表单最后一行字段同行右对齐**（2026-08-25 二次修订：不在单独动作行，随上一行字段内容对齐）且为非默认色；动作类型分段按钮无 emoji 图标（「提醒」不带 💧、「执行命令」不带 ⚡——列表行徽标保留）；Rust `validate` 为权威、前端同规则预检（v1 模式）；
   4. notify 新建（interval / daily / once 三种调度）触发行为与 v1 提醒等价（气泡 / 烟花 / 记账）。
 
 ### TC-M4-03 调度纯函数（单测）
@@ -564,7 +564,7 @@
   2. 伪 session 定义：session key = `task:<log_id>`（agent = 常量 `"task"`，Rust 内部直连 `apply_event` 不经 HTTP 白名单）；每次 apply 后**必须调 `DisplayNotifier::notify`**（单测断言 apply+notify 成对）；**不更新 AgentActivity、不触发 idle_hook**（mock 断言零调用）；
   3. 心跳 15s：执行期间每 15s 重 apply Working + notify（防 30s idle 回收；注入时钟单测：正常心跳不回收、心跳延迟 >15s 时回收可观察）；
   4. agent 层免费：例程会话的真实细粒度状态与伪 session 平等参与优先级合并（task 的 working(1)/success(2) 天然低于手头 editing(4)/testing(5)；error(7) 抢镜一次可接受）；已知双 emit（例程结束真实会话 Success 与伪 session Success 同优先级先后到达，芯片在 opencode/task 间闪一次——接受，记录级）；
-  5. 状态芯片任务执行期显示「定时任务」（`panel.agentTask`）。
+  5. 状态芯片任务执行期显示「例程」（`panel.agentTask`，2026-08-25 用户裁定修订：原「定时任务」同步「例程」，en 建议 Routine 实施定）。
 
 ### TC-M4-11 结果气泡与伪 session 边界（实机）
 
@@ -633,7 +633,7 @@
 ### TC-M4-17 双语与深浅主题（实机）
 
 - **步骤**：zh/en 切换 + 深 / 浅主题下目验新表单 / 徽标 / 调度摘要 / 历史区 / snooze 按钮 / 状态芯片。
-- **预期**：`tasks.*` + `panel.tab.tasks` + `panel.agentTask` 键 zh/en 集合一致（完备性测试）；summary 模板键（ok / failed(N) / timeout / skipped / 退出中断）按当前语言渲染；新元素全落 M2 token。
+- **预期**：`tasks.*` + `panel.tab.tasks` + `panel.agentTask` 键 zh/en 集合一致（完备性测试）；summary 模板键（ok / failed(N) / timeout / skipped / 退出中断）按当前语言渲染；新元素全落 M2 token。zh 下 tab 显示「例程」/「待办」、状态芯片显示「例程」（2026-08-25 R1 后用户裁定修订，en 建议 Routines / Todo / Routine 实施定；修订波及面：TC-UI-07/TC-UI-12 的「Todo」tab 显示名同口径，M2 用例留档不改）。
 
 ### TC-M4-18 Windows 分支（实机，挂观察项）
 
