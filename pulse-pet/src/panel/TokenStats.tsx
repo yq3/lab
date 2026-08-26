@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  AGENT_CLAUDE_CODE,
   fetchTokenRows,
   formatCost,
   formatTokens,
@@ -69,6 +70,19 @@ function sessionTitleTip(s: TokenRow): string {
   return `${title}\n${s.session_id ?? ""}\n${formatTime(s.time_updated)}`;
 }
 
+/** v2 M5（TC-M5-07）：例程会话识别——M4 spawn 的 `opencode run --title
+ *  "pulsepet 例程: …"`（前缀匹配；title 保留已由 TC-M4-08 实测确认，R8）。 */
+function isRoutineSession(s: TokenRow): boolean {
+  return (s.title ?? "").startsWith("pulsepet 例程:");
+}
+
+/** v2 M5：会话行 agent 徽标文本（oc / cc 等宽小字；title 提示全名经 i18n）。 */
+function agentBadgeOf(s: TokenRow): { text: string; title: string } {
+  return s.agent === AGENT_CLAUDE_CODE
+    ? { text: "cc", title: t("token.agent.claudeCode") }
+    : { text: "oc", title: t("token.agent.opencode") };
+}
+
 /** 项目列：project_name basename；null → global/unknown 回退标签（前端判定）。 */
 function projectName(s: TokenRow): string {
   if (s.project_name) return s.project_name;
@@ -93,6 +107,10 @@ export default function TokenStats() {
   const [expanded, setExpanded] = useState<string | null>(null);
   /** 模型筛选（作用域仅柱图，SCOPE E；null 键 = 「未知模型」桶）。 */
   const [selectedModels, setSelectedModels] = useState<Set<ModelKey> | null>(null);
+  /** v2 M5：agent 筛选（作用域仅柱图，M3 E 口径；null = 默认全勾）。 */
+  const [selectedAgents, setSelectedAgents] = useState<Set<string> | null>(null);
+  /** v2 M5（C1/N-4）：opencode 源报错 × CC 有数据的降级标记（仅 panel 细横幅）。 */
+  const [degraded, setDegraded] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -102,18 +120,21 @@ export default function TokenStats() {
       // 越过定格 toMs 后被整体排除且 Refresh 不可追回；preset 的 to 随调用时刻
       // 前进，custom（用户指定区间）整天边界语义不变（resolveQueryRange）。
       const range = resolveQueryRange(preset, fromStr, toStr);
-      // 时序/汇总维度 + 固定 session 维度（会话列表，TC-TK-09 ④）
+      // 时序/汇总维度 + 固定 session 维度（会话列表，TC-TK-09 ④）；
+      // v2 M5：返回体 {rows, degraded} 包装
       const [dim, sess] = await Promise.all([
         fetchTokenRows(range.fromMs, range.toMs, dimension as GroupBy),
         fetchTokenRows(range.fromMs, range.toMs, "session"),
       ]);
-      setRows(dim);
-      setSessions(sess);
+      setRows(dim.rows);
+      setSessions(sess.rows);
+      setDegraded(dim.degraded ?? sess.degraded);
       setError(null);
     } catch (e) {
       setError(e as StatsError);
       setRows(null);
       setSessions(null);
+      setDegraded(null);
     } finally {
       setLoading(false);
     }
@@ -150,9 +171,10 @@ export default function TokenStats() {
     };
   }, [load]);
 
-  // 数据/维度切换 → 模型筛选重置为全勾（新跨度 chip 集合变化）
+  // 数据/维度切换 → 模型筛选 + agent 筛选重置为全勾（新跨度 chip 集合变化）
   useEffect(() => {
     setSelectedModels(null);
+    setSelectedAgents(null);
   }, [rows, dimension]);
 
   const kpi = useMemo(() => sumRows(rows ?? []), [rows]);
@@ -160,9 +182,23 @@ export default function TokenStats() {
   /** 模型 chip 清单（distinct model_id 按总量降序；range 维无筛选区）。 */
   const chips = useMemo(() => computeModelChips(rows ?? []), [rows]);
 
+  /** v2 M5（TC-M5-04-1）：agent chip 仅渲染有数据的 agent（dim 行 distinct）。 */
+  const agentChips = useMemo(() => {
+    const set = new Set<string>();
+    for (const r of rows ?? []) {
+      if (r.agent) set.add(r.agent);
+    }
+    return [...set].sort();
+  }, [rows]);
+
   const effectiveSelected = useMemo<ReadonlySet<ModelKey>>(
     () => selectedModels ?? new Set(chips.map((c) => c.key)),
     [selectedModels, chips],
+  );
+
+  const effectiveAgents = useMemo<ReadonlySet<string>>(
+    () => selectedAgents ?? new Set(agentChips),
+    [selectedAgents, agentChips],
   );
 
   const bars = useMemo(
@@ -173,8 +209,10 @@ export default function TokenStats() {
             width: 640,
             height: 190,
             pad: 18,
+            // v2 M5：agent 筛选作用域仅柱图（KPI/会话列表不受勾选影响，E 口径）
+            agentFilter: effectiveAgents,
           }),
-    [rows, dimension, effectiveSelected],
+    [rows, dimension, effectiveSelected, effectiveAgents],
   );
 
   const sortedSessions = useMemo(() => {
@@ -188,6 +226,10 @@ export default function TokenStats() {
 
   const toggleModel = (key: ModelKey) => {
     setSelectedModels(symmetricToggle(effectiveSelected, key));
+  };
+
+  const toggleAgent = (agent: string) => {
+    setSelectedAgents(symmetricToggle(effectiveAgents, agent));
   };
 
   return (
@@ -243,28 +285,41 @@ export default function TokenStats() {
       {/* 错误态（TC-TK-03/04/13：不崩溃，给出可行动提示） */}
       {error && <div className="token-error">{errorHint(error)}</div>}
 
+      {/* v2 M5（C1/N-4）：degraded 细横幅——opencode 源报错 × CC 有数据时
+          仅 panel 顶部细条提示，不遮蔽内容；pet 侧三层不呈现（宠物不打扰） */}
+      {!error && degraded && (
+        <div className="token-degraded" title={degraded}>
+          {t("token.degraded")}
+        </div>
+      )}
+
       {/* ① KPI 四卡（用户 2026-08-25 裁定修订：总量 / cache read / input /
           output——cost 卡移除，cache read 升独立第二卡，首卡无副行小字；
           cost 数据仍在会话详情中展示） */}
       {rows && (
-        <div className="token-kpis">
-          <div className="kpi kpi-total">
-            <div className="kpi-value">{formatTokens(kpi.total)}</div>
-            <div className="kpi-label">{t("token.kpi.total")}</div>
+        <>
+          <div className="token-kpis">
+            <div className="kpi kpi-total">
+              <div className="kpi-value">{formatTokens(kpi.total)}</div>
+              <div className="kpi-label">{t("token.kpi.total")}</div>
+            </div>
+            <div className="kpi">
+              <div className="kpi-value">{formatTokens(kpi.cacheRead)}</div>
+              <div className="kpi-label">cache read</div>
+            </div>
+            <div className="kpi">
+              <div className="kpi-value">{formatTokens(kpi.input)}</div>
+              <div className="kpi-label">input tokens</div>
+            </div>
+            <div className="kpi">
+              <div className="kpi-value">{formatTokens(kpi.output)}</div>
+              <div className="kpi-label">output tokens</div>
+            </div>
           </div>
-          <div className="kpi">
-            <div className="kpi-value">{formatTokens(kpi.cacheRead)}</div>
-            <div className="kpi-label">cache read</div>
-          </div>
-          <div className="kpi">
-            <div className="kpi-value">{formatTokens(kpi.input)}</div>
-            <div className="kpi-label">input tokens</div>
-          </div>
-          <div className="kpi">
-            <div className="kpi-value">{formatTokens(kpi.output)}</div>
-            <div className="kpi-label">output tokens</div>
-          </div>
-        </div>
+          {/* v2 M5（§5.6）：费用口径标注——CC 恒 0（S4 裁定）；M4 R1 用户
+              裁定移除 cost KPI 卡后，本标注以 KPI 区注释小字承载 */}
+          <p className="token-kpi-note">{t("token.costOpencodeOnly")}</p>
+        </>
       )}
 
       {/* ② 堆叠柱图 + 模型筛选（day/week 维度；range 维无柱图——隐藏柱图与
@@ -293,10 +348,43 @@ export default function TokenStats() {
                 </label>
               ))}
             </div>
+            {/* v2 M5（TC-M5-04-1）：agent 筛选第二组——仅渲染有数据的 agent；
+                默认全勾；作用域仅柱图 */}
+            {agentChips.length > 0 && (
+              <div
+                className="filter-group"
+                role="group"
+                aria-label={t("token.aria.agent")}
+              >
+                {agentChips.map((a) => (
+                  <label
+                    key={a}
+                    className="model-chip agent-chip"
+                    title={t(
+                      a === AGENT_CLAUDE_CODE
+                        ? "token.agent.claudeCode"
+                        : "token.agent.opencode",
+                    )}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={effectiveAgents.has(a)}
+                      onChange={() => toggleAgent(a)}
+                    />
+                    <span className="model-chip-name">{a}</span>
+                  </label>
+                ))}
+              </div>
+            )}
           </div>
 
-          {effectiveSelected.size === 0 ? (
-            <p className="token-empty">{t("token.chart.noModels")}</p>
+          {effectiveSelected.size === 0 || effectiveAgents.size === 0 ? (
+            // v2 M5（TC-M5-04-3）：agent 空集空态复用 M3 模型空集口径
+            <p className="token-empty">
+              {effectiveAgents.size === 0
+                ? t("token.chart.noAgents")
+                : t("token.chart.noModels")}
+            </p>
           ) : bars.length === 0 ? (
             <p className="token-empty">{t("token.sessions.empty")}</p>
           ) : (
@@ -332,12 +420,28 @@ export default function TokenStats() {
                     className="session-row"
                     onClick={() => setExpanded(open ? null : s.session_id)}
                   >
+                    {/* v2 M5：agent 标识微列（oc / cc 等宽小字徽标，i18n title 全名） */}
+                    <span
+                      className="session-agent"
+                      title={agentBadgeOf(s).title}
+                    >
+                      {agentBadgeOf(s).text}
+                    </span>
                     <span className="session-title" title={sessionTitleTip(s)}>
+                      {/* v2 M5（TC-M5-07）：例程会话 ⚡ 徽标（零 schema 改动） */}
+                      {isRoutineSession(s) && (
+                        <span className="session-task-badge" title={t("token.taskBadge")}>
+                          ⚡
+                        </span>
+                      )}
                       {sessionTitle(s)}
                     </span>
                     <span className="session-project">{projectName(s)}</span>
                     <span className="session-tokens">{formatTokens(total)}</span>
-                    <span className="session-cost">{formatCost(s.cost)}</span>
+                    {/* v2 M5：CC 行 cost 列 `—`（数据层恒 0，S4 口径） */}
+                    <span className="session-cost">
+                      {s.agent === AGENT_CLAUDE_CODE ? "—" : formatCost(s.cost)}
+                    </span>
                     <span className="session-caret">{open ? "▾" : "▸"}</span>
                   </button>
                   {open && (
@@ -369,7 +473,10 @@ export default function TokenStats() {
                       </div>
                       <div>
                         <dt>cost</dt>
-                        <dd>{formatCost(s.cost)}</dd>
+                        {/* v2 M5：CC 行 cost 恒 0（S4）→ 详情同样显示 — */}
+                        <dd>
+                          {s.agent === AGENT_CLAUDE_CODE ? "—" : formatCost(s.cost)}
+                        </dd>
                       </div>
                       <div className="detail-wide">
                         <dt>{t("token.sessions.updated")}</dt>
@@ -387,8 +494,8 @@ export default function TokenStats() {
   );
 }
 
-/** 勾选切换纯逻辑（不可变更新）。 */
-function symmetricToggle(set: ReadonlySet<ModelKey>, key: ModelKey): Set<ModelKey> {
+/** 勾选切换纯逻辑（不可变更新；模型/agent 筛选共用）。 */
+function symmetricToggle<T>(set: ReadonlySet<T>, key: T): Set<T> {
   const next = new Set(set);
   if (next.has(key)) next.delete(key);
   else next.add(key);

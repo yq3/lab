@@ -5,12 +5,13 @@ import {
   TOOLTIP_ROW_ORDER,
   type ModelKey,
 } from "./token-chart";
-import type { TokenRow } from "./token-stats";
+import { AGENT_CLAUDE_CODE, AGENT_OPENCODE, type TokenRow } from "./token-stats";
 
 function gRow(
   day: string,
   model: string | null,
   v: { i?: number; o?: number; c?: number; r?: number },
+  agent = AGENT_OPENCODE,
 ): TokenRow {
   return {
     session_id: null,
@@ -27,6 +28,7 @@ function gRow(
     model_id: model,
     project_name: null,
     title: null,
+    agent,
   };
 }
 
@@ -105,6 +107,42 @@ describe("computeStackedBars：三段堆叠柱（v2 M3 §3.5，TC-M3-05）", () 
     const withOpt = computeStackedBars(rows, all, { ...OPTS, agentFilter: undefined });
     const withoutOpt = computeStackedBars(rows, all, OPTS);
     expect(withOpt).toEqual(withoutOpt);
+  });
+
+  it("M5 agentFilter：勾选剔除（作用域仅柱图）；空集 → 空数组（空态复用模型口径）", () => {
+    // 双 agent 混合行：cc 行注入后勾选剔除
+    const mixed = [
+      gRow("2026-08-25", "glm", { i: 100 }, AGENT_OPENCODE),
+      gRow("2026-08-25", "deepseek", { i: 40 }, AGENT_CLAUDE_CODE),
+    ];
+    const onlyOc = computeStackedBars(
+      mixed,
+      new Set<ModelKey>(["glm", "deepseek"]),
+      { ...OPTS, agentFilter: new Set([AGENT_OPENCODE]) },
+    );
+    expect(onlyOc[0].input).toBe(100);
+    expect(onlyOc[0].total).toBe(100);
+    const onlyCc = computeStackedBars(
+      mixed,
+      new Set<ModelKey>(["glm", "deepseek"]),
+      { ...OPTS, agentFilter: new Set([AGENT_CLAUDE_CODE]) },
+    );
+    expect(onlyCc[0].input).toBe(40);
+    // agent 空集 → 无行保留 → 空数组（组件层显示空态文案）
+    expect(
+      computeStackedBars(mixed, new Set<ModelKey>(["glm", "deepseek"]), {
+        ...OPTS,
+        agentFilter: new Set<string>(),
+      }),
+    ).toEqual([]);
+    // 全量 agent 集合 = 不传等价（勾选剔除语义）
+    const allAgents = computeStackedBars(
+      mixed,
+      new Set<ModelKey>(["glm", "deepseek"]),
+      { ...OPTS, agentFilter: new Set([AGENT_OPENCODE, AGENT_CLAUDE_CODE]) },
+    );
+    const noFilter = computeStackedBars(mixed, new Set<ModelKey>(["glm", "deepseek"]), OPTS);
+    expect(allAgents).toEqual(noFilter);
   });
 
   it("reasoning 不参与任何段（注入非零 reasoning 段高不变）", () => {

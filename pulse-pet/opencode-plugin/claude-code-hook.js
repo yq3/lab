@@ -99,6 +99,107 @@ export function isPayloadTooLarge(byteLength) {
   return byteLength > MAX_STDIN_BYTES;
 }
 
+// ---- v2 M5 工具级气泡：detail 模板 ID 协议（V2-DESIGN §5.5，TC-M5-06）----
+//
+// M3 协议（`detail="tplId:param"`，§3.7.1）照抄到 CC hook；仅 PreToolUse 携带。
+// TC-SEC 净化口径：绝不携带路径/参数/URL 原文——param 提取后只剩 basename /
+// 首词 / hostname / ≤40 字符 pattern。一次性进程无进程内节流状态——App 侧
+// 10s 同源合并（M2 ambient）即节流（M1 §1.3.2 裁定延续）。
+
+/** CC 工具族 → 模板 ID（白名单五模板；与 pulse-pet-hook.js DETAIL_TPLS 同协议）。 */
+export const CC_DETAIL_TPLS = Object.freeze({
+  read: new Set(["Read"]),
+  edit: new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]),
+  bash: new Set(["Bash"]),
+  search: new Set(["Grep", "Glob"]),
+  web: new Set(["WebFetch", "WebSearch"]),
+});
+
+/** 工具 → 模板 ID；白名单外 → null（不携带 detail）。 */
+export function ccDetailTplOf(toolName) {
+  for (const [id, set] of Object.entries(CC_DETAIL_TPLS)) {
+    if (set.has(String(toolName ?? ""))) return id;
+  }
+  return null;
+}
+
+/** 路径 basename：按 / 与 \ 切分取末段非空（跨平台；无分隔符原样）。 */
+export function ccBasenameOf(s) {
+  const parts = String(s ?? "").split(/[\\/]+/).filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : "";
+}
+
+/** detail param 上限（与 App 桥侧 sanitizeToolParam 同口径）。 */
+export const CC_DETAIL_PARAM_MAX = 40;
+
+function clipCC(s, max = CC_DETAIL_PARAM_MAX) {
+  return [...String(s)].slice(0, max).join("");
+}
+
+/**
+ * 提取 detail param（M3 extractDetailParam 规则 CC 工具族平移）：
+ * - read/edit（Read/Edit/Write/MultiEdit/NotebookEdit）：file_path → basename；
+ * - bash：先剥离行首连续 KEY=value 赋值段，再取首词；首词含 / 或 \ 时取
+ *   basename（绝对路径命令净化，P1-4 同款）；
+ * - search（Grep/Glob）：pattern 净化后原样 ≤40 字符（含 / 或 \ 取末段）；
+ * - web（WebFetch/WebSearch）：url → hostname（WebSearch 无 url 时 query
+ *   按 search 同款净化）。
+ * 无参 / 提取失败 / 白名单外工具 → null（不携带 detail）。
+ */
+export function extractDetailParam(toolName, toolInput) {
+  if (!toolName) return null;
+  const a = toolInput ?? {};
+  const tpl = ccDetailTplOf(toolName);
+  if (!tpl) return null;
+
+  if (tpl === "read" || tpl === "edit") {
+    const path = a.file_path ?? a.filePath ?? a.path ?? null;
+    if (typeof path !== "string" || !path.trim()) return null;
+    return ccBasenameOf(path) || null;
+  }
+  if (tpl === "bash") {
+    const command = a.command ?? a.cmd ?? null;
+    if (typeof command !== "string" || !command.trim()) return null;
+    // 先剥离行首连续 KEY=value 赋值段（env 前缀），再取首词
+    const stripped = command.replace(/^(?:\w+=\S*\s+)+/, "").trim();
+    const firstWord = stripped.split(/\s+/)[0] ?? "";
+    if (!firstWord) return null;
+    // 首词含路径分隔符 → basename（绝对路径命令净化）
+    return /[\\/]/.test(firstWord) ? ccBasenameOf(firstWord) : firstWord;
+  }
+  if (tpl === "search") {
+    const pattern = a.pattern ?? a.query ?? null;
+    if (typeof pattern !== "string" || !pattern.trim()) return null;
+    const clean = clipCC(pattern.trim());
+    return /[\\/]/.test(clean) ? ccBasenameOf(clean) : clean;
+  }
+  // web
+  if (typeof a.url === "string" && a.url.trim()) {
+    try {
+      const hostname = new URL(a.url).hostname;
+      if (hostname) return hostname;
+    } catch {
+      // 非 URL 形态（如裸域名）：按 basename 兜底
+      return ccBasenameOf(a.url) || null;
+    }
+    return null;
+  }
+  // WebSearch：query 按 search 同款净化（无 URL 可提）
+  if (typeof a.query === "string" && a.query.trim()) {
+    const clean = clipCC(a.query.trim());
+    return /[\\/]/.test(clean) ? ccBasenameOf(clean) : clean;
+  }
+  return null;
+}
+
+/** detail = "<tplId>:<param>"（param 提取失败 → null 不携带）。 */
+export function buildDetail(toolName, toolInput) {
+  const param = extractDetailParam(toolName, toolInput);
+  if (param == null) return null;
+  const tpl = ccDetailTplOf(toolName);
+  return tpl ? `${tpl}:${param}` : null;
+}
+
 /** 净化错误文案中的家目录路径（仅 PULSEPET_HOOK_DEBUG=1 时输出，openpets 同款）。 */
 export function sanitizeMessage(message, homeDir = homedir()) {
   return String(message ?? "").split(String(homeDir)).join("~");
@@ -200,13 +301,18 @@ export async function processHookInput({
     debugLog(
       `event ${json.hook_event_name} → kind=${kind} session=${json.session_id} → POST http://${endpoint}/state`,
     );
+    // v2 M5（§5.5）：PreToolUse 携带 detail（"<tplId>:<param>"，M3 协议照抄）；
+    // App 侧白名单校验 + i18n 渲染，开关对双 agent 统一生效
+    const body = { sessionId: json.session_id, kind, agent: "claude-code" };
+    const detail = buildDetail(json.tool_name, json.tool_input);
+    if (detail) body.detail = detail;
     const res = await fetchImpl(`http://${endpoint}/state`, {
       method: "POST",
       headers: {
         "content-type": "application/json",
         "x-pulsepet-token": token,
       },
-      body: JSON.stringify({ sessionId: json.session_id, kind, agent: "claude-code" }),
+      body: JSON.stringify(body),
       signal: AbortSignal.timeout(POST_TIMEOUT_MS),
     });
     if (res.status >= 400) {

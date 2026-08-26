@@ -48,6 +48,7 @@ const zh: Dict = {
   "token.aria.from": "起始日期",
   "token.aria.to": "结束日期",
   "token.aria.dim": "统计维度",
+  "token.aria.agent": "agent 筛选",
   "token.chart.title": "Token 时序（{dim}）",
   "token.chart.aria": "token 时序柱状图",
   // v2 M3：堆叠柱图 HTML tooltip（日期 + 三值 + 占比 + 总量）
@@ -68,6 +69,17 @@ const zh: Dict = {
   "token.error.schemaMismatch": "opencode.db schema 不兼容（{msg}）",
   "token.error.query": "查询失败：{msg}",
   "token.needApp": "Token 统计需要在 PulsePet App（Tauri）内查看",
+  // v2 M5（§5.6，TC-M5-04/10）：agent 筛选 chip + 会话列表徽标全名
+  "token.agent.opencode": "opencode",
+  "token.agent.claudeCode": "Claude Code",
+  // v2 M5：费用口径标注（CC 恒 0——第三方 key 下单价表不可信，S4 裁定）
+  "token.costOpencodeOnly": "费用仅统计 opencode（Claude Code 无可靠费用数据）",
+  // v2 M5（TC-M5-07）：例程会话 ⚡ 徽标 title 提示（零 schema 改动）
+  "token.taskBadge": "定时任务例程",
+  // v2 M5（C1/N-4）：degraded 细横幅（仅 panel；opencode 源不可用 × CC 有数据）
+  "token.degraded": "opencode 源不可用：仅显示 Claude Code 数据",
+  // v2 M5（TC-M5-04-3）：agent 空集空态（复用 M3 模型空集口径）
+  "token.chart.noAgents": "未勾选任何 agent，柱图为空。",
 
   // ---- 提醒页 ----
   "reminders.needApp": "提醒配置需要在 PulsePet App（Tauri）内使用",
@@ -386,6 +398,7 @@ const en: Dict = {
   "token.aria.from": "Start date",
   "token.aria.to": "End date",
   "token.aria.dim": "Dimension",
+  "token.aria.agent": "Agent filter",
   "token.chart.title": "Token timeline ({dim})",
   "token.chart.aria": "Token bar chart",
   "token.chart.tip": "{label}: total {total}",
@@ -400,12 +413,23 @@ const en: Dict = {
   "token.project.global": "Global",
   "token.project.unknown": "(unknown project)",
   "token.error.noDatabase":
-    "Database not running/initialized: no opencode database detected (opencode.db / opencode-canary.db).",
+    "opencode database not running/initialized: opencode.db / opencode-canary.db not found.",
   "token.error.legacyStorage":
     "Legacy opencode storage detected (storage/session/*.json): please upgrade opencode.",
   "token.error.schemaMismatch": "opencode.db schema incompatible ({msg})",
   "token.error.query": "Query failed: {msg}",
   "token.needApp": "Token stats are only available inside the PulsePet app (Tauri)",
+  // v2 M5（§5.6，TC-M5-04/10）：agent 筛选 chip + 会话列表徽标全名
+  "token.agent.opencode": "opencode",
+  "token.agent.claudeCode": "Claude Code",
+  // v2 M5：费用口径标注（CC 恒 0——第三方 key 下单价表不可信，S4 裁定）
+  "token.costOpencodeOnly": "Cost covers opencode only (no reliable Claude Code cost)",
+  // v2 M5（TC-M5-07）：例程会话 ⚡ 徽标 title 提示（零 schema 改动）
+  "token.taskBadge": "Scheduled routine",
+  // v2 M5（C1/N-4）：degraded 细横幅（仅 panel；opencode 源不可用 × CC 有数据）
+  "token.degraded": "opencode source unavailable: showing Claude Code data only",
+  // v2 M5（TC-M5-04-3）：agent 空集空态（复用 M3 模型空集口径）
+  "token.chart.noAgents": "No agents selected — the chart is empty.",
 
   "reminders.needApp": "Reminders are only available inside the PulsePet app (Tauri)",
   "reminders.loadFail": "Failed to load reminders: {msg}",

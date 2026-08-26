@@ -689,6 +689,26 @@ select {
   line-height: 1.6;
 }
 
+/* v2 M5（C1/N-4）：degraded 细横幅（仅 panel 顶部，不遮蔽内容——
+   opencode 源报错 × CC 有数据时的降级提示） */
+.token-degraded {
+  margin: 0 0 12px;
+  padding: 6px 10px;
+  border: 1px solid var(--warn);
+  border-left: 3px solid var(--warn);
+  background: var(--surface-2);
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+/* v2 M5：KPI 区费用口径注释（cost KPI 卡已按 2026-08-25 用户裁定移除，
+   标注以注释小字承载——CC 恒 0，S4 裁定） */
+.token-kpi-note {
+  margin: -6px 0 16px;
+  font-size: 11px;
+  color: var(--ink-faint);
+}
+
 /* KPI 卡：2px 墨边 + 硬阴影；首卡 accent 阴影（今日高亮语义） */
 .token-kpis {
   display: grid;
@@ -925,6 +945,28 @@ select {
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--ink);
+}
+
+/* v2 M5（§5.6）：agent 标识微列（oc / cc 等宽小字徽标，i18n title 全名） */
+.session-agent {
+  flex: none;
+  min-width: 22px;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--ink-soft);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 1px 3px;
+  background: var(--surface-2);
+}
+
+/* v2 M5（TC-M5-07）：例程会话 ⚡ 徽标（title 属性「定时任务例程」） */
+.session-task-badge {
+  margin-right: 4px;
+  color: var(--accent);
 }
 
 .session-project {

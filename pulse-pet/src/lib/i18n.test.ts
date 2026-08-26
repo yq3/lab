@@ -127,6 +127,34 @@ describe("字典完备性", () => {
     expect(DICT.zh["panel.agentTask"]).toBe("例程");
     expect(DICT.en["panel.agentTask"]).toBe("Routine");
   });
+
+  // v2 M5（TC-M5-10）：新键 zh/en 集合一致 + 关键键值钉住
+  it("M5 新键 zh/en 均存在（token.agent.* / costOpencodeOnly / taskBadge / degraded）", async () => {
+    const { DICT } = await import("./i18n");
+    const m5Keys = [
+      "token.agent.opencode",
+      "token.agent.claudeCode",
+      "token.costOpencodeOnly",
+      "token.taskBadge",
+      "token.degraded",
+      "token.chart.noAgents",
+      "token.aria.agent",
+    ];
+    for (const k of m5Keys) {
+      expect(DICT.zh[k], `zh 缺键 ${k}`).toBeTruthy();
+      expect(DICT.en[k], `en 缺键 ${k}`).toBeTruthy();
+      expect(DICT.zh[k].length > 0 && DICT.en[k].length > 0, `${k} 两语言非空`).toBe(true);
+    }
+    // 徽标全名（品牌名不翻译——zh/en 同值合法）
+    expect(DICT.zh["token.agent.claudeCode"]).toBe("Claude Code");
+    expect(DICT.en["token.agent.claudeCode"]).toBe("Claude Code");
+    // 可翻译键 zh/en 互异（防粘贴错语言）
+    for (const k of ["token.costOpencodeOnly", "token.taskBadge", "token.degraded"]) {
+      expect(DICT.zh[k], `${k} zh/en 应互异`).not.toBe(DICT.en[k]);
+    }
+    expect(DICT.zh["token.taskBadge"]).toBe("定时任务例程");
+    expect(DICT.en["token.taskBadge"]).toBe("Scheduled routine");
+  });
 });
 
 describe("systemLangSafe：默认语言跟随系统", () => {

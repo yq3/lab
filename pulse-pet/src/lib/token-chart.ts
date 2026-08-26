@@ -47,9 +47,9 @@ export interface StackedBarOptions {
   /** 柱宽占每格宽度的比例（0-1，默认 0.6）。 */
   fill?: number;
   /**
-   * **M5 预留参数位（N3/N12）**：agent 筛选——M3 声明类型不传值不实现；
-   * 「不传 = 不过滤」（等价全量）由钉子单测守住。M5 数据维度（TokenRow.agent
-   * 列）到来时在此填实现，签名与调用点均不变。
+   * **M5（V2-DESIGN §5.6，TC-M5-04）**：agent 筛选——作用域仅柱图（与模型
+   * 筛选一致，M3 E 口径）；「不传 = 不过滤」（等价全量）由钉子单测守住。
+   * 传入即按 `row.agent ∈ agentFilter` 过滤后聚合（勾选剔除）。
    */
   agentFilter?: ReadonlySet<string>;
 }
@@ -57,6 +57,7 @@ export interface StackedBarOptions {
 /**
  * 堆叠柱计算：
  * 1. 行按 `row.model_id`（null 为「未知模型」桶）过滤——未勾选的模型剔除后聚合；
+ *    M5：行再按 agentFilter 过滤（未勾选的 agent 剔除，作用域仅柱图）；
  * 2. 按行 day 标签分组 SUM（多模型行合并为一柱）；
  * 3. 柱按标签升序排列；柱高与最大 total 成比例，三段自底向上 output → input
  *    → cache read；全零/空输入不产生 NaN。
@@ -68,8 +69,11 @@ export function computeStackedBars(
 ): StackedBar[] {
   const { width, height, pad } = opts;
   const fill = opts.fill ?? 0.6;
-  // 勾选剔除（M3 不实现 agentFilter——声明参数位，不传 = 不过滤，N12）
-  const kept = rows.filter((r) => selectedModels.has(r.model_id ?? null));
+  // 勾选剔除（模型筛选 + M5 agent 筛选；不传 agentFilter = 不过滤，N12）
+  const kept = rows.filter((r) => {
+    if (opts.agentFilter && !opts.agentFilter.has(r.agent)) return false;
+    return selectedModels.has(r.model_id ?? null);
+  });
   // 按 day 标签聚合（null 标签归 "—"，正常 grouped 行恒有 day）
   const map = new Map<string, { output: number; input: number; cacheRead: number }>();
   for (const r of kept) {
