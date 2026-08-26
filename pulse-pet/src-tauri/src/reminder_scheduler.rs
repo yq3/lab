@@ -1211,6 +1211,11 @@ pub fn insert_action_log_skipped(
 }
 
 /// 终态回写（ok/failed；v2 M4 执行链完成路径）。
+/// R2（TC-M4-15-1 P2 竞态修复）：**`WHERE status='running'` 守卫**——只写仍
+/// 在 running 的行。退出处置（abort）先行结案为 interrupted 后，被杀进程
+/// 唤醒的完成回调在此被拦下（0 行更新），「App 退出中断」summary 不被
+/// 通用 failed 覆盖；反向（自然完成先落库）同理不被 abort 覆盖——两个
+/// 写入方以行状态为单调屏障，天然与 N7 登记表语义互补。
 pub fn finish_action_log_with(
     conn: &Connection,
     log_id: i64,
@@ -1222,7 +1227,7 @@ pub fn finish_action_log_with(
 ) -> Result<(), String> {
     conn.execute(
         "UPDATE action_logs SET status = ?2, summary = ?3, output_tail = ?4, \
-         exit_code = ?5, finished_at = ?6 WHERE id = ?1",
+         exit_code = ?5, finished_at = ?6 WHERE id = ?1 AND status = 'running'",
         params![log_id, status, summary, output_tail, exit_code, finished_at],
     )
     .map_err(|e| format!("finish action_log {log_id}: {e}"))?;
@@ -3460,6 +3465,52 @@ mod tests {
         let (rows, total) = list_action_logs(&c, None, 1).unwrap();
         assert_eq!(total, 62);
         assert_eq!(rows[0].status, "skipped", "倒序：最新 skipped 在首页首位");
+    }
+
+    // ---- R2（TC-M4-15-1 P2）：finish_action_log_with 的 running 守卫 ----
+
+    #[test]
+    fn finish_action_log_with_guarded_by_running_status() {
+        // 守卫钉子：已离开 running 态的行（如 abort 先行结案 interrupted、
+        // 或已完成 ok）不被后续完成回写覆盖——两个写入方以行状态为屏障
+        let c = conn();
+        let log_id = insert_action_log_running(&c, 1, "exec", &rfc(1000), &rfc(1000)).unwrap();
+        // running → 首次正常回写成功
+        finish_action_log_with(
+            &c, log_id, "ok", crate::action_exec::SUMMARY_OK, Some("out"), Some(0), &rfc(2000),
+        )
+        .unwrap();
+        // 迟到的第二次回写（failed）被守卫拦下：仍是 ok
+        finish_action_log_with(
+            &c, log_id, "failed", crate::action_exec::SUMMARY_FAILED, None, Some(9), &rfc(3000),
+        )
+        .unwrap();
+        let (status, summary, exit_code): (String, String, Option<i32>) = c
+            .query_row(
+                "SELECT status, summary, exit_code FROM action_logs WHERE id = ?1",
+                [log_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(status, "ok", "已结案行不被二次回写覆盖");
+        assert_eq!(summary, crate::action_exec::SUMMARY_OK);
+        assert_eq!(exit_code, Some(0), "旧值全保留（守卫 = 整行不动）");
+        // abort 结案（interrupted）后的完成回写同样被拦——action_exec 侧的
+        // 真实进程竞态钉子覆盖该主场景，此处钉纯 SQL 语义
+        let log2 = insert_action_log_running(&c, 2, "exec", &rfc(1000), &rfc(1000)).unwrap();
+        c.execute(
+            "UPDATE action_logs SET status = 'failed', summary = ?2 WHERE id = ?1",
+            params![log2, crate::action_exec::SUMMARY_INTERRUPTED],
+        )
+        .unwrap();
+        finish_action_log_with(
+            &c, log2, "failed", crate::action_exec::SUMMARY_FAILED, None, None, &rfc(4000),
+        )
+        .unwrap();
+        let summary2: String = c
+            .query_row("SELECT summary FROM action_logs WHERE id = ?1", [log2], |r| r.get(0))
+            .unwrap();
+        assert_eq!(summary2, crate::action_exec::SUMMARY_INTERRUPTED, "interrupted 不被通用 failed 覆盖");
     }
 
     // ---- 模板命令：exec trigger_now 走分派（试一试 = 真实执行，P3-9） ----

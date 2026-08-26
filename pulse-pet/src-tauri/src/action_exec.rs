@@ -558,6 +558,13 @@ pub fn cleanup_running_logs(conn: &Connection) -> usize {
 /// `RunEvent::Exit` 退出处置（P1-2）：遍历登记表句柄杀进程组 + action_logs
 /// 补写 failed（「App 退出中断」）。N7：只处置登记表内的句柄（完成路径已
 /// 先行移除自身，不竞写）。同步执行（退出路径 async runtime 不可依赖）。
+///
+/// R2（TC-M4-15-1 P2 竞态修复）：**先写库（interrupted，`WHERE
+/// status='running'`）后杀进程组**——原顺序（先 kill）下，被杀进程唤醒的
+/// async 完成回调可能在 abort 写库前抢先落通用 failed（原 finish 无守卫），
+/// 使 interrupted 落空。调序后：interrupted 先占行（status 离开 running），
+/// 完成回调的 `finish_action_log_with` 被同款守卫拦下（0 行更新）；
+/// 自然完成先于 abort 的场景由 abort 侧守卫兜底（不覆盖真实结果）。
 pub fn abort_all_on_exit<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     use tauri::Manager;
     let Some(registry) = app.try_state::<Arc<Mutex<RunningTasks>>>() else {
@@ -574,9 +581,7 @@ pub fn abort_all_on_exit<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
         "[pulsepet] exit: killing {} running task process group(s)",
         entries.len()
     );
-    for (_, pid) in &entries {
-        kill_process_tree(*pid);
-    }
+    // ① 先结案（interrupted 占行——完成回调守卫随即生效）
     if let Some(db) = app.try_state::<Mutex<Connection>>() {
         if let Ok(conn) = db.lock() {
             let now = now_rfc3339();
@@ -588,6 +593,10 @@ pub fn abort_all_on_exit<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
                 );
             }
         }
+    }
+    // ② 后杀进程组（被杀唤醒的完成回调写库被 ① 的行状态拦下）
+    for (_, pid) in &entries {
+        kill_process_tree(*pid);
     }
 }
 
@@ -1241,6 +1250,115 @@ mod tests {
                     .unwrap()
             };
             assert_eq!(status, "failed");
+        }
+    }
+
+    // ---- R2（TC-M4-15-1 P2 竞态修复）：真实进程 + 真实 async 完成回调 +
+    //      真实退出处置三方竞态钉子（tester 指出 mock 环境未钉住） ----
+
+    /// 竞态现场还原：`run_task`（完成路径）持有真实 `sleep 597` 进程执行中，
+    /// 退出路径 `abort_all_on_exit` 介入——R2 语义 = abort **先写 interrupted
+    /// （WHERE status='running'）后杀组**；被杀进程唤醒的完成回调随后调
+    /// `finish_action_log_with`（带同款守卫）必须被拦下，最终行保持
+    /// interrupted。旧实现（先杀后写 + 无守卫）此场景下完成回调抢先落
+    /// 通用 failed——实机 1/1 复现的缺陷形态（已验证：临时回退修复后本
+    /// 钉子以「failed 覆盖 interrupted」形态失败）。
+    #[test]
+    fn abort_exit_race_real_process_keeps_interrupted_summary() {
+        use tauri::Manager;
+        #[cfg(unix)]
+        {
+            let app = tauri::test::mock_app();
+            let handle = app.handle();
+            let conn = Connection::open_in_memory().unwrap();
+            crate::db::migrate(&conn).unwrap();
+            // running 日志（start_exec_run 的 spawn 时刻形态）+ exec 规则
+            let started = crate::reminder_scheduler::now_rfc3339();
+            let log_id = crate::reminder_scheduler::insert_action_log_running(
+                &conn, 1, "exec", &started, &started,
+            )
+            .unwrap();
+            let rule = crate::reminder_scheduler::ReminderRule {
+                id: 1,
+                kind: "custom".into(),
+                label: "退出竞态钉子".into(),
+                interval_minutes: 0,
+                created_at: started.clone(),
+                action_type: "exec".into(),
+                action_params: Some(r#"{"command":"sleep 597"}"#.into()),
+                schedule_kind: "once".into(),
+                ..test_rule_fields()
+            };
+            let registry = Arc::new(Mutex::new(RunningTasks::default()));
+            handle.manage(registry.clone());
+            handle.manage(Mutex::new(conn));
+
+            // 完成路径：真实进程 spawn（run_task 内部经 ExecExecutor 执行并登记）
+            let jh = tauri::async_runtime::spawn(run_task(
+                handle.clone(),
+                rule,
+                log_id,
+                registry.clone(),
+            ));
+            // 等真实进程登记就绪（进程活着 = 完成回调必然后续被杀唤醒）
+            let mut registered = false;
+            for _ in 0..100 {
+                if registry.lock().unwrap().len() == 1 {
+                    registered = true;
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            assert!(registered, "真实进程已 spawn 并登记（竞态前置成立）");
+
+            // 退出路径介入（R2：先写库后杀组）
+            abort_all_on_exit(handle);
+
+            // 完成路径走完（被杀唤醒 → finish 守卫 → apply/emit）
+            let _ = block_on(async { jh.await });
+
+            // 终态断言：interrupted 不被完成回调的通用 failed 覆盖
+            let (status, summary): (String, String) = {
+                let db = handle.state::<Mutex<Connection>>();
+                let c = db.lock().unwrap();
+                c.query_row(
+                    "SELECT status, summary FROM action_logs WHERE id = ?1",
+                    [log_id],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .unwrap()
+            };
+            assert_eq!(status, "failed");
+            assert_eq!(
+                summary,
+                SUMMARY_INTERRUPTED,
+                "「App 退出中断」须胜出（完成回调守卫拦截覆盖）"
+            );
+        }
+    }
+
+    /// test_rule_fields：测试构造 ReminderRule 的 v1 字段缺省尾巴。
+    fn test_rule_fields() -> crate::reminder_scheduler::ReminderRule {
+        crate::reminder_scheduler::ReminderRule {
+            id: 0,
+            kind: "custom".into(),
+            label: String::new(),
+            interval_minutes: 0,
+            start_time: None,
+            end_time: None,
+            enabled: true,
+            use_fireworks: false,
+            last_triggered_at: None,
+            source_todo_id: None,
+            todo_due_at: None,
+            created_at: String::new(),
+            action_type: "notify".into(),
+            action_params: None,
+            schedule_kind: "interval".into(),
+            schedule_at: None,
+            schedule_weekdays: None,
+            snooze_until: None,
+            last_skipped_at: None,
         }
     }
 }
