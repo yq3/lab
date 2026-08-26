@@ -138,10 +138,12 @@ fn make_idle_hook(
     state: &Arc<Mutex<SessionStateMachine>>,
     app: &tauri::AppHandle,
     cc_cache: &Arc<Mutex<transcript::TranscriptCache>>,
+    notifier: &Arc<http_server::DisplayNotifier>,
 ) -> http_server::IdleHook {
     let state = state.clone();
     let app = app.clone();
     let cc_cache = cc_cache.clone();
+    let notifier = notifier.clone();
     Arc::new(move |agent: &str, session_id: &str| {
         idle_hook_body(
             &state,
@@ -160,7 +162,7 @@ fn make_idle_hook(
             },
             &|sid| {
                 // v2 M5（§5.4，N-3）：后台线程内直接完成
-                // 「解析（缓存未命中 scan 补建）→ 护栏判定 → apply + emit」，
+                // 「解析（缓存未命中 scan 补建）→ 护栏判定 → apply + notify + emit」，
                 // 不 join 回 http 线程（AppHandle/State 的 Arc 均 Send 可移入）。
                 // 竞态诚实口径（P2-3）：护栏只防陈旧不防尾行未 flush——
                 // Stop 先于 transcript 尾行落盘时可能欠计最后一条 message（接受）。
@@ -168,6 +170,7 @@ fn make_idle_hook(
                 let state = state.clone();
                 let app = app.clone();
                 let cache = cc_cache.clone();
+                let notifier = notifier.clone();
                 std::thread::spawn(move || {
                     let now = token_stats::now_ms();
                     if let Some((text, today)) = token_stats::build_cc_idle_report(
@@ -191,6 +194,9 @@ fn make_idle_hook(
                             // 复合键 claude-code:{sessionId}（P2-5）
                             st.apply_event("claude-code", &sid, Kind::Success, Instant::now());
                         }
+                        // apply + notify 成对（后台线程内 apply 后立即推送，
+                        // 不依赖 1s tick 兜底）
+                        notifier.notify(&state);
                         let _ = app
                             .emit("pulsepet://bubble", serde_json::json!({ "text": full }));
                     }
@@ -292,7 +298,7 @@ pub fn run() {
             let server = http_server::start(
                 state.clone(),
                 notifier.clone(),
-                make_idle_hook(&state, app.handle(), &cc_cache),
+                make_idle_hook(&state, app.handle(), &cc_cache, &notifier),
                 // v2 M3（§3.7.2，N8）：含非空 detail 的状态事件 → 定向 pet 窗
                 // 透传字符串（不解析不判开关——App 侧过滤）
                 {
