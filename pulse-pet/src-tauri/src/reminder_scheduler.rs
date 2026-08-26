@@ -1387,7 +1387,11 @@ fn fire_and_notify<R: tauri::Runtime>(app: &tauri::AppHandle<R>, fired: &[Remind
 
 /// skipped 判定落库（N1 闭环的调用方半段）：写 last_skipped_at + 清 snooze；
 /// exec 型落 action_logs(status='skipped')，notify 型不落库（错过无害）。
-fn persist_skipped(app: &tauri::AppHandle, skipped: &[SkippedRule], now_ts: &str) {
+fn persist_skipped<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    skipped: &[SkippedRule],
+    now_ts: &str,
+) {
     let Some(db) = app.try_state::<Mutex<Connection>>() else {
         return;
     };
@@ -1619,7 +1623,7 @@ pub fn spawn_scheduler(app: tauri::AppHandle, state: Arc<Mutex<RemindersState>>)
     });
 }
 
-fn run_tick(app: &tauri::AppHandle, state: &Arc<Mutex<RemindersState>>) {
+fn run_tick<R: tauri::Runtime>(app: &tauri::AppHandle<R>, state: &Arc<Mutex<RemindersState>>) {
     let now = now_ms();
     let ts = now_rfc3339();
     let minute = now_minute_of_day();
@@ -1642,6 +1646,31 @@ fn run_tick(app: &tauri::AppHandle, state: &Arc<Mutex<RemindersState>>) {
         fire_and_notify(app, &notify);
     }
     for f in fired.iter().filter(|f| f.rule.action_type == "exec") {
+        // R5（tester R4 P2）：**排队中去重**——collect_due fire 与 dispatch 落库
+        // 之间被 CRUD reload 插入时，reload 重建的内存无 handled 标记 → 该规则
+        // next_due 回到过去时刻 → 下个 tick 重复 fire。此处按 id 查等待队列：
+        // 已排队 = 本周期已认领，跳过分派并补 mark_triggered 落库（handled
+        // 持久化，此后任意 reload 不再复活）。
+        let already_pending = state
+            .lock()
+            .map(|st| {
+                st.pending_execs
+                    .iter()
+                    .any(|p| p.rule.id == f.rule.id)
+            })
+            .unwrap_or(false);
+        if already_pending {
+            if let Some(db) = app.try_state::<Mutex<Connection>>() {
+                if let Ok(conn) = db.lock() {
+                    let _ = mark_triggered(&conn, f.rule.id, &ts);
+                }
+            }
+            plog!(
+                "[pulsepet] exec task #{} already pending, skip re-dispatch (reload race guard)",
+                f.rule.id
+            );
+            continue;
+        }
         crate::action_exec::dispatch_exec(app, state, &f.rule, f.scheduled_at_ms);
     }
 }
@@ -3222,10 +3251,17 @@ mod tests {
             .unwrap();
         assert_eq!(status, "running", "出队即写 running（spawn 时刻）");
         drop(conn);
-        // 清理：杀掉测试拉起的进程（登记表里有句柄，模拟退出处置）
+        // 清理：杀掉测试拉起的进程——**先等登记就绪**（R5 P3-2：spawn 任务
+        // 首 poll 才插入登记表，不等会 drain 空 → sleep 30 孤儿泄漏）
         {
             use tauri::Manager;
             let reg = handle.state::<Arc<Mutex<crate::action_exec::RunningTasks>>>();
+            for _ in 0..100 {
+                if reg.lock().unwrap().len() >= 1 {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
             let mut r = reg.lock().unwrap();
             for (_, proc_) in r.tasks.drain() {
                 crate::action_exec::kill_process_tree(proc_.pid);
@@ -3256,10 +3292,11 @@ mod tests {
             r.action_params = Some(format!(r#"{{"command":"{cmd}"}}"#).into());
             r
         };
+        // sleep 45：断言期进程稳定存活 + 清理万一漏杀时 45s 自愈（不长命孤儿）
         let rules = vec![
-            mk(1, "sleep 598"),
-            mk(2, "sleep 597"),
-            mk(3, "sleep 596"),
+            mk(1, "sleep 45"),
+            mk(2, "sleep 45"),
+            mk(3, "sleep 45"),
         ];
         // run_tick 的同步循环形态：顺序 dispatch，无 await
         for r in &rules {
@@ -3321,12 +3358,12 @@ mod tests {
         let live = {
             let mut r = daily_rule(7, "10:00", None);
             r.action_type = "exec".into();
-            r.action_params = Some(r#"{"command":"sleep 595"}"#.into());
+            r.action_params = Some(r#"{"command":"sleep 45"}"#.into());
             r
         };
         let mut stale = daily_rule(999, "10:00", None);
         stale.action_type = "exec".into();
-        stale.action_params = Some(r#"{"command":"sleep 594"}"#.into());
+        stale.action_params = Some(r#"{"command":"sleep 45"}"#.into());
         let sched = Arc::new(Mutex::new(RemindersState {
             // 内存规则表只含 live（id=7）——999 已删除
             rules: vec![RuleState {
@@ -3370,6 +3407,166 @@ mod tests {
             let reg = handle.state::<Arc<Mutex<RunningTasks>>>();
             for _ in 0..100 {
                 if reg.lock().unwrap().len() >= 1 {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            let mut r = reg.lock().unwrap();
+            for (_, proc_) in r.tasks.drain() {
+                crate::action_exec::kill_process_tree(proc_.pid);
+            }
+        }
+    }
+
+    /// R5（tester R4 P2）：**排队中规则 reload 后不重复 fire**——实机缺陷形态：
+    /// 3 条 once 同分钟触发，第 3 条排队；排队期间 CRUD reload 重建内存（排队
+    /// 条目 handled 只在内存）→ next_due 回过去时刻 → 下 tick 重复 fire →
+    /// 队列同规则重复条目 → 双重执行。修复 = dispatch_exec 入口无条件
+    /// mark_triggered 落库（排队分支持久化）+ run_tick 分派前按 id 查 pending
+    /// 去重（毫秒窗口兜底）。对照断言：非排队规则（disabled daily）reload 后
+    /// 照常重算（过去时刻补跑判定入口不回归）。
+    #[test]
+    fn queued_rule_reload_does_not_refire_or_duplicate() {
+        use crate::action_exec::RunningTasks;
+        let app = tauri::test::mock_app();
+        let handle = app.handle();
+        let c = conn();
+        // 3 条 once exec 同刻（now+120s：分钟截断后必然严格未来、过 validate
+        // 未来校验；next_due 手动置过去模拟到点）+ 1 条 disabled daily（对照）
+        let at_local = {
+            let at = now_ms() + 120_000;
+            DateTime::from_timestamp_millis(at)
+                .unwrap()
+                .with_timezone(&Local)
+                .format("%Y-%m-%dT%H:%M")
+                .to_string()
+        };
+        let mut ids = Vec::new();
+        for i in 0..3 {
+            let mut inp = input("custom", &format!("排队钉子 {i}"), 30);
+            inp.schedule_kind = "once".into();
+            inp.schedule_at = Some(at_local.clone());
+            inp.action_type = "exec".into();
+            inp.action_params = Some(r#"{"command":"sleep 20"}"#.into());
+            ids.push(insert_rule(&c, &inp).unwrap().id);
+        }
+        // at 置真实过去（insert 需未来过 validate；UPDATE 绕行模拟"已到点"——
+        // 实机缺陷形态即 at 为过去时刻）
+        let at_past = {
+            let at = now_ms() - 120_000;
+            DateTime::from_timestamp_millis(at)
+                .unwrap()
+                .with_timezone(&Local)
+                .format("%Y-%m-%dT%H:%M")
+                .to_string()
+        };
+        for id in &ids {
+            c.execute(
+                "UPDATE reminders SET schedule_at = ?2 WHERE id = ?1",
+                params![id, at_past],
+            )
+            .unwrap();
+        }
+        let mut daily_inp = input("custom", "对照（停用 daily）", 30);
+        daily_inp.schedule_kind = "daily".into();
+        daily_inp.schedule_at = Some("09:00".into());
+        daily_inp.enabled = false;
+        let daily_id = insert_rule(&c, &daily_inp).unwrap().id;
+
+        let sched = Arc::new(Mutex::new(RemindersState::load(&c).unwrap()));
+        handle.manage(Arc::new(Mutex::new(RunningTasks::default())));
+        handle.manage(Mutex::new(c));
+
+        // 模拟到点：3 条 once 的 next_due 置过去
+        {
+            let mut st = sched.lock().unwrap();
+            for rs in st.rules.iter_mut() {
+                if rs.rule.schedule_kind == "once" {
+                    rs.next_due_ms = now_ms() - 1_000;
+                }
+            }
+        }
+        // tick1：3 个 exec fire → 2 启动 + 1 排队
+        run_tick(handle, &sched);
+        {
+            let st = sched.lock().unwrap();
+            assert_eq!(st.active_execs, 2, "恰 2 槽");
+            assert_eq!(st.pending_execs.len(), 1, "第 3 个排队");
+        }
+        let daily_due_before: i64 = {
+            let st = sched.lock().unwrap();
+            st.rules
+                .iter()
+                .find(|rs| rs.rule.id == daily_id)
+                .unwrap()
+                .next_due_ms
+        };
+        assert!(
+            daily_due_before > now_ms() && daily_due_before != i64::MAX,
+            "对照 daily（未处理，created=刚才）常规值 = 次日 09:00"
+        );
+
+        // ---- 排队期间 CRUD reload（缺陷触发条件）----
+        {
+            let db = handle.state::<Mutex<Connection>>();
+            let conn = db.lock().unwrap();
+            sched.lock().unwrap().reload(&conn).unwrap();
+        }
+        // 修复点 1：排队条目 handled 已落库 → reload 重算 once → MAX（不复活）
+        {
+            let st = sched.lock().unwrap();
+            for id in &ids {
+                let due = st
+                    .rules
+                    .iter()
+                    .find(|rs| rs.rule.id == *id)
+                    .unwrap()
+                    .next_due_ms;
+                assert_eq!(due, i64::MAX, "once #{id} reload 后不复活（handled 持久化）");
+            }
+            // 对照：非排队 daily 照常重算（常规值不受排队保护波及）
+            let daily_due = st
+                .rules
+                .iter()
+                .find(|rs| rs.rule.id == daily_id)
+                .unwrap()
+                .next_due_ms;
+            assert_eq!(
+                daily_due, daily_due_before,
+                "非排队规则 reload 语义不回归（重算结果一致）"
+            );
+        }
+
+        // tick2：无重复 fire → 队列无重复条目、无新 running
+        run_tick(handle, &sched);
+        {
+            let st = sched.lock().unwrap();
+            assert_eq!(st.pending_execs.len(), 1, "队列无重复条目");
+            assert_eq!(st.pending_execs[0].rule.id, ids[2], "排队的仍是原第 3 条");
+        }
+        // db：3 条 once 的 handled 标记全落库（dispatch 时刻）
+        {
+            let db = handle.state::<Mutex<Connection>>();
+            let conn = db.lock().unwrap();
+            for id in &ids {
+                let (lt,): (Option<String>,) = conn
+                    .query_row(
+                        "SELECT last_triggered_at FROM reminders WHERE id = ?1",
+                        [id],
+                        |r| Ok((r.get(0)?,)),
+                    )
+                    .unwrap();
+                assert!(lt.is_some(), "once #{id} handled 已持久化");
+            }
+        }
+
+        // 清理：清队列（防出队）+ 等登记就绪 + 杀进程组
+        sched.lock().unwrap().pending_execs.clear();
+        {
+            use tauri::Manager;
+            let reg = handle.state::<Arc<Mutex<RunningTasks>>>();
+            for _ in 0..100 {
+                if reg.lock().unwrap().len() >= 2 {
                     break;
                 }
                 std::thread::sleep(std::time::Duration::from_millis(50));

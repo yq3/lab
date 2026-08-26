@@ -222,15 +222,28 @@ mod tests {
         assert!(content.contains("marker-append"));
         assert!(content.ends_with('\n'));
 
-        // ---- ② 超限轮转：>1MB 改名 .old，新文件只含横幅 ----
+        // ---- ② 超限轮转：>1MB 改名 .old，新文件以横幅重开 ----
+        // R5（tester R4 P3）：断言容忍并行测试的 plog! 写入——全局句柄在轮转
+        // 与 set_file 之间的窗口里仍指向旧 inode（.old），其它测试的 plog! 会
+        // 追加进来（实测 ~15% 概率多 ~176B）；set_file 后的并行行则进新文件。
+        // 核心断言不削弱：.old 存在 + ≥ 写入量 + 含写入内容（轮转确实发生、
+        // 轮转点 >1MB）；新文件以横幅开头（重开 + 横幅在首行，并行追加只在尾部）。
         let big = "x".repeat(ROTATE_BYTES as usize + 1);
         std::fs::write(&path, &big).unwrap();
         init_at(&path).unwrap();
         let old = std::fs::read_to_string(dir.join("pulsepet.old")).unwrap();
-        assert_eq!(old.len(), ROTATE_BYTES as usize + 1);
+        assert!(
+            old.len() >= ROTATE_BYTES as usize + 1,
+            "rotated .old must hold the oversize content: {}",
+            old.len()
+        );
+        assert!(old.ends_with(&"x".repeat(64)), ".old content tail preserved");
         let cur = std::fs::read_to_string(&path).unwrap();
-        assert!(cur.contains("=== PulsePet"), "rotated file lacks banner:\n{cur}");
-        assert!(cur.len() < 1024, "rotated file should only hold banner:\n{cur}");
+        let first_line = cur.split('\n').next().unwrap_or("");
+        assert!(
+            first_line.contains("=== PulsePet"),
+            "rotated file must reopen with banner as first line:\n{cur}"
+        );
 
         // ---- ③ panic hook：panic 落文件（消息 + 位置 + backtrace） ----
         let dir_p = tmpdir("panic");
