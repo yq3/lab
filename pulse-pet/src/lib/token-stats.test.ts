@@ -6,6 +6,7 @@ import {
   localDayStartMs,
   parseStatsError,
   rangeForPreset,
+  resolveQueryRange,
   sumRows,
   type TokenRow,
 } from "./token-stats";
@@ -99,6 +100,43 @@ describe("rangeForPreset：时间跨度（含当天，TC-TK-08）", () => {
     const fromNext = new Date(rangeForPreset("today", next).fromMs);
     expect(fromNext.getDate()).toBe(17);
     expect(fromNext.getHours()).toBe(0);
+  });
+});
+
+// ---- v2 M4 R3（tester R2 P2）：查询窗口解析——preset 随调用时刻前进 ----
+
+describe("resolveQueryRange：load 时重算查询窗口（挂载定格回归钉子）", () => {
+  const T0 = new Date(2026, 7, 26, 10, 0, 0, 0);
+  const T1 = new Date(2026, 7, 26, 18, 30, 0, 0); // 同日 8.5h 后（活跃会话越过定格 toMs）
+
+  it("preset（today/7d/30d）：后一次调用的 toMs 随时刻前进（越过旧 toMs 的会话不落窗外）", () => {
+    const first = resolveQueryRange("today", "", "", T0);
+    const second = resolveQueryRange("today", "", "", T1);
+    expect(first.toMs).toBe(T0.getTime());
+    expect(second.toMs).toBe(T1.getTime());
+    expect(second.toMs).toBeGreaterThan(first.toMs);
+    // fromMs 锚定不变（同日 0 点）
+    expect(second.fromMs).toBe(first.fromMs);
+    // 7d 同语义
+    const a = resolveQueryRange("7d", "", "", T0);
+    const b = resolveQueryRange("7d", "", "", T1);
+    expect(b.toMs).toBeGreaterThan(a.toMs);
+  });
+
+  it("custom：用户指定区间语义不变——now 前进不改变 from/to（整天边界含当天）", () => {
+    const fromStr = "2026-08-20";
+    const toStr = "2026-08-26";
+    const a = resolveQueryRange("custom", fromStr, toStr, T0);
+    const b = resolveQueryRange("custom", fromStr, toStr, T1);
+    expect(a).toEqual(b);
+    expect(a.fromMs).toBe(localDayStartMs(fromStr));
+    expect(a.toMs).toBe(localDayEndMs(toStr));
+  });
+
+  it("custom 从至倒填自动归位（min/max，既有语义保留）", () => {
+    const r = resolveQueryRange("custom", "2026-08-26", "2026-08-20", T0);
+    expect(r.fromMs).toBe(localDayStartMs("2026-08-20"));
+    expect(r.toMs).toBe(localDayEndMs("2026-08-26"));
   });
 });
 

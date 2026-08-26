@@ -5,9 +5,7 @@ import {
   formatTokens,
   isTauriRuntime,
   localDateStr,
-  localDayEndMs,
-  localDayStartMs,
-  rangeForPreset,
+  resolveQueryRange,
   sumRows,
   type GroupBy,
   type StatsError,
@@ -96,19 +94,14 @@ export default function TokenStats() {
   /** 模型筛选（作用域仅柱图，SCOPE E；null 键 = 「未知模型」桶）。 */
   const [selectedModels, setSelectedModels] = useState<Set<ModelKey> | null>(null);
 
-  // 跨度计算：预设含当天；自定义从/至均为整天边界（含当天）
-  const range = useMemo(() => {
-    if (preset === "custom") {
-      const fromMs = Math.min(localDayStartMs(fromStr), localDayStartMs(toStr));
-      const toMs = Math.max(localDayEndMs(fromStr), localDayEndMs(toStr));
-      return { fromMs, toMs };
-    }
-    return rangeForPreset(preset);
-  }, [preset, fromStr, toStr]);
-
   const load = useCallback(async () => {
     setLoading(true);
     try {
+      // v2 M4 R3（tester R2 P2 修复）：查询窗口**每次 load 重算**——此前 range
+      // 在挂载时 useMemo 定格（面板 hide/show 不重挂载），活跃会话 time_updated
+      // 越过定格 toMs 后被整体排除且 Refresh 不可追回；preset 的 to 随调用时刻
+      // 前进，custom（用户指定区间）整天边界语义不变（resolveQueryRange）。
+      const range = resolveQueryRange(preset, fromStr, toStr);
       // 时序/汇总维度 + 固定 session 维度（会话列表，TC-TK-09 ④）
       const [dim, sess] = await Promise.all([
         fetchTokenRows(range.fromMs, range.toMs, dimension as GroupBy),
@@ -124,7 +117,7 @@ export default function TokenStats() {
     } finally {
       setLoading(false);
     }
-  }, [range.fromMs, range.toMs, dimension]);
+  }, [preset, fromStr, toStr, dimension]);
 
   useEffect(() => {
     void load();

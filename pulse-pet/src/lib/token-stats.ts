@@ -169,6 +169,30 @@ export function rangeForPreset(preset: RangePreset, now = new Date()): TimeRange
   return { fromMs: from.getTime(), toMs };
 }
 
+/**
+ * v2 M4 R3（tester R2 P2 修复）：查询窗口解析——**每次调用以传入 now 重算**。
+ *
+ * - preset（today/7d/30d）：to = 调用时刻（面板窗口 hide/show 不重挂载组件，
+ *   若 range 在挂载时 useMemo 定格，活跃会话 time_updated 越过定格 toMs 后
+ *   被整体排除且 Refresh 不可追回——TokenStats 的 load/focus 刷新每次调用
+ *   本函数，窗口随之前进）；
+ * - custom：用户指定区间语义不变——from/to 恒为所选日的整天边界（含当天），
+ *   与调用时刻无关；从/至倒填经 min/max 归位。
+ */
+export function resolveQueryRange(
+  preset: RangePreset | "custom",
+  fromStr: string,
+  toStr: string,
+  now = new Date(),
+): TimeRange {
+  if (preset === "custom") {
+    const fromMs = Math.min(localDayStartMs(fromStr), localDayStartMs(toStr));
+    const toMs = Math.max(localDayEndMs(fromStr), localDayEndMs(toStr));
+    return { fromMs, toMs };
+  }
+  return rangeForPreset(preset, now);
+}
+
 /** `yyyy-mm-dd` → 本地当天 0 点毫秒。 */
 export function localDayStartMs(dateStr: string): number {
   const [y, m, d] = dateStr.split("-").map(Number);
