@@ -676,7 +676,7 @@
 - **步骤**：打开 Token 页今日 / 7d。
 - **预期**：
   1. 出现 CC 会话行：标题 = 首条用户 prompt 截断 + `cc` agent 微列徽标（i18n title 提示全名）+ cost 列显示 `—`（CC 侧 cost 省略——第三方 API key 下单价表永远不准，诚实优于假精确）；
-  2. KPI 总量含 CC 用量（grouped 行 SUM 自动全 agent 合计）；费用卡副行「仅 opencode」标注可见；
+  2. KPI 总量含 CC 用量（grouped 行 SUM 自动全 agent 合计）；费用口径「仅 opencode」标注可见（M4 移除 cost KPI 卡后以 KPI 区注释小字承载——2026-08-27 措辞对齐实际形态）；
   3. day/week 聚合增 agent 维度（opencode SQL `GROUP BY day, agent, model_id` + CC 内存聚合合并，两源 concat）；range 维 `agent × model_id`；
   4. 模型 chip 来源 distinct(model_id) 自动含 CC 模型，双源同模型（如 deepseek 系）自然归并（模型维度跨 agent 合法）；
   5. CC 行与 opencode 行时间倒序统一排序；`token_stats_query` / `token_stats_today` 为 `async fn` + `spawn_blocking`（主线程不承 IO，IPC 契约不变）；
@@ -746,7 +746,7 @@
 ### TC-M5-10 主题与双语目验（实机）
 
 - **步骤**：深 / 浅主题 + zh/en 下目验新增元素。
-- **预期**：agent tab（标题右侧分段单选，含「全部」项）/ 模型复选框联动收窄 / cc 徽标 / ⚡ / 费用卡标注 / cost `—` / degraded 横幅全走 M2 token；新键（`token.agent.*`（含 `token.agent.all`）/ `token.costOpencodeOnly` / `token.taskBadge` / CC 汇报模板）zh/en 集合一致。
+- **预期**：agent tab（标题右侧分段单选，含「全部」项）/ 模型复选框联动收窄 / cc 徽标 / ⚡ / 费用区注释小字 / cost `—` / degraded 横幅全走 M2 token；新键（`token.agent.*`（含 `token.agent.all`）/ `token.costOpencodeOnly` / `token.taskBadge` / CC 汇报模板）zh/en 集合一致。
 
 ---
 

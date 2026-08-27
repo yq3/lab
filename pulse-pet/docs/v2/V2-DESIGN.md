@@ -787,7 +787,7 @@ pub async fn token_stats_today() -> Result<TodayStats, String>
   - 输入 day/week 聚合行（含 model_id）+ 勾选模型集合；输出每日一柱、柱内三段自底向上 **output → input → cache read**（SCOPE D 裁定；reasoning 不参与汇总口径）；
   - 未勾选模型的行直接剔除后聚合；selectedModels 为空集 → 空态文案（不渲染柱）；
   - **opts 预留 `agentFilter?: ReadonlySet<string>` 参数位**（M3 声明类型不传值——M5 接入时填实现，签名与调用点均不变；N3 措辞修正，弃「never 收窄」说法）。
-- **agent 筛选 UI 预留位（SCOPE H「避免二次返工」的落实）**：筛选 chip 行设计为**可容纳多组筛选的容器**（`<div class="filter-row">` 内模型组为第一组）；M5 时 agent 组作为第二组 chip 插入同一容器（数据维度到来前不渲染空组、不留空位）——布局与组件结构按两组设计，M3 只渲染模型组。
+- **agent 筛选 UI 预留位（SCOPE H「避免二次返工」的落实）**：筛选 chip 行设计为**可容纳多组筛选的容器**（`<div class="filter-row">` 内模型组为第一组）；M5 时 agent 组作为第二组 chip 插入同一容器（数据维度到来前不渲染空组、不留空位）——布局与组件结构按两组设计，M3 只渲染模型组。〔注：M5 实施时（2026-08-27 R2 修订）agent 筛选最终改为标题右侧 tab 单选 + 模型复选联动，未按"第二组 chip"形态落地；本预留位由 `computeStackedBars`/`computeModelChips` 的 agentFilter 参数位与 filter-row 容器继续承载，见 §5.6 修订注记。〕
 - **渲染**：SVG/DOM 三段矩形（色值 = M2 `--chart-output/input/cache` token；柱内堆叠顺序维持自底向上 output → input → cache read 不变）；悬浮 **HTML tooltip**（日期 + 三项数值 + 占比 + 总量；三项数值行**自上而下 cache read → input → output**〔用户 2026-08-25 裁定修订，与柱内堆叠顺序独立〕）；图例三项（仅说明，不可交互——避免与模型筛选语义混淆）。
 - **模型筛选**：柱图上方复选 chip 列表（水平 wrap），来源 = 当前跨度聚合行的 distinct model_id（按总量降序）；默认全勾；作用域**仅柱图**（KPI/会话列表不联动，SCOPE E 裁定）。probe-model 已在 SQL 层过滤（S4）。
 - **KPI 首卡**：`总量 = input + output + cache_read`（`sumRows` 增 total 字段；reasoning 不计）；卡片顺序：**总量 / cache read / input / output** 四卡（cost 卡移除，cache read 升独立第二卡，首卡无副行小字）〔用户 2026-08-25 裁定修订，取代原「总量/input/output/cost + cache read 副行小字」布局；cost 数据仍在会话详情与 TodayStats 中存在，仅不作 KPI 卡展示〕。
@@ -916,7 +916,7 @@ pub async fn token_stats_today() -> Result<TodayStats, String>
 
 **P1-1（已修，→ §3.4）**：穿透模式可用性误述——「②不可达（①③可用）」与 SCOPE §3.3 C 原文（仅被动层+面板可用）及代码现实（TC-WIN-04：穿透态右键菜单不可达）双重矛盾。改为「②③均不可达」。
 
-**P1-2（已修，→ §3.1/§3.5）**：SCOPE H 要求的「agent 筛选预留位」只有一句空话承诺。落实：`computeStackedBars` opts 预留 `agentFilter` 参数位 + 筛选 chip 行按多组容器设计（M5 插第二组）。
+**P1-2（已修，→ §3.1/§3.5）**：SCOPE H 要求的「agent 筛选预留位」只有一句空话承诺。落实：`computeStackedBars` opts 预留 `agentFilter` 参数位 + 筛选 chip 行按多组容器设计（M5 插第二组）。〔注：M5 实施时（2026-08-27 R2 修订）agent 筛选最终改为标题右侧 tab 单选 + 模型复选联动，未按"第二组 chip"形态落地；agentFilter 参数位预留价值不变，见 §5.6 修订注记。〕
 
 **P1-3（已修，→ §3.7.2/§3.8）**：工具播报开关缺跨窗口机制（panel/pet 双 webview 不共享 store，「立即静默」不可实现）。补齐：`tool_broadcast_get/set` 命令 + `pulsepet://tool-broadcast` 定向广播 + pet 桥 get 初始化/广播订阅（照 pass-through 模式）。
 
@@ -1264,7 +1264,7 @@ tick 判定到期（daily/once，补跑窗内）
 - Rust 新模块 `transcript.rs`：CC transcript 扫描/解析/文件级缓存，产出与 TokenRow 同构的会话行。
 - `token_stats_query` 双源化：opencode SQL + CC 解析结果合并，`TokenRow` 增 `agent` 字段；day/week/range 聚合增 agent 维度。
 - `token_stats_today` 双源化（M3 三层快捷查看自动覆盖 CC）。
-- Token 页：agent 筛选 chip 组（M3 预留第二组落实）、会话列表 agent 标识列 + 例程 ⚡ 徽标、费用卡「仅 opencode」标注。
+- Token 页：agent 筛选两级交互（标题右侧 tab 单选 + 模型复选联动，R2 修订口径，M3 预留位落实）、会话列表 agent 标识列 + 例程 ⚡ 徽标、费用区「仅 opencode」注释小字。
 - CC 会话汇报气泡：M1 idle 分流预留位兑现（CC idle → transcript 聚合 → 气泡）。
 - CC hook 工具级气泡：M3 协议照抄接入（detail 携带）。
 - **不含**：M6 抢镜（气泡 agent 标识 UI 属 M6，M5 只备数据）、子代理感知（彩蛋池，S6 数据已留）、单价表配置面（裁定不做）。
@@ -1358,9 +1358,12 @@ M3 协议（`detail="tplId:param"`，§3.7.1）照抄到 `claude-code-hook.js`�
 
 ### 5.6 Token 页 UI（M3 预留位落实）
 
-- **agent 筛选 chip 第二组**（M3 `filter-row` 多组容器设计兑现）：`opencode` / `claude-code` 两 chip（有数据的 agent 才渲染），默认全勾；作用域**仅柱图**（与模型筛选一致，M3 E 口径）；`computeStackedBars` 的 `agentFilter` 参数位填实现（M3 N12 单测钉子已在）。
+> **口径修订（2026-08-27，用户反馈 R1 偏差后方案 A 终审）**：agent 筛选由原设计的「filter-row 第二组复选 chip」改为「标题右侧 tab 单选 + 模型复选框联动」两级交互——用户意图是两级筛选（先 agent 维度、再模型维度），R1 按本节原文实现的两组复选框并排属需求偏差，R2 已按修订口径交付（commit `ca2b600`）。验收口径见 V2-TEST-CASES TC-M5-04/TC-M5-10 修订注记。
+
+- **agent 维度 tab（分段单选）**：置于「Token 时序（按天/按周）」标题 `<h3>` 右侧同一行（`.token-chart-head` flex 布局）；交互照抄 Settings 主题三档 `theme-seg` 模式（`role="radiogroup"` + 每项 `role="radio"` + `aria-checked` + `seg active`）。选项 = **「全部」（`token.agent.all`，恒显，默认选中）** + 仅有数据的 agent（无数据不渲染；仅一个 agent 有数据时「全部」仍并列恒显）；数据刷新后所选 agent 无数据 → 回落「全部」。
+- **模型复选框联动收窄**：`filter-row` 只保留模型组（唯一一组复选）；`computeModelChips` 增可选 `agentFilter` 参数——选中「全部」= 所有 agent 的模型并集（原行为）；选中具体 agent = 收窄为该 agent 有数据的模型；**切换 tab 时模型勾选重置为全选**（不保留跨 tab 隐性勾选）。作用域**仅柱图**（与模型筛选一致，M3 E 口径，KPI/会话列表不随 tab 变化）；`computeStackedBars` 的 `agentFilter` 参数位填实现（具体 agent = 单元素集 /「全部」= 不传，M3 N12 钉子语义保持）。原 noAgents 空集空态随单选交互不可达（`token.chart.noAgents` 键 zh/en 已清退；模型空集空态口径不变）。
 - **会话列表**：增 agent 标识微列（`oc` / `cc` 等宽小字徽标，i18n title 提示全名）；**例程 ⚡ 徽标**：`title.startsWith("pulsepet 例程:")` → 标题前 ⚡ 图标（title 属性「定时任务例程」）；CC 行标题 = 首 prompt（§5.2）。
-- **费用 KPI 卡**：副行小字「仅 opencode」（CC 恒 0 口径标注）；会话列表 CC 行 cost 列显示 `—`。
+- **费用口径标注**：M4 R1 用户裁定移除 cost KPI 卡后，「仅 opencode」标注以 **KPI 区注释小字**（`token-kpi-note`）承载（CC 恒 0 口径标注）；会话列表 CC 行 cost 列显示 `—`。
 - 深浅主题：新增元素全走 token（M2 系统）。
 
 ### 5.7 Rust / 前端变更汇总
@@ -1372,7 +1375,7 @@ M3 协议（`detail="tplId:param"`，§3.7.1）照抄到 `claude-code-hook.js`�
 | `lib.rs` | TranscriptCache manage（窗口创建前）；idle hook 分支派发 CC 汇报（http 线程只派发、解析在后台线程，P2-2）；命令注册（签名不变，返回体 +agent/+degraded 向后兼容） |
 | `opencode-plugin/claude-code-hook.js` | §5.5 detail 携带（extractDetailParam 照抄 M3 规则） |
 | `lib/token-stats.ts` | TokenRow +agent 字段；CC 类型常量；**fetchTokenRows/fetchTodayStats 解析 `{rows,degraded}`/`{today,degraded}` 包装**（N-4） |
-| `panel/TokenStats.tsx` | agent chip 组/会话列表 agent 列 + ⚡ 徽标/费用卡标注/CC cost `—`/**degraded 细横幅**（仅 panel；pet 三层静默显示 CC-only 数值，§5.2 定案） |
+| `panel/TokenStats.tsx` | agent tab 两级筛选（标题右侧单选 + 模型复选联动，R2 修订口径）/会话列表 agent 列 + ⚡ 徽标/费用区注释小字/CC cost `—`/**degraded 细横幅**（仅 panel；pet 三层静默显示 CC-only 数值，§5.2 定案） |
 | `lib/token-chart.ts` | `agentFilter` 实现（参数位已在） |
 | `lib/i18n.ts` + `i18n.rs` | `token.agent.*`（chip/列徽标）、`token.costOpencodeOnly`、`token.taskBadge`、CC 汇报气泡模板（zh/en；Rust 侧 build_cc_idle_report 模板入 i18n.rs） |
 
@@ -1386,15 +1389,15 @@ M3 协议（`detail="tplId:param"`，§3.7.1）照抄到 `claude-code-hook.js`�
 |---|---|
 | `transcript.rs`（tempdir 注入） | **message.id 去重**（6 行含 thinking/text 重复行 → 3 条 SUM，按行序取末条——S3 回归钉子）；五维映射；坏行/空文件/非 JSON 行跳过不崩；**首末行无 timestamp（mode/last-prompt 包夹）→ 时间戳取自首/末条含 ts 事件行**（P1-1 钉子）；UTC→本地日转换（跨日边界注入时区）；**week 标签复刻 %W 语义**（2026-12-28/2027-01-01/2027-01-04 跨年对齐断言，P2-4）；title 首 prompt 截断（**中文 60 字符**）/无 prompt 回退；**首条含 cwd 行取 basename**（含无 cwd 的 snapshot 行稀释 fixture，P2-6）；mtime+size 缓存命中/失效；sessionId 索引定位；memory/ 子目录排除；目录不存在 → 空结果 |
 | `token_stats.rs` | grouped 行 agent 维度（opencode 恒单值 + CC 内存聚合合并）；today 双源合计；`build_cc_idle_report`（新鲜度护栏/**last_assistant_ts 字段消费**（N-1）/全零静默/无 cost 段文案）；**degraded 双源容错**（opencode 错×CC 有数据 → Ok(CC-only)+degraded=Some；双源全缺 → 既有错误码透传；CC 缺席 → rows 原样 + degraded=None（M3 回归），N-4） |
-| `token-chart` | agentFilter 实现用例（勾选剔除/不传=全量——M3 N12 钉子扩展） |
-| 前端 | CC cost `—` 渲染；例程前缀匹配 ⚡；agent chip 逻辑 |
+| `token-chart` | agentFilter 实现用例（具体 agent 单元素收窄/不传=全量——M3 N12 钉子扩展） |
+| 前端 | CC cost `—` 渲染；例程前缀匹配 ⚡；agent tab 单选 + 模型复选框联动逻辑 |
 | `claude-code-hook.js` | extractDetailParam CC 工具族五类（basename/首词剥赋值/hostname——M3 用例平移） |
 | i18n | 新键 zh/en 完备性 |
 
 **实机验收**（TC-M5-xx，N-6 重排）：
 
-1. 真实 CC 会话（本机 DataAgent 项目已有存量）→ Token 页今日/7d 出现 CC 会话行（首 prompt 标题 + `cc` 徽标 + cost `—`）；KPI 总量含 CC；费用卡仅 opencode 标注可见；**M3 三层交叉断言双源复验**（悬停卡 = 面板今日 KPI = 菜单，会话静止窗口内——P3-10；悬停/菜单在 degraded 态静默显示 CC-only 数值）；
-2. agent chip：只勾 opencode → 柱图剔除 CC 数据，KPI/会话列表不变（E 口径）；双源同模型（deepseek）在模型 chip 自然归并（tooltip 跨源说明实施时对齐，P3-11）；agent chip 空集空态复用 M3 模型空集口径（P3-12）；
+1. 真实 CC 会话（本机 DataAgent 项目已有存量）→ Token 页今日/7d 出现 CC 会话行（首 prompt 标题 + `cc` 徽标 + cost `—`）；KPI 总量含 CC；费用区「仅 opencode」注释小字可见（M4 后形态）；**M3 三层交叉断言双源复验**（悬停卡 = 面板今日 KPI = 菜单，会话静止窗口内——P3-10；悬停/菜单在 degraded 态静默显示 CC-only 数值）；
+2. agent tab：切具体 agent → 柱图剔除其它 agent 数据、模型复选框收窄为该 agent 模型且重置全选，KPI/会话列表不变（E 口径）；双源同模型（deepseek）在模型 chip 自然归并（tooltip 跨源说明实施时对齐，P3-11）；agent 空集空态随单选交互不可达（`token.chart.noAgents` 已清退，原 P3-12 口径作废留注）；
 3. CC 会话结束 → 宠物气泡「本期用了 Xk input / Yk output · 今日 T」（无 $ 段）；opencode 会话结束气泡无回归（双发时同源合并）；
 4. CC 工具级气泡：CC 会话内编辑文件/跑命令 →「正在编辑 X」/「正在跑 npm」（与 opencode 同模板同 ambient 行为）；开关对双 agent 统一生效；
 5. 例程徽标：M4 定时任务跑一次 opencode run → Token 页新会话带 ⚡（前提 = M4 验收 4 回填，R8）；
