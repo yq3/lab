@@ -410,6 +410,16 @@ pub fn run() {
             }
 
             windows::restore_pet_position(app.handle());
+            // issue #20：pet 窗口隐藏创建（conf visible:false），位置恢复后才
+            // 显式 show——消除 Windows 上左上角默认位置闪现（WebView2 异步创建
+            // 期间泵消息、前端内容先于 setup 渲染，与 #9 同源时序）。无条件
+            // show：无保存位置时 restore 仅记日志，窗口也必须显示。
+            if let Some(win) = app.get_webview_window("pet") {
+                match win.show() {
+                    Ok(()) => plog!("[pulsepet] pet window shown"),
+                    Err(e) => plog!("[pulsepet] pet window show failed: {e}"),
+                }
+            }
             // ---- M6 托盘（五项菜单 + 勾选句柄）与全局热键 ----
             app.manage(tray::TrayItems::default());
             tray::build_tray(app.handle())?;
@@ -736,5 +746,42 @@ mod order_nails {
             .find("Arc::new(Mutex::new(transcript::TranscriptCache::default()))")
             .expect("lib.rs 须含 TranscriptCache 构造");
         assert!(construct_at < windows_at);
+    }
+
+    /// issue #20：pet 窗口必须隐藏创建（conf visible:false），setup 内位置
+    /// 恢复之后才显式 show——Windows 上 WebView2 异步创建期间泵消息、前端
+    /// 内容先于 setup 渲染，可见创建会在默认位置（左上角）闪现后跳位
+    /// （与 #9 同源时序盲区；macOS 内容首帧晚于 setup，无此现象）。
+    #[test]
+    fn pet_window_hidden_until_position_restored() {
+        let src = include_str!("lib.rs");
+        let restore_at = src
+            .find("windows::restore_pet_position(app.handle())")
+            .expect("lib.rs 须含 restore_pet_position 调用（issue #20）");
+        let show_at = src
+            .find("\"[pulsepet] pet window shown\"")
+            .expect("lib.rs 须含 pet 窗口恢复后显式 show 的 plog 标记（issue #20）");
+        assert!(
+            restore_at < show_at,
+            "pet 窗口 show 必须在 restore_pet_position 之后（issue #20 铁律）"
+        );
+        // 钉住 show 调用本身（防"删 win.show() 只留 plog 标记"绕过）
+        assert!(
+            src[restore_at..show_at].contains("win.show()"),
+            "restore 与 plog 标记之间须含 win.show() 调用（issue #20）"
+        );
+        // conf：pet 窗口 visible:false（隐藏创建）
+        let conf = include_str!("../tauri.conf.json");
+        let pet_at = conf
+            .find("\"label\": \"pet\"")
+            .expect("tauri.conf.json 须含 pet 窗口条目");
+        let panel_at = conf
+            .find("\"label\": \"panel\"")
+            .expect("tauri.conf.json 须含 panel 窗口条目");
+        let pet_block = &conf[pet_at..panel_at];
+        assert!(
+            pet_block.contains("\"visible\": false"),
+            "pet 窗口须 visible:false 隐藏创建（issue #20）"
+        );
     }
 }
