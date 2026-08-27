@@ -3,14 +3,14 @@
 > 生成：2026-08-27（v2 M6 合入 develop 后）
 > 来源：Windows 实机使用反馈（[issue #19](https://github.com/yq3/lab/issues/19) / [issue #20](https://github.com/yq3/lab/issues/20)）+ 源码级诊断（2026-08-27，诊断结论已分别留痕于两 issue）
 > 性质：两项 **Windows 特有缺陷**，根因已定位、修复方案已裁定（R1-R5，见 [§三](#三修复任务清单r1r5统一实施)）。
-> **状态（2026-08-27）**：R1-R5 **已实施**（develop 工作区，未提交；测试基线全绿：`cargo test` 320+3 钉子 / `npm test` 409 / `tsc --noEmit` 通过）；Windows release 实机三场景验证（§四）待用户复测，通过后分别闭环 #19 / #20。
+> **状态（2026-08-27 闭环）**：R1-R5 **已修复并随 `pulse-pet-v0.2.1` 发布**——实施 commit `6f9e0be`（R1-R4）/ `9e609d6`（R5）/ `acc12b3`（本文件）/ `f2cf13e`（版本 bump 四件套），tag `pulse-pet-v0.2.1`（CI run 33071206433 双矩阵 success，安装包挂 draft Release）。测试基线全绿（`cargo test` 320+3 钉子 / `npm test` 409 / `tsc --noEmit`），committer 评审 APPROVED（P0/P1=0，三条 P3 加固已落地）。**Windows release 实机三场景验证通过（2026-08-27，v0.2.1，§四）**，#19 / #20 可闭环。
 > 共同背景：与 v1 issue #9 同源——Windows 上 WebView2 环境创建异步、主线程泵消息期间页面已加载执行（GUI 子系统 + 控制台子进程交互）的时序盲区；v1 里程碑"Windows 实机验证后移"的欠账在 v2 实机使用中集中显性化。macOS 开发机均无法复现。
 
 ---
 
 ## 一、issue #19：doctor 的 node 探测与面板焦点事件自激励死循环
 
-> 状态：**已实施（R1-R4，2026-08-27，工作区未提交），待 Windows 实机验证**；诊断评论见 [#19](https://github.com/yq3/lab/issues/19#issuecomment-5437033400)。
+> 状态：**已修复（R1-R4，commit 6f9e0be）+ Windows 实机验证通过（2026-08-27，v0.2.1）**；诊断评论见 [#19](https://github.com/yq3/lab/issues/19#issuecomment-5437033400)。
 > 定级：设置 tab 无法正常驻留（日志风暴 ~4-5 轮/s，每轮 2 行 plog + 一次 node spawn），无数据损坏。
 
 ### 1.1 症状（2026-08-27 用户报告）
@@ -45,7 +45,7 @@ Windows release 构建打开控制面板切到设置 tab，`pulsepet.log` 疯狂
 
 ## 二、issue #20：启动时宠物在屏幕左上角闪现后才移到上次位置
 
-> 状态：**已实施（R5，2026-08-27，工作区未提交），待 Windows 实机验证**。
+> 状态：**已修复（R5，commit 9e609d6）+ Windows 实机验证通过（2026-08-27，v0.2.1）**。
 > 定级：视觉体验缺陷，无功能影响。
 
 ### 2.1 症状（2026-08-27 用户报告）
@@ -81,14 +81,14 @@ R5 配套钉子（并入 R4 实施）：`order_nails` 新增断言 conf 里 pet 
 - R2 的 `CREATE_NO_WINDOW` 只抑制控制台宿主窗口，不影响子进程启动 GUI 程序；
 - R3 冷却只作用于 focus 触发路径，mount / `panel://tab` 触发不受限（保持"重开面板即刷新"语义）。
 
-## 四、验证口径
+## 四、验证口径与结果
 
 **测试基线**（实施后全绿）：`cargo test` + `npm test` + `npx tsc --noEmit`。
 
-**Windows release 实机**（三项都过才算闭环）：
+**Windows release 实机**（2026-08-27 用户复测，PulsePet v0.2.1——三项全部通过，闭环）：
 
-| # | 场景 | 预期 |
-|---|---|---|
-| 1 | 打开面板切到设置 tab | 日志只出 2 行 doctor 状态（进 tab 一次），无循环滚动 |
-| 2 | 定时任务（exec 型）到点执行 | 无控制台窗口闪现、无焦点被抢 |
-| 3 | 启动 App（有/无保存位置各一次） | 宠物直接出现在上次位置，无左上角闪现；无保存位置时仍正常显示 |
+| # | 场景 | 预期 | 结果 |
+|---|---|---|---|
+| 1 | 打开面板切到设置 tab | 日志只出 2 行 doctor 状态（进 tab 一次），无循环滚动 | ✅ 通过 |
+| 2 | 定时任务（exec 型）到点执行 | 无控制台窗口闪现、无焦点被抢 | ✅ 通过 |
+| 3 | 启动 App（有/无保存位置各一次） | 宠物直接出现在上次位置，无左上角闪现；无保存位置时仍正常显示 | ✅ 通过 |
