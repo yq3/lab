@@ -291,6 +291,10 @@ fn finalize_state(state: &SessionState, session_id: &str) -> Option<CcSessionRow
 /// 单文件解析（坏行/空文件/非 JSON 行跳过不崩；无 assistant 行 → None）。
 /// 方案 α 起口径统一为「只解析以换行符结束的完整行」（与增量路径一致；
 /// CC 正在写的半行不入账——jsonl 语义，逐字段等价的前提）。
+/// 生产路径已全量走 CacheEntry 增量链路（parse_file_full/increment），
+/// 本函数仅测试使用（task-pulsepet-v2-polish R1 追加：cfg(test) 清 release
+/// 档 dead_code 警告）。
+#[cfg(test)]
 pub fn parse_session(path: &Path) -> Option<CcSessionRow> {
     let bytes = std::fs::read(path).ok()?;
     let session_id = session_id_of(path);
@@ -505,6 +509,10 @@ impl TranscriptCache {
     /// 语义与 v2-m5 相同；并发场景用 [`refresh_unlocked`]）。
     /// 增量口径：append-only 增长的文件从已记录偏移只读尾部新增行；
     /// 变小 / mtime 变而 size 未变 / 文件身份变了 → 全量重解析。
+    /// 生产调用方已全走 refresh_unlocked（token_stats 三入口）；本方法仅
+    /// 测试使用（task-pulsepet-v2-polish R1 追加：cfg(test) 清 release 档
+    /// dead_code 警告）。
+    #[cfg(test)]
     pub fn refresh(&mut self, dir: &Path) -> Vec<CcSessionRow> {
         let Some(plan) = self.plan_refresh(dir) else {
             return self.snapshot_rows();
@@ -587,6 +595,10 @@ impl TranscriptCache {
     /// 经 sessionId 索引定位文件并取会话行（单线程便捷路径；并发场景用
     /// [`find_session_unlocked`]）。索引缺失（首查/idle 先于查询）→ refresh
     /// 补建后取。无 → None。
+    /// 生产调用方（build_cc_idle_report）已走 find_session_unlocked；本方法
+    /// 仅测试使用（task-pulsepet-v2-polish R1 追加：cfg(test) 清 release 档
+    /// dead_code 警告）。
+    #[cfg(test)]
     pub fn find_session(&mut self, dir: &Path, session_id: &str) -> Option<CcSessionRow> {
         let path = match self.index.get(session_id).cloned() {
             Some(p) => p,
@@ -658,7 +670,7 @@ pub fn find_session_unlocked(
         Miss,
     }
     let step = {
-        let mut c = lock_cache(cache);
+        let c = lock_cache(cache);
         match c.index.get(session_id).cloned() {
             Some(path) => {
                 let meta = std::fs::metadata(&path).ok();
