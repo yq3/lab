@@ -797,10 +797,9 @@ pub fn query_stats_dual(
             format!("invalid group_by: {group_by}（应为 session/day/week/range）"),
         ));
     }
-    let cc_rows_all = {
-        let mut c = cache.lock().unwrap_or_else(|p| p.into_inner());
-        c.refresh(cc_dir)
-    };
+    // 方案 α（task-pulsepet-v2-polish #11）：锁内只做轻量判定与写回，I/O 与
+    // 解析（增量：append 只读尾部）在锁外——不再于 Mutex 持有期全量解析。
+    let cc_rows_all = transcript::refresh_unlocked(cc_dir, cache);
     let cc_has_data = !cc_rows_all.is_empty();
     let cc_tokens: Vec<TokenRow> = cc_rows_all.iter().map(cc_to_token_row).collect();
     let cc_grouped = cc_group_rows(&cc_tokens, group_by, from_ms, to_ms);
@@ -839,10 +838,8 @@ pub fn today_stats_dual(
     now_ms: i64,
 ) -> Result<TodayResponse, StatsError> {
     let from = local_today_start_ms(now_ms);
-    let cc_rows_all = {
-        let mut c = cache.lock().unwrap_or_else(|p| p.into_inner());
-        c.refresh(cc_dir)
-    };
+    // 方案 α：锁外增量刷新（同 query_stats_dual）
+    let cc_rows_all = transcript::refresh_unlocked(cc_dir, cache);
     let cc_has_data = !cc_rows_all.is_empty();
     let mut cc_today = TodayStats {
         input: 0,
@@ -892,7 +889,7 @@ pub fn today_stats_dual(
 
 /// M5 CC 会话汇报（V2-DESIGN §5.4，TC-M5-05）：
 /// - 经 TranscriptCache sessionId 索引定位文件（缓存缺失由 find_session 内
-///   refresh 补建——idle 先于查询）；
+///   refresh 补建——idle 先于查询；方案 α：定位/校验锁内轻量，I/O 与解析锁外）；
 /// - 新鲜度护栏：**last_assistant_ts** 距 now < max_lag（N-1 专用口径，对齐
 ///   opencode「最后 message 写入时间」语义）；
 /// - 五维有非零用量才出气泡（全零静默，TC-TK-12 口径）；
@@ -906,10 +903,7 @@ pub fn build_cc_idle_report(
     now_ms: i64,
     max_lag_ms: i64,
 ) -> Option<(String, Option<i64>)> {
-    let row = {
-        let mut c = cache.lock().unwrap_or_else(|p| p.into_inner());
-        c.find_session(cc_dir, session_id)?
-    };
+    let row = transcript::find_session_unlocked(cc_dir, cache, session_id)?;
     let fresh = row
         .last_assistant_ts
         .is_some_and(|t| (now_ms - t).abs() <= max_lag_ms);

@@ -492,6 +492,11 @@ export default function Settings() {
           const ui = uiStateOf(s);
           const busy = intgBusy === s.id;
           const nameKey = s.id === "opencode" ? "integrations.opencodeDesc" : "integrations.claudeDesc";
+          // P3-6（task-pulsepet-v2-polish #2）：单次计算——此前条件判断与渲染
+          // 各调一次 composeActionNotice，重复拼串
+          const actionNotice =
+            intgNotices[s.id] &&
+            composeActionNotice(t("integrations.actionDone"), intgNotices[s.id]);
           return (
             <div className="intg-row" key={s.id}>
               <div className="intg-row-head">
@@ -521,16 +526,9 @@ export default function Settings() {
               </div>
               <p className="intg-path">{s.configPath}</p>
               <p className="intg-message">{s.message}</p>
-              {intgNotices[s.id] &&
-                composeActionNotice(
-                  t("integrations.actionDone"),
-                  intgNotices[s.id],
-                ) && (
-                  <p className="intg-row-notice">
-                    ✅{" "}
-                    {composeActionNotice(t("integrations.actionDone"), intgNotices[s.id])}
-                  </p>
-                )}
+              {actionNotice && (
+                <p className="intg-row-notice">✅ {actionNotice}</p>
+              )}
               {intgErrors[s.id] && <p className="intg-row-error">⚠️ {intgErrors[s.id]}</p>}
               <p className="intg-note">{t("integrations.backupNote")}</p>
             </div>

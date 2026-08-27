@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   buildPetMenuItems,
   clampMenuPosition,
@@ -178,5 +180,30 @@ describe("buildPetMenuItems：分布行随今日 token 信息项（M6 sub 行）
     expect(single[0].sub).toBeUndefined();
     const loading = buildPetMenuItems(false, { status: "loading" });
     expect(loading[0].sub).toBeUndefined();
+  });
+});
+
+describe("PetMenu clamp 自适应（v2 打磨轮 #12，源码钉子）", () => {
+  // node 环境无 DOM/ResizeObserver，渲染行为由 playwright 实测佐证（任务
+  // 报告）；此处钉住组件挂载 ResizeObserver 的源码口径——防止回退成
+  // 「effect deps [pos] 一次性测量」丢掉子行动态出现后的重算（双 agent 日
+  // 菜单增高 ~14px 贴下缘时底项被裁）。
+  const src = readFileSync(
+    join(process.cwd(), "src/pet/PetMenu.tsx"),
+    "utf8",
+  );
+
+  it("clamp effect 挂 ResizeObserver 并 observe 菜单元素", () => {
+    expect(src).toContain("new ResizeObserver(reclamp)");
+    expect(src).toContain("ro.observe(el)");
+  });
+
+  it("卸载时断开 observer（不泄漏）", () => {
+    expect(src).toContain("ro.disconnect()");
+  });
+
+  it("实测重算用菜单真实尺寸（offsetWidth/offsetHeight 回退估值 176/130）", () => {
+    expect(src).toContain("el.offsetWidth || 176");
+    expect(src).toContain("el.offsetHeight || 130");
   });
 });

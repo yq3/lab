@@ -77,6 +77,38 @@ pub fn init_at(path: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+/// 测试专用（task-pulsepet-v2-polish #6）：持全局 slot 锁完成「预写 oversize
+/// 内容 → 轮转 → 重开 → 换句柄」。预写/轮转/换柄全窗口期内其它线程的
+/// plog! 阻塞在锁上（而非拿着旧句柄把行追加进已被 rename 的 `.old`），
+/// `ends_with(x×64)` 断言从「容忍概率污染」变为确定成立。banner 在锁外
+/// 补写：此时句柄已指向新文件，并行追加只落新文件尾部（首行横幅断言
+/// 不受影响）。
+#[cfg(test)]
+pub(crate) fn init_at_exclusive(path: &Path, oversize_prewrite: &str) -> std::io::Result<()> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    match LOG_FILE.get() {
+        Some(slot) => {
+            let mut guard = slot.lock().unwrap_or_else(|p| p.into_inner());
+            std::fs::write(path, oversize_prewrite)?;
+            rotate_if_oversize(path)?;
+            let file = OpenOptions::new().create(true).append(true).open(path)?;
+            *guard = Some(file);
+        }
+        None => {
+            // slot 未建（首次 init，无并发旧句柄可污染 .old）：与 init_at 等价
+            std::fs::write(path, oversize_prewrite)?;
+            rotate_if_oversize(path)?;
+            let file = OpenOptions::new().create(true).append(true).open(path)?;
+            let _ = LOG_FILE.set(Mutex::new(Some(file)));
+        }
+    }
+    install_panic_hook();
+    banner();
+    Ok(())
+}
+
 /// 超限轮转：改名 `.old` 只保留一代。Windows rename 到已存在目标会失败，
 /// 先删旧 `.old`（POSIX rename 原生覆盖，删除也无害）。
 fn rotate_if_oversize(path: &Path) -> std::io::Result<()> {
@@ -223,14 +255,12 @@ mod tests {
         assert!(content.ends_with('\n'));
 
         // ---- ② 超限轮转：>1MB 改名 .old，新文件以横幅重开 ----
-        // R5（tester R4 P3）：断言容忍并行测试的 plog! 写入——全局句柄在轮转
-        // 与 set_file 之间的窗口里仍指向旧 inode（.old），其它测试的 plog! 会
-        // 追加进来（实测 ~15% 概率多 ~176B）；set_file 后的并行行则进新文件。
-        // 核心断言不削弱：.old 存在 + ≥ 写入量 + 含写入内容（轮转确实发生、
-        // 轮转点 >1MB）；新文件以横幅开头（重开 + 横幅在首行，并行追加只在尾部）。
+        // task-pulsepet-v2-polish #6：预写 + 轮转 + 换句柄全程持全局 slot 锁
+        //（init_at_exclusive）——其它并行测试的 plog! 在窗口期阻塞在锁上，
+        // 不再经旧句柄把尾部追加进已被 rename 的 .old（原 ~15% 概率污染
+        // ends_with(x×64) 断言的竞态根除）；set_file 后的并行行进新文件尾部。
         let big = "x".repeat(ROTATE_BYTES as usize + 1);
-        std::fs::write(&path, &big).unwrap();
-        init_at(&path).unwrap();
+        init_at_exclusive(&path, &big).unwrap();
         let old = std::fs::read_to_string(dir.join("pulsepet.old")).unwrap();
         assert!(
             old.len() >= ROTATE_BYTES as usize + 1,

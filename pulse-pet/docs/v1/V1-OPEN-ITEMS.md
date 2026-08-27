@@ -240,6 +240,14 @@
 4. 删除 v0.1.0 draft Release（七-1 已裁定丢弃）；
 5. 发布说明**重点**提醒重跑 `install.sh`（插件副本不随 App 更新，§8.3/§九）。
 
+### 8.6 后续维护版清单（0.1.x 线待办）
+
+> v0.1.3 收尾后新发现的维护项落此处（0.1.x 线下一维护版承载；v2 期间发现的 v1 既有问题同样归此）。
+
+| # | 事项 | 修法要点 | 来源 |
+|---|---|---|---|
+| 1 | **OBS-SIGTERM**：外部 kill（SIGTERM）不产生 `exit` 日志行（排障口径「有 exit 行 = 干净退出」失效），runtime token/endpoint 残留不清理（下会话启动才被覆盖；窗口期内 endpoint 仍可被旧 token 命中） | **SIGTERM 退出钩子**：注册信号处理器 → ①补写 `exit` 日志行（标注信号来源）②清理 runtime 目录的 token/endpoint ③**Windows 分叉说明**：Windows 无 SIGTERM，需走 console 事件（`SetConsoleCtrlHandler`）或 Tauri window close 事件路径，实现时分叉处理并注明验证口径 | task-pulsepet-v2-polish / v2-m6 OBS-SIGTERM（2026-08-27 记录；本轮只落文档不改代码） |
+
 ---
 
 ## 九、已修复严重缺陷：插件钩子同步阻塞宿主 opencode（2026-08-22）
