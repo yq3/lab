@@ -37,12 +37,42 @@ export interface TokenRow {
 export const AGENT_OPENCODE = "opencode";
 export const AGENT_CLAUDE_CODE = "claude-code";
 
+/**
+ * v2 M6（V2-DESIGN §6.2）：agent 短名（opencode→oc / claude-code→cc /
+ * task→task；未知 agent 原名兜底）。气泡徽标 `[oc]` 与今日分布行 `oc 39M`
+ * 共用；技术名约定，i18n 不翻译。
+ */
+export function agentShortName(agent: string): string {
+  switch (agent) {
+    case AGENT_OPENCODE:
+      return "oc";
+    case AGENT_CLAUDE_CODE:
+      return "cc";
+    case "task":
+      return "task";
+    default:
+      return agent;
+  }
+}
+
+/** v2 M6：by_agent 行类型（与 Rust token_stats.rs AgentTodayTotal 一致）。 */
+export interface AgentTodayTotal {
+  agent: string;
+  total: number;
+}
+
 /** v2 M3：今日 token 聚合（token_stats_today；三层快捷查看共享单一数据源）。 */
 export interface TodayStats {
   input: number;
   output: number;
   cache_read: number;
   cost: number;
+  /**
+   * v2 M6（V2-DESIGN §6.2）：agent 分布行（有数据的 agent 按 total 降序；
+   * total = 今日总量同口径 in+out+cacheRead、不含 reasoning、mock 过滤）。
+   * 可选——旧序列化数据/测试夹具无此字段。
+   */
+  by_agent?: AgentTodayTotal[];
 }
 
 /**

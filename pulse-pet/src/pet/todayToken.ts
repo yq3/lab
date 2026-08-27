@@ -8,7 +8,7 @@
  */
 
 import { formatTokens, fetchTodayStats, type TodayStats } from "../lib/token-stats";
-import type { TodayTokenState } from "../lib/pet-menu";
+import { todayByAgentText, type TodayTokenState } from "../lib/pet-menu";
 
 /** 缓存新鲜度窗口（§3.4：30s）。 */
 export const TODAY_CACHE_MS = 30_000;
@@ -27,10 +27,16 @@ export async function fetchTodayStatsCached(now = Date.now()): Promise<TodayStat
   return today;
 }
 
-/** TodayStats → 菜单信息项三态文案（total = in+out+cache_read，reasoning 不计）。 */
+/**
+ * TodayStats → 菜单信息项三态文案（total = in+out+cache_read，reasoning 不计）。
+ * v2 M6（V2-DESIGN §6.2，TC-M6-04）：+agent 分布行 byAgent（双 agent 有数据
+ * 才显示；呈现面随 M3 悬停卡移除落在本菜单信息项子行——任务裁定点）。
+ */
 export function todayTokenStateOf(s: TodayStats): TodayTokenState {
+  const byAgent = todayByAgentText(s) ?? undefined;
   return {
     status: "ok",
     text: formatTokens(s.input + s.output + s.cache_read),
+    ...(byAgent ? { byAgent } : {}),
   };
 }

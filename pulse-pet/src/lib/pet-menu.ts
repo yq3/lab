@@ -12,6 +12,7 @@
  */
 
 import { t, type Lang } from "./i18n";
+import { agentShortName, formatTokens, type TodayStats } from "./token-stats";
 
 export type PetMenuAction =
   | "today-token"
@@ -19,10 +20,16 @@ export type PetMenuAction =
   | "toggle-pass-through"
   | "hide-pet";
 
-/** 「今日 token」信息项三态（数据来自 token_stats_today 的 30s 缓存）。 */
+/**
+ * 「今日 token」信息项三态（数据来自 token_stats_today 的 30s 缓存）。
+ * v2 M6（V2-DESIGN §6.2，TC-M6-04）：ok 态可携带 agent 分布行文本
+ * `byAgent`（`oc 36.0M · cc 3.0M`）——**单项时不显示**（单 agent 无辨识
+ * 需求）；呈现面随 M3 悬停卡移除（2026-08-25 用户裁定）落在本菜单信息项
+ * 子行（原设计「悬停卡分布行」的适配落点，见任务裁定点）。
+ */
 export type TodayTokenState =
   | { status: "loading" }
-  | { status: "ok"; text: string }
+  | { status: "ok"; text: string; byAgent?: string }
   | { status: "error" };
 
 export interface PetMenuItem {
@@ -30,6 +37,8 @@ export interface PetMenuItem {
   label: string;
   /** v2 M3：信息项（今日 token）与行为项分隔线样式区分（§3.4 ③）。 */
   info?: boolean;
+  /** v2 M6：信息项子行（agent 分布行；仅双 agent 有数据时携带）。 */
+  sub?: string;
 }
 
 /** 三态 → label 插值 v（… / 42M / —）。 */
@@ -42,6 +51,18 @@ export function todayTokenValue(state: TodayTokenState): string {
     case "error":
       return "—";
   }
+}
+
+/**
+ * v2 M6（V2-DESIGN §6.2，TC-M6-04-1/4）：今日 agent 分布行文本——
+ * `oc 36.0M · cc 3.0M`（有数据的 agent 降序、formatTokens 同口径）。
+ * **单项时不显示**（单 agent 无辨识需求）→ null；零数据/缺省同样 null
+ * （省略）。短名 oc/cc/task 与气泡徽标共用 agentShortName（技术名不翻译）。
+ */
+export function todayByAgentText(s: TodayStats): string | null {
+  const rows = s.by_agent ?? [];
+  if (rows.length < 2) return null;
+  return rows.map((r) => `${agentShortName(r.agent)} ${formatTokens(r.total)}`).join(" · ");
 }
 
 /**
@@ -63,6 +84,10 @@ export function buildPetMenuItems(
       id: "today-token",
       label: t("menu.todayToken", { v: todayTokenValue(todayToken) }, lang),
       info: true,
+      // v2 M6：agent 分布行（双 agent 有数据才携带；单项/零数据省略）
+      ...(todayToken.status === "ok" && todayToken.byAgent
+        ? { sub: todayToken.byAgent }
+        : {}),
     },
     { id: "settings", label: t("menu.settings", undefined, lang) },
     {

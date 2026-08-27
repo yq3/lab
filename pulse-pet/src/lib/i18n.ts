@@ -80,6 +80,7 @@ const zh: Dict = {
   "token.taskBadge": "定时任务例程",
   // v2 M5（C1/N-4）：degraded 细横幅（仅 panel；opencode 源不可用 × CC 有数据）
   "token.degraded": "opencode 源不可用：仅显示 Claude Code 数据",
+  "token.hoverAgent": "今日 agent 分布",
 
   // ---- 提醒页 ----
   "reminders.needApp": "提醒配置需要在 PulsePet App（Tauri）内使用",
@@ -429,6 +430,7 @@ const en: Dict = {
   "token.taskBadge": "Scheduled routine",
   // v2 M5（C1/N-4）：degraded 细横幅（仅 panel；opencode 源不可用 × CC 有数据）
   "token.degraded": "opencode source unavailable: showing Claude Code data only",
+  "token.hoverAgent": "Today's tokens by agent",
 
   "reminders.needApp": "Reminders are only available inside the PulsePet app (Tauri)",
   "reminders.loadFail": "Failed to load reminders: {msg}",

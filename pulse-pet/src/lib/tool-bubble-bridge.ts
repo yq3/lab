@@ -92,16 +92,34 @@ export function toolBubbleText(d: ToolDetail, lang?: Parameters<typeof t>[2]): s
 /**
  * 应用一条 detail：解析 → 白名单/净化 → 开关判定（只读 store 位，零 IPC）→
  * ambient 入队（source="tool:<tplId>"；dwell 由级派生）。
+ * v2 M6（§6.2，TC-M6-03-1）：+agent（Rust `/state` 透传链路 (detail, agent)——
+ * [oc]/[cc] 徽标数据源；缺省不带——旧载荷向后兼容）。
  */
-export function applyToolDetail(detail: unknown): void {
+export function applyToolDetail(detail: unknown, agent?: unknown): void {
   if (!useToolBroadcastStore.getState().enabled) return; // 开关关：静默（插件照发）
   const d = parseAndSanitize(detail);
   if (!d) return; // 白名单外 / param 空：丢弃（不发气泡）
+  const a = typeof agent === "string" && agent ? agent : undefined;
   usePetStore.getState().pushBubble({
     text: toolBubbleText(d),
     level: "ambient",
     source: `tool:${d.tpl}`,
+    ...(a ? { agent: a } : {}),
   });
+}
+
+/** v2 M6：`pulsepet://tool-bubble` payload `{detail, agent}`（agent 缺省 null）。 */
+export interface ToolBubblePayload {
+  detail: unknown;
+  agent: string | null;
+}
+
+/** 解析 `pulsepet://tool-bubble` 载荷；payload 非对象 → null（agent 非字符串按缺省）。 */
+export function parseToolBubblePayload(payload: unknown): ToolBubblePayload | null {
+  if (typeof payload !== "object" || payload === null) return null;
+  const p = payload as { detail?: unknown; agent?: unknown };
+  const agent = typeof p.agent === "string" && p.agent ? p.agent : null;
+  return { detail: p.detail, agent };
 }
 
 /** 解析 `pulsepet://tool-broadcast` 载荷；非法 → null。 */
@@ -131,7 +149,10 @@ export async function initToolBubbleBridge(): Promise<void> {
   }
   const { listen } = await import("@tauri-apps/api/event");
   await listen(TOOL_BUBBLE_EVENT, (event) => {
-    applyToolDetail((event.payload as { detail?: unknown } | null)?.detail);
+    // v2 M6：payload {detail, agent}（agent 透传自 /state body——徽标数据源）
+    const p = parseToolBubblePayload(event.payload);
+    if (!p) return;
+    applyToolDetail(p.detail, p.agent);
   });
   await listen(TOOL_BROADCAST_EVENT, (event) => {
     const v = parseToolBroadcastEnabled(event.payload);

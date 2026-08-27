@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { usePetStore } from "./petStore";
 import { buildPetMenuItems, clampMenuPosition } from "../lib/pet-menu";
 import { openPanel, setPassThrough, togglePetVisible } from "../lib/interaction";
-import { useLangStore } from "../lib/i18n";
+import { t, useLangStore } from "../lib/i18n";
 import { fetchTodayStatsCached, todayTokenStateOf } from "./todayToken";
 import type { TodayTokenState } from "../lib/pet-menu";
 
@@ -122,8 +122,10 @@ export default function PetMenu() {
           role="menuitem"
           className={item.info ? "pet-menu-item pet-menu-info" : "pet-menu-item"}
           onClick={() => act(item.id)}
+          title={item.sub ? t("token.hoverAgent") : undefined}
         >
           {item.label}
+          {item.sub && <span className="pet-menu-sub">{item.sub}</span>}
         </button>
       ))}
     </div>

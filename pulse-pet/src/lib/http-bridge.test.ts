@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { applyStatePayload, parseDisplayKind, parseStatePayload } from "./http-bridge";
+import {
+  applyBubblePayload,
+  applyStatePayload,
+  parseDisplayKind,
+  parseStatePayload,
+} from "./http-bridge";
 import { usePetStore } from "../pet/petStore";
 import { ALL_STATES } from "./state";
 
@@ -84,5 +89,31 @@ describe("applyStatePayload：event → petStore（含 8→5 降级）", () => {
   it("displayAgent 默认 opencode（V2-DESIGN §1.6）", () => {
     // 上一用例末尾可能改过；此处经重置验证默认初值语义（新 store 首次读取）
     expect(["opencode", "claude-code"]).toContain(usePetStore.getState().displayAgent);
+  });
+});
+
+// ---- v2 M6（V2-DESIGN §6.2，TC-M6-03-1）：bubble payload 解析 agent ----
+
+describe("applyBubblePayload：token 汇报气泡携带 agent（M6 徽标数据源）", () => {
+  it("payload {text, agent} → 条目 agent 传入（[oc]/[cc] 徽标来源）", () => {
+    usePetStore.getState().resetBubbles();
+    applyBubblePayload({ text: "opencode 汇报", agent: "opencode" });
+    expect(usePetStore.getState().bubble.current?.agent).toBe("opencode");
+    usePetStore.getState().resetBubbles();
+    applyBubblePayload({ text: "CC 汇报", agent: "claude-code" });
+    expect(usePetStore.getState().bubble.current?.agent).toBe("claude-code");
+  });
+
+  it("payload 缺 agent（旧载荷）→ 条目无 agent（向后兼容，不渲染徽标）", () => {
+    usePetStore.getState().resetBubbles();
+    applyBubblePayload({ text: "旧版载荷" });
+    expect(usePetStore.getState().bubble.current?.agent).toBeUndefined();
+  });
+
+  it("agent 非字符串（非法类型）→ 忽略 agent 只出文本", () => {
+    usePetStore.getState().resetBubbles();
+    applyBubblePayload({ text: "ok", agent: 42 });
+    expect(usePetStore.getState().bubble.current?.agent).toBeUndefined();
+    expect(usePetStore.getState().bubble.current?.text).toBe("ok");
   });
 });

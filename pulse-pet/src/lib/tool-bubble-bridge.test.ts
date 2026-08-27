@@ -3,6 +3,7 @@ import {
   TOOL_PARAM_MAX,
   applyToolDetail,
   parseAndSanitize,
+  parseToolBubblePayload,
   parseToolDetail,
   parseToolBroadcastEnabled,
   sanitizeToolParam,
@@ -129,5 +130,41 @@ describe("parseToolBroadcastEnabled：广播载荷解析", () => {
     expect(parseToolBroadcastEnabled({ enabled: false })).toBe(false);
     expect(parseToolBroadcastEnabled({ enabled: "yes" })).toBeNull();
     expect(parseToolBroadcastEnabled(null)).toBeNull();
+  });
+});
+
+// ---- v2 M6（V2-DESIGN §6.2，TC-M6-03-1）：tool-bubble payload 补 agent ----
+
+describe("applyToolDetail + agent（M6：/state 透传链路 (detail, agent)）", () => {
+  it("带 agent：条目 agent 传入（[oc]/[cc] 徽标来源）", () => {
+    usePetStore.getState().resetBubbles();
+    applyToolDetail("edit:V2-DESIGN.md", "opencode");
+    expect(usePetStore.getState().bubble.current?.agent).toBe("opencode");
+    usePetStore.getState().resetBubbles();
+    applyToolDetail("bash:npm", "claude-code");
+    expect(usePetStore.getState().bubble.current?.agent).toBe("claude-code");
+  });
+
+  it("agent 缺省（旧载荷/旧事件）→ 条目无 agent（向后兼容，不渲染徽标）", () => {
+    usePetStore.getState().resetBubbles();
+    applyToolDetail("edit:X.md");
+    expect(usePetStore.getState().bubble.current?.agent).toBeUndefined();
+  });
+
+  it("parseToolBubblePayload：{detail, agent} 解析；agent 非字符串按缺省", () => {
+    expect(parseToolBubblePayload({ detail: "edit:a.md", agent: "opencode" })).toEqual({
+      detail: "edit:a.md",
+      agent: "opencode",
+    });
+    expect(parseToolBubblePayload({ detail: "edit:a.md" })).toEqual({
+      detail: "edit:a.md",
+      agent: null,
+    });
+    expect(parseToolBubblePayload({ detail: "edit:a.md", agent: 7 })).toEqual({
+      detail: "edit:a.md",
+      agent: null,
+    });
+    expect(parseToolBubblePayload(null)).toBeNull();
+    expect(parseToolBubblePayload("edit:a.md")).toBeNull();
   });
 });

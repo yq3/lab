@@ -4,6 +4,7 @@ import {
   MERGE_WINDOW_MS,
   QUEUE_MAX,
   ackCurrent,
+  bubbleAgentBadge,
   dwellFor,
   enqueue,
   expireCurrent,
@@ -296,5 +297,46 @@ describe("bubble-queue TC-UI-09 ⑥记账时机 / ack", () => {
   it("QUEUE_MAX = 3、MERGE_WINDOW_MS = 10s 常量钉子", () => {
     expect(QUEUE_MAX).toBe(3);
     expect(MERGE_WINDOW_MS).toBe(10_000);
+  });
+});
+
+// ---- v2 M6（V2-DESIGN §6.2，TC-M6-03-3/5）：BubbleItem agent 字段流转 + 徽标 ----
+
+describe("bubble-queue TC-M6-03 agent 字段流转", () => {
+  it("同源合并：徽标以幸存新条目为准（合并键不含 agent）", () => {
+    // 同 source 同级 10s 内合并——旧条目 agent 与新条目不同时，幸存者 = 新条目
+    let s = initialState();
+    s = enqueue(s, item(1, "info", "token-report", "第一条", { agent: "opencode" }), T0);
+    expect(s.current?.agent).toBe("opencode");
+    s = enqueue(s, item(2, "info", "token-report", "第二条", { agent: "claude-code" }), T0 + 100);
+    expect(s.current?.id).toBe(2);
+    expect(s.current?.agent, "合并幸存新条目 → agent 跟随新条目（P3-4）").toBe("claude-code");
+  });
+
+  it("顶替回队：被顶条目保留自身 agent（不丢徽标归属）", () => {
+    let s = initialState();
+    s = enqueue(s, item(1, "ambient", "tool:edit", "", { agent: "opencode" }), T0);
+    s = enqueue(s, item(2, "critical", "reminder:1", "", { agent: undefined }), T0 + 100);
+    expect(s.current?.id).toBe(2);
+    expect(s.current?.agent).toBeUndefined(); // 提醒气泡无徽标（回归）
+    expect(s.queue[0].id).toBe(1);
+    expect(s.queue[0].agent, "回队条目 agent 原样保留").toBe("opencode");
+    // 回队重现后徽标仍在
+    const r = ackCurrent(s, T0 + 200);
+    expect(r.state.current?.id).toBe(1);
+    expect(r.state.current?.agent).toBe("opencode");
+  });
+
+  it("bubbleAgentBadge：opencode→oc / claude-code→cc / task→task / 未知→原名", () => {
+    expect(bubbleAgentBadge("opencode")).toBe("oc");
+    expect(bubbleAgentBadge("claude-code")).toBe("cc");
+    expect(bubbleAgentBadge("task")).toBe("task");
+    expect(bubbleAgentBadge("codex")).toBe("codex"); // 未来 agent 原名兜底
+  });
+
+  it("bubbleAgentBadge：缺省/空串 → null（agent 缺省不渲染徽标——提醒气泡回归，TC-M6-03-5）", () => {
+    expect(bubbleAgentBadge(undefined)).toBeNull();
+    expect(bubbleAgentBadge(null)).toBeNull();
+    expect(bubbleAgentBadge("")).toBeNull();
   });
 });

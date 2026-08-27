@@ -32,6 +32,13 @@ export interface TaskResultPayload {
   text: string;
   logId: number;
   status: string;
+  /**
+   * v2 M6（V2-DESIGN §6.2，TC-M6-03-1）：显式 `agent: "task"`（Rust 侧
+   * task_result_payload 恒发；结果气泡必然来自 task 伪 session，此前隐含、
+   * 本里程碑显式化）。解析侧缺省容错为 "task"（旧载荷锁步发布，无跨版本
+   * 运行场景）。
+   */
+  agent: string;
 }
 
 /** 解析 task-result payload；字段缺失/类型不对 → null（静默忽略）。 */
@@ -41,7 +48,8 @@ export function parseTaskResult(payload: unknown): TaskResultPayload | null {
   if (typeof p.text !== "string" || !p.text) return null;
   if (typeof p.logId !== "number" || !Number.isFinite(p.logId)) return null;
   if (typeof p.status !== "string") return null;
-  return { text: p.text, logId: p.logId, status: p.status };
+  const agent = typeof p.agent === "string" && p.agent ? p.agent : "task";
+  return { text: p.text, logId: p.logId, status: p.status, agent };
 }
 
 export function initReminderBridge(): void {
@@ -103,6 +111,7 @@ export function initReminderBridge(): void {
 
     // v2 M4（P1-3/TC-M4-11）：exec 结果气泡——独立事件按 M2 critical 入队；
     // 无 reminder 载荷（点宠物即消、无 snooze 按钮、不写 reminder_logs）。
+    // v2 M6：+agent（"task" → 前置徽标 [task]）。
     await listen(TASK_RESULT_EVENT, (event) => {
       const r = parseTaskResult(event.payload);
       if (!r) return;
@@ -110,6 +119,7 @@ export function initReminderBridge(): void {
         text: r.text,
         level: "critical",
         source: `task:${r.logId}`,
+        agent: r.agent,
       });
     });
     console.log("[pulsepet] reminder bridge ready (pet)");

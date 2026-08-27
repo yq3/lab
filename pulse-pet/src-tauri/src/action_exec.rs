@@ -52,6 +52,18 @@ pub const TASK_AGENT: &str = "task";
 /// 结果气泡独立事件名（P1-3；桥层按 M2 critical 入队，无 reminder 载荷）。
 pub const TASK_RESULT_EVENT: &str = "pulsepet://task-result";
 
+/// v2 M6（V2-DESIGN §6.2，TC-M6-03-1）：`pulsepet://task-result` payload 构造
+/// （纯函数供单测）——显式携带 `agent: TASK_AGENT`（字段此前已隐含——结果
+/// 气泡必然来自 task 伪 session，本里程碑显式化供前端徽标 [task] 消费）。
+pub fn task_result_payload(text: &str, log_id: i64, status: &str) -> serde_json::Value {
+    serde_json::json!({
+        "text": text,
+        "logId": log_id,
+        "status": status,
+        "agent": TASK_AGENT,
+    })
+}
+
 // ---- summary 模板键（存库形态；P3-3 展示按当前语言渲染） ----
 
 pub const SUMMARY_OK: &str = "task.summary.ok";
@@ -839,7 +851,8 @@ async fn run_task<R: tauri::Runtime>(
     };
     task_apply(&app, log_id, kind);
 
-    // 结果气泡（P1-3）：text = 任务名 + summary（lib 层拼接、按当前语言渲染）
+    // 结果气泡（P1-3）：text = 任务名 + summary（lib 层拼接、按当前语言渲染）；
+    // v2 M6：payload 经 task_result_payload 显式携带 agent:"task"（[task] 徽标）
     {
         use tauri::Emitter;
         let rendered = crate::i18n::current().render_task_summary(&outcome.summary, outcome.exit_code);
@@ -847,11 +860,7 @@ async fn run_task<R: tauri::Runtime>(
         let _ = app.emit_to(
             "pet",
             TASK_RESULT_EVENT,
-            serde_json::json!({
-                "text": text,
-                "logId": log_id,
-                "status": outcome.status.as_str(),
-            }),
+            task_result_payload(&text, log_id, outcome.status.as_str()),
         );
     }
     plog!(
@@ -1194,7 +1203,7 @@ mod tests {
         task_apply(handle, 7, Kind::Success);
 
         let st = sm.lock().unwrap();
-        let d = st.display();
+        let d = st.display(std::time::Instant::now());
         assert_eq!(d.kind, Kind::Success);
         assert_eq!(d.agent, TASK_AGENT);
         drop(st);
@@ -1213,6 +1222,17 @@ mod tests {
     fn task_session_key_shape() {
         assert_eq!(task_session_key(42), "task:42");
         assert_eq!(TASK_AGENT, "task");
+    }
+
+    #[test]
+    fn task_result_payload_carries_explicit_task_agent() {
+        // v2 M6（TC-M6-03-1）：payload 显式 agent:"task"（徽标 [task] 数据源），
+        // text/logId/status 既有字段原样保留（同版本锁步，向后兼容）
+        let p = task_result_payload("例程「日报」完成", 7, "ok");
+        assert_eq!(p["agent"], "task");
+        assert_eq!(p["text"], "例程「日报」完成");
+        assert_eq!(p["logId"], 7);
+        assert_eq!(p["status"], "ok");
     }
 
     // ---- 心跳 15s vs idle 回收 30s（TC-M4-10-3，注入时钟） ----
@@ -1234,12 +1254,12 @@ mod tests {
             sm.apply_event(TASK_AGENT, "task:1", Kind::Working, now);
         }
         sm.tick(t0 + Duration::from_secs(65), Duration::from_secs(30), idle);
-        assert_eq!(sm.display().kind, Kind::Working, "15s 心跳 < 30s idle 回收：持续保鲜");
+        assert_eq!(sm.display(t0 + Duration::from_secs(65)).kind, Kind::Working, "15s 心跳 < 30s idle 回收：持续保鲜");
         // 心跳停止 >30s → 回收（延迟 >15s 两次即超 30s：可观察）
         let mut sm2 = SessionStateMachine::new();
         sm2.apply_event(TASK_AGENT, "task:2", Kind::Working, t0);
         sm2.tick(t0 + Duration::from_secs(31), Duration::from_secs(30), idle);
-        assert_eq!(sm2.display().kind, Kind::Idle, "无心跳 30s 后被回收");
+        assert_eq!(sm2.display(t0 + Duration::from_secs(31)).kind, Kind::Idle, "无心跳 30s 后被回收");
     }
 
     // ---- 启动清理 / 退出处置（TC-M4-15） ----
