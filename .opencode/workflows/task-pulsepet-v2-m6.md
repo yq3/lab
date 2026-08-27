@@ -16,7 +16,7 @@ reviewedSha: 8973813da5fbe23baba93a09769995314a0b2de2
 filesChanged: [pulse-pet/src-tauri/src/session_state.rs, pulse-pet/src-tauri/src/http_server.rs, pulse-pet/src-tauri/src/lib.rs, pulse-pet/src-tauri/src/action_exec.rs, pulse-pet/src-tauri/src/token_stats.rs, pulse-pet/src/lib/bubble-queue.ts, pulse-pet/src/lib/bubble-queue.test.ts, pulse-pet/src/lib/token-stats.ts, pulse-pet/src/lib/http-bridge.ts, pulse-pet/src/lib/http-bridge.test.ts, pulse-pet/src/lib/tool-bubble-bridge.ts, pulse-pet/src/lib/tool-bubble-bridge.test.ts, pulse-pet/src/lib/reminder-bridge.ts, pulse-pet/src/lib/reminder-bridge.test.ts, pulse-pet/src/lib/reminders.test.ts, pulse-pet/src/lib/pet-menu.ts, pulse-pet/src/lib/pet-menu.test.ts, pulse-pet/src/lib/i18n.ts, pulse-pet/src/lib/i18n.test.ts, pulse-pet/src/pet/Bubble.tsx, pulse-pet/src/pet/PetMenu.tsx, pulse-pet/src/pet/todayToken.ts, pulse-pet/src/styles/global.css]
 endReason: null
 createdAt: 2026-08-27T14:17:21+0800          # 创建时间（30 天清理审计用，见 README §4.5）
-updatedAt: 2026-08-27T16:29:40+0800          # 每次写检查点必更新为当前时间（ISO 8601 含时区），不得沿用旧值
+updatedAt: 2026-08-27T21:17:54+0800          # 每次写检查点必更新为当前时间（ISO 8601 含时区），不得沿用旧值
 ---
 
 # task-pulsepet-v2-m6: PulsePet v2 M6——多 agent × 多 session 抢镜 + 气泡 agent 标识
@@ -300,3 +300,6 @@ R1 一次通过，无修复轮次需求。
 - **本轮清偿**：TEST_BUG real_db_reconciliation_manual（v2-m5 移交，R1 顺手修，tester ignored 单测 ok + committer 口径核对一致）；M6 主体全部交付（两层算法/徽标/by_agent/i18n，双通过 + PR #18 合入）
 - **本轮新移交**：P3×4（① PetMenu clamp 高度→打磨轮；② 文档滞后 §6.2/6.3/6.4+TC-M6-04→文档维护轮；③ TC-M6-05 实机组合+OBS-PANEL→用户人工目验批次；④ 理论 tie-break→备查）；OBS-SIGTERM→V1-OPEN-ITEMS §八（随下个 v1 文档维护点落笔）；OBS-DEDUP/OBS-HYST=记录无行动
 - **继续移交（历史）**：v2-m2 实机目验 7 项（待用户反馈）；TC-M5 实机验收缺口 4 项（用户人工配合 per INC-20260827-1033）；v2-m2 P3-5/P3-6~10；v2-m5 committer P3×4（打磨轮）；M4 P3①②③+Windows 观察项；v2-m1 遗留 A~D；after-crash 库留档至 2026-09-03；pp-m5-dom/ 63 截图（人工复核后可清）
+- **遗留清单文档化（2026-08-27 21:10，用户指示，supervised-coding 执行）**：新建 `pulse-pet/docs/v2/V2-OPEN-ITEMS.md`——v2 六里程碑检查点遗留全量汇总（六类：用户目验/实机批次、条件触发、打磨轮 13 项、文档维护、发布与清理、记录备查）；后续任务以此清单 + 检查点为移交基准。另注：v0.2.0 之后用户自行 bump v0.2.1（tag f2cf13e，Draft 待核对）已入清单五节
+- **⚠️ 覆盖事故与恢复（2026-08-27 21:12 更正上条记录）**：21:05 写入 V2-OPEN-ITEMS.md 时**误覆盖了用户并行创建的同名文件**（acc12b3 新建 + 94622dd 闭环——issue #19/#20 Windows 缺陷诊断/R1-R5 修复/v0.2.1 实机三场景验证记录，16:29~21:05 期间用户另一线工作产物）。根因：会话开始时该文件不存在，间隔近 5 小时后写入前未复查存在性（期间已注意到 v0.2.1 tag 异常却未联想到其他文件变动）。用户自行从 git 恢复原文件（21:11）→ supervised-coding 改为**按原结构追加**：原文一~四节（#19/#20 专项）一字不动，引言加构成说明一行，追加五~十节（六里程碑遗留六类汇总 + 附清偿记录），git diff +126 行纯追加零删除；内容融合两处：TC-M4-18 核心面标注已随 v0.2.1 场景 2 验证、v0.2.0 Release 标注被 v0.2.1 取代待裁定。教训入册：**写入既有路径前必先检查存在性 + 读原文**（即使会话早期它不存在，长会话期间用户可能有并行操作）
+- **文档维护轮执行（2026-08-27 21:18，用户指示，supervised-coding 落笔）**：清偿 M6 P3-②（V2-OPEN-ITEMS §8-1）——V2-DESIGN 7 处（§6.0 裁定表悬停卡行加前向注记〔原文不动〕、§6.2 标题改「今日 agent 分布行」+节首修订注记+末段按实际落点改写、§6.3 表 HoverToday 行改 pet-menu/PetMenu/todayToken 三文件+i18n 行键名保留注、§6.4 单测表「前端」行+实机验收 3 改菜单子行两层口径）+ V2-TEST-CASES 4 处（TC-M6-04 标题+修订注记+步骤+预期 1/3、TC-M6-06-4 措辞）；§6.7 评审/终审记录历史留档未动；i18n 键名 token.hoverAgent 按裁定保留。V2-OPEN-ITEMS §8-1 已勾销+清偿记录回写。三文件改动（DESIGN +18 行内/OPEN-ITEMS +128/TEST-CASES ±10）在工作区待入库
