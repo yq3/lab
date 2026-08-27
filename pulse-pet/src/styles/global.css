@@ -760,6 +760,21 @@ select {
   color: var(--ink);
 }
 
+/* v2 M5 R2（TC-M5-04-1）：柱图标题行——h3 左 + agent 维度 tab 右同一行
+ * （窄面板换行兜底；tab 复用 .token-seg 分段样式，深浅主题随既有 token） */
+.token-chart-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  margin-bottom: 12px;
+}
+
+.token-chart-head h3 {
+  margin: 0;
+}
+
 .token-chart {
   width: 100%;
   height: auto;
@@ -855,8 +870,8 @@ select {
   background: var(--chart-cache);
 }
 
-/* v2 M3：筛选 chip 行——可容纳多组筛选的容器（M5 时 agent 组作为第二组
-   插入同一 .filter-row；M3 只渲染模型组不留空位，P1-2 预留位） */
+/* v2 M3：筛选 chip 行容器（M5 R2 修订：agent 维度上移为标题行 tab 单选，
+   此容器只承载模型复选框一组——两级筛选第二级，随 tab 联动收窄） */
 .filter-row {
   display: flex;
   flex-wrap: wrap;

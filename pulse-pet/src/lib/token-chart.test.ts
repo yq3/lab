@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  agentsWithRows,
   computeModelChips,
   computeStackedBars,
   TOOLTIP_ROW_ORDER,
@@ -165,6 +166,51 @@ describe("computeModelChips：模型 chip 清单（§3.5）", () => {
       { key: "glm", total: 150 },
       { key: "kimi", total: 50 },
       { key: null, total: 1 },
+    ]);
+  });
+
+  // v2 M5 R2（TC-M5-04-2）：模型复选框联动收窄——agent tab 单选后 chip 清单
+  // 收窄为该 agent 有数据的模型；「全部」= 不传（并集，与 N12 同语义）
+  it("M5 R2：agentFilter 单元素集 → 仅该 agent 的模型；不传/全量集 = 双源并集", () => {
+    const mixed = [
+      gRow("d1", "glm", { i: 100 }, AGENT_OPENCODE),
+      gRow("d1", "glm", { i: 40 }, AGENT_CLAUDE_CODE),
+      gRow("d1", "deepseek", { i: 10 }, AGENT_CLAUDE_CODE),
+    ];
+    // 选中具体 agent（单元素集）→ 收窄为该 agent 有数据的模型
+    expect(
+      computeModelChips(mixed, new Set([AGENT_CLAUDE_CODE])),
+    ).toEqual([
+      { key: "glm", total: 40 },
+      { key: "deepseek", total: 10 },
+    ]);
+    expect(computeModelChips(mixed, new Set([AGENT_OPENCODE]))).toEqual([
+      { key: "glm", total: 100 },
+    ]);
+    // 「全部」= 不传（并集；同模型跨 agent 归并合法，TC-M5-03-4）
+    expect(computeModelChips(mixed)).toEqual([
+      { key: "glm", total: 140 },
+      { key: "deepseek", total: 10 },
+    ]);
+    // 全量集 = 不传等价（与 computeStackedBars agentFilter 语义对齐）
+    expect(computeModelChips(mixed, new Set([AGENT_OPENCODE, AGENT_CLAUDE_CODE]))).toEqual(
+      computeModelChips(mixed),
+    );
+  });
+});
+
+describe("agentsWithRows：agent tab 选项清单（v2 M5 R2，TC-M5-04-1）", () => {
+  it("仅有数据的 agent、distinct、按字典序稳定排列；空行 → 空数组", () => {
+    const rows = [
+      gRow("d1", "glm", { i: 1 }, AGENT_CLAUDE_CODE),
+      gRow("d1", "kimi", { i: 2 }, AGENT_OPENCODE),
+      gRow("d2", "glm", { i: 3 }, AGENT_CLAUDE_CODE),
+    ];
+    expect(agentsWithRows(rows)).toEqual([AGENT_OPENCODE, AGENT_CLAUDE_CODE].sort());
+    expect(agentsWithRows([])).toEqual([]);
+    // 无数据 agent 不出现（tab 不渲染，「全部」恒显由组件层并列补上）
+    expect(agentsWithRows([gRow("d1", "glm", {}, AGENT_OPENCODE)])).toEqual([
+      AGENT_OPENCODE,
     ]);
   });
 });

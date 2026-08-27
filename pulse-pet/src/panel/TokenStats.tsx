@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AGENT_CLAUDE_CODE,
+  AGENT_OPENCODE,
   fetchTokenRows,
   formatCost,
   formatTokens,
@@ -13,6 +14,7 @@ import {
   type TokenRow,
 } from "../lib/token-stats";
 import {
+  agentsWithRows,
   computeModelChips,
   computeStackedBars,
   TOOLTIP_ROW_ORDER,
@@ -83,6 +85,15 @@ function agentBadgeOf(s: TokenRow): { text: string; title: string } {
     : { text: "oc", title: t("token.agent.opencode") };
 }
 
+/** v2 M5 R2（TC-M5-04-1）：agent tab 显示名（i18n 全名；未知 agent 原样）。 */
+function agentLabel(agent: string): string {
+  return agent === AGENT_CLAUDE_CODE
+    ? t("token.agent.claudeCode")
+    : agent === AGENT_OPENCODE
+      ? t("token.agent.opencode")
+      : agent;
+}
+
 /** 项目列：project_name basename；null → global/unknown 回退标签（前端判定）。 */
 function projectName(s: TokenRow): string {
   if (s.project_name) return s.project_name;
@@ -107,8 +118,12 @@ export default function TokenStats() {
   const [expanded, setExpanded] = useState<string | null>(null);
   /** 模型筛选（作用域仅柱图，SCOPE E；null 键 = 「未知模型」桶）。 */
   const [selectedModels, setSelectedModels] = useState<Set<ModelKey> | null>(null);
-  /** v2 M5：agent 筛选（作用域仅柱图，M3 E 口径；null = 默认全勾）。 */
-  const [selectedAgents, setSelectedAgents] = useState<Set<string> | null>(null);
+  /**
+   * v2 M5 R2（TC-M5-04，方案 A）：agent 维度 tab 单选（两级筛选第一级）——
+   * null = 「全部」（恒显，默认选中）＝ 双源混合全量；具体 agent = 单选。
+   * 替代 R1 的 agent 复选框第二组（维度混杂偏差修正）。作用域仅柱图。
+   */
+  const [agentTab, setAgentTab] = useState<string | null>(null);
   /** v2 M5（C1/N-4）：opencode 源报错 × CC 有数据的降级标记（仅 panel 细横幅）。 */
   const [degraded, setDegraded] = useState<string | null>(null);
 
@@ -171,34 +186,38 @@ export default function TokenStats() {
     };
   }, [load]);
 
-  // 数据/维度切换 → 模型筛选 + agent 筛选重置为全勾（新跨度 chip 集合变化）
+  // 数据/维度切换 → 模型筛选重置为全勾（新跨度 chip 集合变化）；数据刷新后
+  // 当前选中 agent 已无数据 → 回落「全部」（TC-M5-04-1/2，v2 M5 R2）。
+  // agentTab 只读不依赖：回落判定是 rows 变化的伴随效应，非触发源。
   useEffect(() => {
     setSelectedModels(null);
-    setSelectedAgents(null);
+    if (agentTab !== null && !agentsWithRows(rows ?? []).includes(agentTab)) {
+      setAgentTab(null);
+    }
   }, [rows, dimension]);
 
   const kpi = useMemo(() => sumRows(rows ?? []), [rows]);
 
-  /** 模型 chip 清单（distinct model_id 按总量降序；range 维无筛选区）。 */
-  const chips = useMemo(() => computeModelChips(rows ?? []), [rows]);
+  /** v2 M5 R2（TC-M5-04-1）：agent tab 选项 = 仅有数据的 agent（无数据不渲染；
+   *  「全部」恒显由渲染层并列补上，仅一个 agent 有数据时仍并列）。 */
+  const agents = useMemo(() => agentsWithRows(rows ?? []), [rows]);
 
-  /** v2 M5（TC-M5-04-1）：agent chip 仅渲染有数据的 agent（dim 行 distinct）。 */
-  const agentChips = useMemo(() => {
-    const set = new Set<string>();
-    for (const r of rows ?? []) {
-      if (r.agent) set.add(r.agent);
-    }
-    return [...set].sort();
-  }, [rows]);
+  /**
+   * 模型 chip 清单（联动收窄，TC-M5-04-2）：「全部」→ 所有 agent 的模型并集；
+   * 选中具体 agent → 仅该 agent 有数据的模型。distinct model_id 按总量降序。
+   */
+  const chips = useMemo(
+    () =>
+      computeModelChips(
+        rows ?? [],
+        agentTab === null ? undefined : new Set([agentTab]),
+      ),
+    [rows, agentTab],
+  );
 
   const effectiveSelected = useMemo<ReadonlySet<ModelKey>>(
     () => selectedModels ?? new Set(chips.map((c) => c.key)),
     [selectedModels, chips],
-  );
-
-  const effectiveAgents = useMemo<ReadonlySet<string>>(
-    () => selectedAgents ?? new Set(agentChips),
-    [selectedAgents, agentChips],
   );
 
   const bars = useMemo(
@@ -209,10 +228,11 @@ export default function TokenStats() {
             width: 640,
             height: 190,
             pad: 18,
-            // v2 M5：agent 筛选作用域仅柱图（KPI/会话列表不受勾选影响，E 口径）
-            agentFilter: effectiveAgents,
+            // v2 M5 R2：agent 维度 tab 单选（作用域仅柱图，E 口径）——具体
+            // agent = 单元素集 /「全部」= 不传（N12 钉子：不传 = 不过滤全量）
+            agentFilter: agentTab === null ? undefined : new Set([agentTab]),
           }),
-    [rows, dimension, effectiveSelected, effectiveAgents],
+    [rows, dimension, effectiveSelected, agentTab],
   );
 
   const sortedSessions = useMemo(() => {
@@ -228,8 +248,13 @@ export default function TokenStats() {
     setSelectedModels(symmetricToggle(effectiveSelected, key));
   };
 
-  const toggleAgent = (agent: string) => {
-    setSelectedAgents(symmetricToggle(effectiveAgents, agent));
+  /**
+   * v2 M5 R2（TC-M5-04-2）：agent tab 单选（null = 「全部」）；切换时模型勾选
+   * 重置为全选（不保留跨 tab 隐性勾选——chips 随 tab 联动收窄）。
+   */
+  const selectAgent = (agent: string | null) => {
+    setAgentTab(agent);
+    setSelectedModels(null);
   };
 
   return (
@@ -322,18 +347,48 @@ export default function TokenStats() {
         </>
       )}
 
-      {/* ② 堆叠柱图 + 模型筛选（day/week 维度；range 维无柱图——隐藏柱图与
-          筛选区，仅 KPI + 会话列表，§3.5） */}
+      {/* ② 堆叠柱图 + 筛选（day/week 维度；range 维无柱图——隐藏柱图与
+          筛选区（含 agent tab），仅 KPI + 会话列表，§3.5） */}
       {rows && dimension !== "range" && (
         <section className="token-section">
-          <h3>
-            {t("token.chart.title", {
-              dim: dimension === "day" ? t("token.dim.day") : t("token.dim.week"),
-            })}
-          </h3>
+          {/* v2 M5 R2（TC-M5-04-1）：标题行 = h3 左 + agent 维度 tab 右
+              （两级筛选第一级；分段单选交互照抄 Settings theme-seg） */}
+          <div className="token-chart-head">
+            <h3>
+              {t("token.chart.title", {
+                dim: dimension === "day" ? t("token.dim.day") : t("token.dim.week"),
+              })}
+            </h3>
+            <div
+              className="token-seg agent-seg"
+              role="radiogroup"
+              aria-label={t("token.aria.agent")}
+            >
+              {/* 「全部」恒显、默认选中；仅一个 agent 有数据时仍并列（语义稳定） */}
+              <button
+                role="radio"
+                aria-checked={agentTab === null}
+                className={agentTab === null ? "seg active" : "seg"}
+                onClick={() => selectAgent(null)}
+              >
+                {t("token.agent.all")}
+              </button>
+              {agents.map((a) => (
+                <button
+                  key={a}
+                  role="radio"
+                  aria-checked={agentTab === a}
+                  className={agentTab === a ? "seg active" : "seg"}
+                  onClick={() => selectAgent(a)}
+                >
+                  {agentLabel(a)}
+                </button>
+              ))}
+            </div>
+          </div>
 
-          {/* 筛选 chip 行：可容纳多组筛选的容器（filter-row；M5 时 agent 组作为
-              第二组插入同一容器——预留位只落结构，不渲染空组，§3.5/P1-2） */}
+          {/* 筛选 chip 行：模型复选框（两级筛选第二级，随 agent tab 联动收窄
+              ——选中具体 agent → 仅该 agent 有数据的模型，「全部」→ 双源并集） */}
           <div className="filter-row">
             <div className="filter-group" role="group" aria-label={t("token.col.model")}>
               {chips.map((c) => (
@@ -348,43 +403,12 @@ export default function TokenStats() {
                 </label>
               ))}
             </div>
-            {/* v2 M5（TC-M5-04-1）：agent 筛选第二组——仅渲染有数据的 agent；
-                默认全勾；作用域仅柱图 */}
-            {agentChips.length > 0 && (
-              <div
-                className="filter-group"
-                role="group"
-                aria-label={t("token.aria.agent")}
-              >
-                {agentChips.map((a) => (
-                  <label
-                    key={a}
-                    className="model-chip agent-chip"
-                    title={t(
-                      a === AGENT_CLAUDE_CODE
-                        ? "token.agent.claudeCode"
-                        : "token.agent.opencode",
-                    )}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={effectiveAgents.has(a)}
-                      onChange={() => toggleAgent(a)}
-                    />
-                    <span className="model-chip-name">{a}</span>
-                  </label>
-                ))}
-              </div>
-            )}
           </div>
 
-          {effectiveSelected.size === 0 || effectiveAgents.size === 0 ? (
-            // v2 M5（TC-M5-04-3）：agent 空集空态复用 M3 模型空集口径
-            <p className="token-empty">
-              {effectiveAgents.size === 0
-                ? t("token.chart.noAgents")
-                : t("token.chart.noModels")}
-            </p>
+          {effectiveSelected.size === 0 ? (
+            // 模型空集空态（M3 口径不变；agent 单选 tab 恒有一项选中——
+            // agent 空集不可达，noAgents 分支随 R2 单选交互移除）
+            <p className="token-empty">{t("token.chart.noModels")}</p>
           ) : bars.length === 0 ? (
             <p className="token-empty">{t("token.sessions.empty")}</p>
           ) : (

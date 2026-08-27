@@ -129,15 +129,17 @@ describe("字典完备性", () => {
   });
 
   // v2 M5（TC-M5-10）：新键 zh/en 集合一致 + 关键键值钉住
+  // R2（2026-08-27）：token.agent.all 新增（agent tab「全部」项）；
+  // token.chart.noAgents 随单选交互清退（始终恰有一项选中，空态不可达）
   it("M5 新键 zh/en 均存在（token.agent.* / costOpencodeOnly / taskBadge / degraded）", async () => {
     const { DICT } = await import("./i18n");
     const m5Keys = [
       "token.agent.opencode",
       "token.agent.claudeCode",
+      "token.agent.all",
       "token.costOpencodeOnly",
       "token.taskBadge",
       "token.degraded",
-      "token.chart.noAgents",
       "token.aria.agent",
     ];
     for (const k of m5Keys) {
@@ -148,12 +150,25 @@ describe("字典完备性", () => {
     // 徽标全名（品牌名不翻译——zh/en 同值合法）
     expect(DICT.zh["token.agent.claudeCode"]).toBe("Claude Code");
     expect(DICT.en["token.agent.claudeCode"]).toBe("Claude Code");
+    // R2：agent tab「全部」项文案钉住（zh/en 互异，防粘贴错语言）
+    expect(DICT.zh["token.agent.all"]).toBe("全部");
+    expect(DICT.en["token.agent.all"]).toBe("All");
+    // R2：agent tab 组 aria-label（维度单选，非复选筛选）
+    expect(DICT.zh["token.aria.agent"]).toBe("agent 维度");
+    expect(DICT.en["token.aria.agent"]).toBe("Agent dimension");
     // 可翻译键 zh/en 互异（防粘贴错语言）
     for (const k of ["token.costOpencodeOnly", "token.taskBadge", "token.degraded"]) {
       expect(DICT.zh[k], `${k} zh/en 应互异`).not.toBe(DICT.en[k]);
     }
     expect(DICT.zh["token.taskBadge"]).toBe("定时任务例程");
     expect(DICT.en["token.taskBadge"]).toBe("Scheduled routine");
+  });
+
+  // v2 M5 R2（TC-M5-04-4）：agent 空集空态随单选交互不可达 → noAgents 键清退
+  it("token.chart.noAgents 已清退（agent 单选 tab 恒有一项选中，空态不可达）", async () => {
+    const { DICT } = await import("./i18n");
+    expect(!("token.chart.noAgents" in DICT.zh), "zh 应无 noAgents").toBe(true);
+    expect(!("token.chart.noAgents" in DICT.en), "en 应无 noAgents").toBe(true);
   });
 });
 

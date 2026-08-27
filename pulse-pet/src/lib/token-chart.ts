@@ -135,13 +135,36 @@ export interface ModelChip {
 export const TOOLTIP_ROW_ORDER = ["cacheRead", "input", "output"] as const;
 
 /** 聚合行 → 模型 chip 清单（§3.5：distinct model_id、按总量降序、默认全勾）。 */
-export function computeModelChips(rows: TokenRow[]): ModelChip[] {
+export function computeModelChips(
+  rows: TokenRow[],
+  /**
+   * **M5 R2（TC-M5-04-2）**：agent 维度联动收窄——选中具体 agent 时传单元素集，
+   * chip 清单收窄为该 agent 有数据的模型；「全部」不传（双源模型并集）或传
+   * 全量集（等价）。语义与 `computeStackedBars.agentFilter` 对齐（N12：不传 =
+   * 不过滤）。
+   */
+  agentFilter?: ReadonlySet<string>,
+): ModelChip[] {
   const map = new Map<ModelKey, number>();
   for (const r of rows) {
+    if (agentFilter && !agentFilter.has(r.agent)) continue;
     const k: ModelKey = r.model_id ?? null;
     map.set(k, (map.get(k) ?? 0) + r.tokens_input + r.tokens_output + r.tokens_cache_read);
   }
   return [...map.entries()]
     .map(([key, total]) => ({ key, total }))
     .sort((a, b) => b.total - a.total);
+}
+
+/**
+ * 聚合行 → 有数据的 agent 清单（M5 R2，TC-M5-04-1：agent tab 选项来源——
+ * 无数据的 agent 不渲染；distinct + 字典序稳定排列）。「全部」项由组件层
+ * 恒显并列补上（纯数据函数不含 UI 哨兵）。
+ */
+export function agentsWithRows(rows: TokenRow[]): string[] {
+  const set = new Set<string>();
+  for (const r of rows) {
+    if (r.agent) set.add(r.agent);
+  }
+  return [...set].sort();
 }
