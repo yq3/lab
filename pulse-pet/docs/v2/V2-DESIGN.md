@@ -1472,7 +1472,7 @@ M3 协议（`detail="tplId:param"`，§3.7.1）照抄到 `claude-code-hook.js`�
 | 活跃窗口 | **10s**（对齐 opencode 流式心跳实际节奏——插件 reaction 桶 10s 冷却 → 生成中会话约每 10s 一事件；活跃语义 =「正在产出」；SCOPE 原文示例值 5s 太严会让生成中会话掉窗） |
 | 合并算法 | **两层**：①窗口内有事件的 session 间按既有优先级合并；②窗口空时显示**最近活跃 session** 的状态（不做全量优先级合并——陈旧 error 会复活抢镜） |
 | 气泡 agent 标识 | **前置等宽徽标 `[oc]`/`[cc]`/`[task]`**（token 汇报/工具播报携带；提醒不加——非 agent 来源；task 结果气泡用 `[task]` 自身徽标） |
-| 悬停卡 | 今日汇总卡追加 **agent 分布行**「oc 39M · cc 3M」（双 agent 有数据才显示） |
+| 悬停卡 | 今日汇总卡追加 **agent 分布行**「oc 39M · cc 3M」（双 agent 有数据才显示）〔注：本表为定稿时点裁定留档；悬停卡后随 M3 2026-08-25 裁定移除，分布行呈现面已改右键菜单子行——见 §6.2 修订注记〕 |
 
 SCOPE §3.6 其余照单：与 M4 例程会话的抢镜协同随本章定（§6.1 场景表）；落 M2 重构后的新气泡组件。
 
@@ -1511,7 +1511,9 @@ fn display(&self, now: Instant) -> DisplayState:
 
 **已知边界**：窗口翻转会带来更频繁的显示状态切换（v1 一场 error 停 30s，M6 可能 error→working→error 交替——仅当双 session 事件交错时发生，节流（插件侧/事件驱动）天然限频；观察项）。
 
-### 6.2 气泡 agent 标识 + 悬停卡分布
+### 6.2 气泡 agent 标识 + 今日 agent 分布行
+
+> 〔修订注记 2026-08-27：本节原按 M6 定稿时点写「悬停卡 agent 分布行（M3 HoverToday 扩展）」；HoverToday 已随 M3 2026-08-25 用户裁定移除（§3.4 修订留档，晚于 M6 定稿 08-23）。M6 实施按后裁定优先——**数据层照本节设计原样实现**（`by_agent` 落 TodayStats/同口径/降序/零数据省略），**呈现层落右键菜单「今日 token」信息项子行**（`lib/pet-menu.ts` + `pet/PetMenu.tsx`，经 `pet/todayToken.ts` 30s 缓存）；i18n 键名 `token.hoverAgent` 按定稿保留（名实轻微不符，裁定不改）。下文本段已按实际落点改写，其余小节不受影响。〕
 
 **气泡徽标**（M6 为 M2 气泡组件新增 `agent?: string` 可选字段）：
 
@@ -1526,10 +1528,10 @@ fn display(&self, now: Instant) -> DisplayState:
 - **实现载体（P2-4）**：`agent` 是 **`BubbleItem` 新增可选字段**（M2 §2.6.2 结构本无此字段，M6 新增）——随条目顶替回队/同源合并流转（**合并键不含 agent，徽标以幸存新条目为准**，P3-4）；渲染在 Bubble.tsx 前置等宽小字（`[oc] `），i18n 不翻译（技术名约定）；`task` 映射 `[task]`（与 M4 芯片「定时任务」文案并存——徽标极简、芯片全称）。**徽标形态与 M5 会话列表无括号 `oc`/`cc` 刻意不同**（气泡=[oc] 终端习惯、列表=oc 列徽标），勿「统一」（P3-2）。
 - CC hook detail 排放（M5 §5.5）payload 天然可带 agent（hook 进程自知身份），无额外改动。
 
-**悬停卡 agent 分布行**（M3 HoverToday 扩展）：
+**今日 agent 分布行**（~~悬停卡 M3 HoverToday 扩展~~〔修订 2026-08-27：HoverToday 已移除，呈现面 = 右键菜单信息项子行〕）：
 
 - `token_stats_today` 返回体**在 TodayStats 结构内追加 `by_agent: Vec<{agent, total}>`**（落 TodayStats 内非顶层——M5 N-4 包装 `{today, degraded}` 的 today 即此结构，P3-3；有数据的 agent 降序；**total 口径 = 今日总量同口径**——in+out+cacheRead、不含 reasoning、mock 过滤（M3/M5 一致），三层数值交叉断言由此成立）；
-- 悬停卡在总量+三行明细下追加一行 `oc 39M · cc 3M`（单项时**不显示**——单 agent 无辨识需求）；30s 缓存口径不变。
+- 右键菜单「今日 token」信息项在数值下追加子行 `oc 39M · cc 3M`（单项时**不显示**——单 agent 无辨识需求）；30s 缓存口径不变。
 
 ### 6.3 变更汇总
 
@@ -1540,9 +1542,9 @@ fn display(&self, now: Instant) -> DisplayState:
 | `lib.rs` | `pulsepet://bubble`/`tool-bubble`/`task-result` 三事件 payload 补 agent 字段；**`get_display_state` 适配 display(now)**（P2-3） |
 | `token_stats.rs` | `token_stats_today` 返回体 +`by_agent` |
 | `pet/Bubble.tsx`（M2 组件） | `agent` 可选字段 → 前置徽标渲染 |
-| `pet/HoverToday.tsx`（M3 组件） | agent 分布行 |
+| `pet-menu.ts` + `PetMenu.tsx` + `todayToken.ts` | 今日 agent 分布行（菜单信息项子行，双 agent 才显示）〔修订 2026-08-27：原写 `pet/HoverToday.tsx`，随 §3.4 悬停卡移除改落此三文件〕 |
 | **`lib/bubble-queue.ts` + 三桥层（P2-4）** | BubbleItem 新增 `agent?: string`（随回队/合并流转）；`http-bridge.ts`/`tool-bubble-bridge.ts`/`reminder-bridge.ts` 三桥层 payload 解析 agent 传入条目 |
-| `lib/i18n.ts` | 少量键（悬停分布行标签 `token.hoverAgent` 等）；徽标不翻译 |
+| `lib/i18n.ts` | 少量键（分布行标签 `token.hoverAgent` 等〔键名按定稿保留，名实注记见 §6.2 修订注记〕）；徽标不翻译 |
 
 **数据库：零迁移。**
 
@@ -1554,14 +1556,14 @@ fn display(&self, now: Instant) -> DisplayState:
 |---|---|
 | `session_state` 两层算法 | 活跃集内优先级合并（双活跃 error>working）；**同 priority 平局取 last_event_at 最新者（双 agent 同 kind，P2-2）**；掉窗让位（error 10s 前事件 vs working 2s 前 → working）；窗口空 fallback 最近活跃（平局 priority）；**solo error 经 fallback 显示至 30s 回收（P1-1 钉子）**；空 map → idle；跨 agent（opencode/claude-code/task 同权参与）；伪 session 15s 心跳的掉窗-接管时序（手头静默期例程连续显示不闪变）；**waiting-permission 掉窗让位（P2-5 语义钉子）**；既有 v1 断言修订（display 注入时钟，同刻事件行为等价） |
 | `token_stats` | today by_agent 分组（单源单行/双源双行/零数据省略） |
-| 前端 | 徽标渲染（agent 缺省不显示徽标——提醒气泡回归）；悬停分布行单 agent 隐藏 |
+| 前端 | 徽标渲染（agent 缺省不显示徽标——提醒气泡回归）；分布行（菜单子行）单 agent 隐藏 |
 | i18n | 新键完备性 |
 
 **实机验收**（TC-M6-xx）：
 
 1. 双开实测：opencode + CC 并行干活 → 宠物随两侧事件切换归属（panel 芯片 agent 同步变化）；一侧 error 后静默 → ≤10s 让位另一侧（v1 抢镜问题消除）；
 2. 气泡徽标：双 agent 各触发一次会话结束/工具播报 → `[oc]`/`[cc]` 正确前置；提醒气泡无徽标（回归）；任务结果 `[task]`；
-3. 悬停卡：双 agent 有数据 → 分布行显示；单 agent 日 → 无分布行；三层数值与 panel 一致（M3 交叉断言延续）；
+3. 今日 agent 分布行（右键菜单「今日 token」信息项子行〔修订 2026-08-27：原写悬停卡，呈现面随 §3.4 移除改菜单子行〕）：双 agent 有数据 → 分布行显示；单 agent 日 → 无分布行；数值与 panel 一致（M3 交叉断言延续，两层口径）；
 4. M4 协同：例程执行中**手头会话窗内持续有事件** → 手头状态优先；例程失败 × 手头持续活跃 → error ≤10s 让位（M4 R6 精化实证）；例程失败 × 无并发会话（或所有其他会话最后事件均早于 error——fallback 最近活跃语义实证点）→ error 显示至 30s 自然回收（solo 边界，有意行为）；手头静默期例程 working 连续显示（兜底语义）；
 5. 重启/主题/双语回归目验。
 
