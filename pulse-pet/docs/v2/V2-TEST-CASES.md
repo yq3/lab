@@ -685,11 +685,14 @@
 
 ### TC-M5-04 agent 筛选（实机）
 
-- **步骤**：Token 页 agent chip 组（M3 预留第二组落实）只勾 opencode → 全部取消。
+> 口径修订（2026-08-27，用户反馈 R1 偏差）：agent 筛选由「复选框第二组」改为「标题右侧 tab 单选 + 模型复选框联动收窄」——用户意图是两级筛选（先 agent 维度、再模型维度），R1 两组复选框并排属需求偏差。
+
+- **步骤**：Token 页「Token 时序」标题右侧 agent tab（全部 / opencode / claude-code）切换 → 观察柱图与下方模型复选框联动。
 - **预期**：
-  1. agent chip 仅渲染有数据的 agent（opencode / claude-code），默认全勾；
-  2. 只勾 opencode → **柱图剔除 CC 数据**，KPI / 会话列表不变（M3 E 口径延续）；`computeStackedBars` 的 `agentFilter` 参数位填实现（M3 N12 钉子扩展：勾选剔除 / 不传 = 全量）；
-  3. agent 空集空态复用 M3 模型空集口径。
+  1. agent tab 为分段单选控件（Settings 主题三档 `theme-seg` 同款交互，`role="radiogroup"` + `seg active`），置于「Token 时序（按日/按周）」标题（`<h3>`）右侧同一行；选项 = **「全部」（恒显，默认选中）** + 仅有数据的 agent（无数据不渲染；仅一个 agent 有数据时「全部」仍并列恒显，语义稳定不跳动）；
+  2. 选中「全部」→ 柱图 = 双源混合全量（等价原「默认全勾」语义），模型复选框列出所有 agent 的模型并集；选中具体 agent → **柱图剔除其它 agent 数据**，模型复选框**收窄为该 agent 有数据的模型**；切换 tab 时模型勾选**重置为全选**（不保留跨 tab 隐性勾选状态）；
+  3. 作用域仅柱图（M3 E 口径延续）：KPI / 会话列表不随 tab 切换变化；`computeStackedBars` 的 `agentFilter` 参数位填实现（M3 N12 钉子扩展：具体 agent = 单元素集 / 「全部」= 不传或全量集）；
+  4. agent 空集空态随单选交互不可达（始终恰有一项选中），原 noAgents 空态移除或降为防御分支；模型空集空态口径不变（复用 M3）。
 
 ### TC-M5-05 CC 会话汇报气泡（实机 + 单测）
 
@@ -720,15 +723,19 @@
 
 ### TC-M5-08 CC 缺席回退（实机）
 
-- **步骤**：临时改名 / 删除 `~/.claude/projects` 目录（模拟 CC 未安装）→ 打开 Token 页。
+> 安全修订（2026-08-27，INC-20260827-1033 事故整改）：原步骤「临时改名 / 删除 `~/.claude/projects`」属破坏性 live rename——`~/.claude` 与 `~/.local/share/opencode` 同为 agent 运行时依赖目录，**agent（tester/coder）禁触这两个目录的改名 / 删除 / 写入**。改名与恢复由**用户人工执行**（或后续引入沙箱 HOME 方案），agent 仅在安全窗口内做观察断言。
+
+- **步骤**：**用户人工**临时改名 `~/.claude/projects`（模拟 CC 未安装）→ 告知 agent → agent 打开 Token 页观察断言 → **用户人工**恢复原状。agent 全程不执行任何针对该目录的文件系统变更命令。
 - **预期**：安静回退 opencode-only——无错误横幅、无 degraded 字段（`rows` 原样 + `degraded=None`，**单源场景行为与 M3 单测钉住的原样一致**——N-4 兼容口径回归）。
 
 ### TC-M5-09 双源容错 degraded（实机 + 单测）
 
+> 安全修订（2026-08-27，INC-20260827-1033 事故整改）：`~/.local/share/opencode/opencode.db` **同时是正在运行的 opencode 自身（含 tester/coder/supervised-coding 全部会话）的实时存储**——R2 测试轮 tester 按原步骤执行 `mv opencode.db` 导致全部会话崩溃 + 约 72s 会话数据永久丢失（实证）。**agent 禁触该文件的改名 / 删除 / 写入**；改名与恢复由**用户人工执行**（完全退出 opencode 后操作更安全），agent 仅在安全窗口内做观察断言；单测路径（预期 5）不涉及真实文件操作，不受影响。
+
 - **步骤**：
-  1. 临时改名 opencode.db（模拟 opencode 源缺席，CC 有数据）→ 打开 Token 页 / 悬停卡 / 右键菜单；
-  2. 恢复 opencode.db；
-  3. 双源全缺（两库都缺席）。
+  1. **用户人工**临时改名 opencode.db（模拟 opencode 源缺席，CC 有数据）→ 告知 agent → agent 打开 Token 页 / 右键菜单观察；
+  2. **用户人工**恢复 opencode.db；
+  3. 双源全缺（两库都缺席，同样用户人工操作）。
 - **预期**：
   1. Token 页显示 **CC-only 数据 + 「opencode 源不可用」细横幅**（仅 panel 顶部，不遮蔽内容）；返回体包装 `{rows, degraded}` / `{today, degraded}`；
   2. **pet 三层（悬停卡 / 菜单 / 追加段）静默显示 CC-only 数值、不呈现 degraded**（宠物不打扰原则）；
@@ -739,7 +746,7 @@
 ### TC-M5-10 主题与双语目验（实机）
 
 - **步骤**：深 / 浅主题 + zh/en 下目验新增元素。
-- **预期**：agent chip / cc 徽标 / ⚡ / 费用卡标注 / cost `—` / degraded 横幅全走 M2 token；新键（`token.agent.*` / `token.costOpencodeOnly` / `token.taskBadge` / CC 汇报模板）zh/en 集合一致。
+- **预期**：agent tab（标题右侧分段单选，含「全部」项）/ 模型复选框联动收窄 / cc 徽标 / ⚡ / 费用卡标注 / cost `—` / degraded 横幅全走 M2 token；新键（`token.agent.*`（含 `token.agent.all`）/ `token.costOpencodeOnly` / `token.taskBadge` / CC 汇报模板）zh/en 集合一致。
 
 ---
 
