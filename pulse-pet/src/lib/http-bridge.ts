@@ -8,8 +8,10 @@
  *      状态芯片与宠物动画同源，初开即正确）；
  *   2. 监听 `pulsepet://state`，把 `kind` 写入 petStore、`agent` 写入
  *      `petStore.displayAgent`（M2 面板状态芯片消费；M6 抢镜在此基础上扩展）；
- *   3. M3：监听 `pulsepet://bubble`（token 会话汇报等，payload = `{text}`）→
- *      `pushBubble`（v2 M2：info 级 source="token-report" 经排队模型合并展示）。
+ *   3. M3：监听 `pulsepet://bubble`（token 会话汇报等，payload = `{text,
+ *      agent?}`——v2 M6 起 Rust 补 agent 字段，opencode→[oc] / CC→[cc] 徽标
+ *      数据源；旧载荷缺 agent 向后兼容）→ `pushBubble`（v2 M2：info 级
+ *      source="token-report" 经排队模型合并展示）。
  *
  * 与 @tauri-apps/api 的交互用动态 import + 运行时探测，使纯函数（parseDisplayKind /
  * parseStatePayload / applyStatePayload / parseBubblePayload）可在 vitest(node) 下直接单测。
@@ -59,24 +61,37 @@ export function applyStatePayload(payload: unknown): void {
   if (parsed.agent) store.setDisplayAgent(parsed.agent);
 }
 
-/** 从 `pulsepet://bubble` payload 提取气泡文案（非字符串 → null，不出气泡）。 */
-export function parseBubblePayload(payload: unknown): string | null {
+/** 解析后的 `pulsepet://bubble` 气泡载荷（v2 M6：+agent，缺省 null 向后兼容）。 */
+export interface BubblePayload {
+  text: string;
+  agent: string | null;
+}
+
+/** 从 `pulsepet://bubble` payload 提取 `{text, agent}`（text 非字符串 → null，不出气泡）。 */
+export function parseBubblePayload(payload: unknown): BubblePayload | null {
   if (typeof payload !== "object" || payload === null) return null;
-  const text = (payload as { text?: unknown }).text;
-  return typeof text === "string" && text.length > 0 ? text : null;
+  const p = payload as { text?: unknown; agent?: unknown };
+  if (typeof p.text !== "string" || p.text.length === 0) return null;
+  const agent = typeof p.agent === "string" && p.agent ? p.agent : null;
+  return { text: p.text, agent };
 }
 
 /**
  * 把气泡 payload 应用到 petStore（v2 M2：token 会话汇报 = **info 级**、
  * source="token-report"，经排队模型合并展示——§2.6.2；pushBubble 内部净化，
  * 空文案丢弃）。
+ * v2 M6（§6.2，TC-M6-03-1）：payload 携带 agent（opencode→[oc] / CC→[cc]
+ * 徽标数据源；缺省不带——旧载荷向后兼容）。
  */
 export function applyBubblePayload(payload: unknown): void {
-  const text = parseBubblePayload(payload);
-  if (text) {
-    usePetStore
-      .getState()
-      .pushBubble({ text, level: "info", source: "token-report" });
+  const parsed = parseBubblePayload(payload);
+  if (parsed) {
+    usePetStore.getState().pushBubble({
+      text: parsed.text,
+      level: "info",
+      source: "token-report",
+      ...(parsed.agent ? { agent: parsed.agent } : {}),
+    });
   }
 }
 

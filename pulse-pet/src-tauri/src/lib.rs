@@ -56,11 +56,12 @@ pub struct DisplayStateDto {
 }
 
 /// get_display_state 核心纯逻辑（单测直接驱动；命令薄封装）。
+/// v2 M6：display 注入 `Instant::now()`（两层合并，V2-DESIGN §6.1，P2-3）。
 fn display_state_dto(state: &Arc<Mutex<SessionStateMachine>>) -> DisplayStateDto {
     let d = state
         .lock()
         .unwrap_or_else(|p| p.into_inner())
-        .display();
+        .display(Instant::now());
     DisplayStateDto {
         kind: d.kind.as_str().to_string(),
         agent: d.agent,
@@ -93,9 +94,12 @@ fn get_display_state(state: tauri::State<'_, Arc<Mutex<SessionStateMachine>>>) -
 /// 全部在后台线程完成（不 join 回 http 线程，N-3）。
 ///
 /// 查询与气泡下发以闭包注入（`idle_hook_body` 单测断言 CC idle 零 opencode 查询）。
+/// v2 M6（V2-DESIGN §6.2，TC-M6-03-1）：`emit_bubble` 签名 `(agent, text)`——
+/// `pulsepet://bubble` payload 补 `agent` 字段（opencode→[oc] / CC→[cc] 徽标
+/// 数据源；同版本锁步发布，前端旧解析只读既有字段向后兼容）。
 fn idle_hook_body(
     state: &Arc<Mutex<SessionStateMachine>>,
-    emit_bubble: &dyn Fn(String),
+    emit_bubble: &dyn Fn(&str, &str),
     query_report: &dyn Fn(&str, i64) -> Option<(String, Option<i64>)>,
     cc_dispatch: &dyn Fn(&str),
     agent: &str,
@@ -118,7 +122,7 @@ fn idle_hook_body(
                     let mut st = state.lock().unwrap_or_else(|p| p.into_inner());
                     st.apply_event("opencode", session_id, Kind::Success, Instant::now());
                 }
-                emit_bubble(full);
+                emit_bubble("opencode", &full);
             }
         }
         "claude-code" => {
@@ -147,8 +151,10 @@ fn make_idle_hook(
     Arc::new(move |agent: &str, session_id: &str| {
         idle_hook_body(
             &state,
-            &|text| {
-                let _ = app.emit("pulsepet://bubble", serde_json::json!({ "text": text }));
+            &|agent, text| {
+                // v2 M6：payload 补 agent（[oc]/[cc] 徽标数据源，§6.2）
+                let _ = app
+                    .emit("pulsepet://bubble", serde_json::json!({ "text": text, "agent": agent }));
             },
             &|sid, now| {
                 let data_dir = token_stats::opencode_data_dir();
@@ -197,8 +203,11 @@ fn make_idle_hook(
                         // apply + notify 成对（后台线程内 apply 后立即推送，
                         // 不依赖 1s tick 兜底）
                         notifier.notify(&state);
-                        let _ = app
-                            .emit("pulsepet://bubble", serde_json::json!({ "text": full }));
+                        // v2 M6：payload 补 agent（CC → [cc] 徽标，§6.2）
+                        let _ = app.emit(
+                            "pulsepet://bubble",
+                            serde_json::json!({ "text": full, "agent": "claude-code" }),
+                        );
                     }
                 });
             },
@@ -301,13 +310,14 @@ pub fn run() {
                 make_idle_hook(&state, app.handle(), &cc_cache, &notifier),
                 // v2 M3（§3.7.2，N8）：含非空 detail 的状态事件 → 定向 pet 窗
                 // 透传字符串（不解析不判开关——App 侧过滤）
+                // v2 M6（§6.2）：+agent（(detail, agent)——[oc]/[cc] 徽标数据源）
                 {
                     let emit_handle = app.handle().clone();
-                    Arc::new(move |detail: &str| {
+                    Arc::new(move |detail: &str, agent: &str| {
                         let _ = emit_handle.emit_to(
                             "pet",
                             "pulsepet://tool-bubble",
-                            serde_json::json!({ "detail": detail }),
+                            serde_json::json!({ "detail": detail, "agent": agent }),
                         );
                     })
                 },
@@ -319,7 +329,13 @@ pub fn run() {
             let shutdown = server.shutdown_flag();
             plog!("[pulsepet] http server listening on 127.0.0.1:{}", server.port);
 
-            // 后台回收线程：瞬态超时回退 + idle 回收（TC-EV-06 / TC-EV-17）
+            // 后台回收线程：瞬态超时回退 + idle 回收（TC-EV-06 / TC-EV-17）。
+            //
+            // 【v2 M6 注钉（P3-6）：本循环的 notify 对 M6 语义不可或缺，不可被
+            //  “优化”掉】display 自 M6 起是时间函数（两层合并，V2-DESIGN §6.1）——
+            // 掉窗让位瞬间（如 stale error 让位 active working）没有新事件到达，
+            // 显示切换完全依赖本循环每 1s 的 notify 兜底（延迟 ≤1s）。删掉
+            // notify（只留 tick）会让掉窗让位永不发生，直到下一事件/回收。
             {
                 let state = state.clone();
                 let notifier = notifier.clone();
@@ -528,7 +544,7 @@ mod tests {
         let dispatched = AtomicUsize::new(0);
         idle_hook_body(
             &state,
-            &|_| {
+            &|_, _| {
                 emitted.fetch_add(1, Ordering::SeqCst);
             },
             &|_sid, _now| {
@@ -551,7 +567,7 @@ mod tests {
         // 未知 agent 零查询零派发（白名单外值到不了这里，防御性钉住）
         idle_hook_body(
             &state,
-            &|_| {},
+            &|_, _| {},
             &|_sid, _now| {
                 queries.fetch_add(1, Ordering::SeqCst);
                 None
@@ -569,13 +585,18 @@ mod tests {
     #[test]
     fn opencode_idle_reports_and_injects_success() {
         let state = Arc::new(Mutex::new(SessionStateMachine::new()));
-        let bubbles = Mutex::new(Vec::<String>::new());
+        let bubbles = Mutex::new(Vec::<(String, String)>::new());
         let queries = AtomicUsize::new(0);
         let dispatched = AtomicUsize::new(0);
         idle_hook_body(
             &state,
-            &|text| {
-                bubbles.lock().unwrap().push(text);
+            &|agent, text| {
+                // v2 M6（TC-M6-03-1）：emit 闭包携带 (agent, text)——payload 补
+                // agent 字段的落点
+                bubbles
+                    .lock()
+                    .unwrap()
+                    .push((agent.to_string(), text.to_string()));
             },
             &|sid, _now| {
                 queries.fetch_add(1, Ordering::SeqCst);
@@ -595,12 +616,15 @@ mod tests {
         assert_eq!(dispatched.load(Ordering::SeqCst), 0, "opencode idle 不走 CC 派发");
         assert_eq!(
             bubbles.lock().unwrap().as_slice(),
-            ["本期用了 58.3k input / 910 output / $0.05 · 今日 42.0M"],
-            "M3：气泡末尾追加「 · 今日 42.0M」（format_tokens_k 同口径，TC-M3-09-1 逐字）"
+            [(
+                "opencode".to_string(),
+                "本期用了 58.3k input / 910 output / $0.05 · 今日 42.0M".to_string()
+            )],
+            "M3：气泡末尾追加「 · 今日 42.0M」（TC-M3-09-1 逐字）；M6：携带 agent=opencode"
         );
         // success 注入到状态机（复合键 opencode:ses_a）
         let st = state.lock().unwrap_or_else(|p| p.into_inner());
-        let d = st.display();
+        let d = st.display(Instant::now());
         assert_eq!(d.kind, Kind::Success);
         assert_eq!(d.agent, "opencode");
     }
@@ -612,7 +636,7 @@ mod tests {
         let emitted = AtomicUsize::new(0);
         idle_hook_body(
             &state,
-            &|_| {
+            &|_, _| {
                 emitted.fetch_add(1, Ordering::SeqCst);
             },
             &|_sid, _now| None,
@@ -622,7 +646,7 @@ mod tests {
         );
         assert_eq!(emitted.load(Ordering::SeqCst), 0);
         let st = state.lock().unwrap_or_else(|p| p.into_inner());
-        assert_eq!(st.display().kind, Kind::Idle, "无汇报不注入 success");
+        assert_eq!(st.display(Instant::now()).kind, Kind::Idle, "无汇报不注入 success");
     }
 
     #[test]
@@ -630,10 +654,10 @@ mod tests {
         // TC-M3-09-3（P2-6）：今日聚合失败（today=None，如跨午夜边界竞态）→
         // 静默省略追加段，本期数字照常显示
         let state = Arc::new(Mutex::new(SessionStateMachine::new()));
-        let bubbles = Mutex::new(Vec::<String>::new());
+        let bubbles = Mutex::new(Vec::<(String, String)>::new());
         idle_hook_body(
             &state,
-            &|text| bubbles.lock().unwrap().push(text),
+            &|_agent, text| bubbles.lock().unwrap().push((text.to_string(), _agent.to_string())),
             &|_sid, _now| {
                 Some(("本期用了 58.3k input / 910 output / $0.05".to_string(), None))
             },
@@ -643,7 +667,7 @@ mod tests {
         );
         assert_eq!(
             bubbles.lock().unwrap().as_slice(),
-            ["本期用了 58.3k input / 910 output / $0.05"],
+            [("本期用了 58.3k input / 910 output / $0.05".to_string(), "opencode".to_string())],
             "失败省略追加段——本期文案原样，无多余分隔符"
         );
     }
@@ -656,7 +680,7 @@ mod tests {
         let bubbles = Mutex::new(Vec::<String>::new());
         idle_hook_body(
             &state,
-            &|text| bubbles.lock().unwrap().push(text),
+            &|_agent, text| bubbles.lock().unwrap().push(text.to_string()),
             &|_sid, _now| Some(("本期用了 1 input / 0 output / $0".to_string(), Some(999_999_999 + 1))),
             &|_sid| {},
             "opencode",

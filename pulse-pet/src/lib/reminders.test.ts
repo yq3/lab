@@ -577,10 +577,13 @@ describe("v2 M4：renderTaskSummary 模板键渲染（P3-3，与 Rust 同口径�
 
 describe("v2 M4：task-result 事件解析（P1-3，TC-M4-11）", () => {
   it("合法 payload 解析；字段缺失/类型不对 → null", () => {
+    // v2 M6（TC-M6-03-1）：解析结果显式携带 agent（Rust 恒发 "task"；
+    // 旧载荷缺字段容错默认 "task"）
     expect(parseTaskResult({ text: "任务：任务完成", logId: 3, status: "ok" })).toEqual({
       text: "任务：任务完成",
       logId: 3,
       status: "ok",
+      agent: "task",
     });
     expect(parseTaskResult(null)).toBeNull();
     expect(parseTaskResult({ text: "", logId: 1, status: "ok" })).toBeNull();

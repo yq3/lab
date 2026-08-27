@@ -192,3 +192,11 @@ describe("changeLanguage：非 Tauri 环境仅更新本地 store", () => {
     expect(useLangStore.getState().lang).toBe("zh");
   });
 });
+
+describe("v2 M6 新键（TC-M6-06-4）", () => {
+  it("token.hoverAgent zh/en 均有（分布行标签；完备性测试之上的显式钉）", async () => {
+    const { DICT } = await import("./i18n");
+    expect(DICT.zh["token.hoverAgent"]).toBe("今日 agent 分布");
+    expect(DICT.en["token.hoverAgent"]).toBe("Today's tokens by agent");
+  });
+});

@@ -11,6 +11,8 @@
  * （只有 dismissed/acked 最终离场才回报——被顶回队期间不结案）。
  */
 
+import { agentShortName } from "./token-stats";
+
 /** 气泡级别（提醒=critical / 会话汇报·庆祝=info / 工具播报=ambient）。 */
 export type BubbleLevel = "critical" | "info" | "ambient";
 
@@ -33,6 +35,13 @@ export interface BubbleItem {
   level: BubbleLevel;
   /** 合并键："reminder:<logId>" | "token-report" | "celebration" | "tool:<tool>"… */
   source: string;
+  /**
+   * v2 M6（V2-DESIGN §6.2，P2-4）：归属 agent（可选）——气泡徽标 `[oc]`/
+   * `[cc]`/`[task]` 的载体。**合并键不含 agent**：同源合并时徽标以幸存新
+   * 条目为准（P3-4）；顶替回队条目保留自身 agent。提醒气泡无此字段
+   * （非 agent 来源，无徽标——回归项）。
+   */
+  agent?: string;
   /** critical 且来自提醒时携带（ack/记账，v1 字段）。 */
   reminder?: { logId: number };
   /** 入队时刻（FIFO 稳定排序 + 合并窗口判定基准）。 */
@@ -42,6 +51,17 @@ export interface BubbleItem {
    * 「剩余 dwell 续走」，TC-UI-10-2）。非回队条目无此字段。
    */
   preShownMs?: number;
+}
+
+/**
+ * v2 M6（§6.2）：agent → 前置徽标短名（渲染层加方括号 `[oc] `）。
+ * opencode→oc / claude-code→cc / task→task；未知 agent 原名兜底（未来
+ * agent 不静默丢徽标）。**缺省/空 → null = 不渲染徽标**（提醒气泡回归，
+ * TC-M6-03-5）；短名是技术名约定，i18n 不翻译。徽标形态（气泡 `[oc]`）
+ * 与 M5 会话列表（无括号 `oc` 列徽标）**刻意不同**，勿顺手统一（P3-2）。
+ */
+export function bubbleAgentBadge(agent?: string | null): string | null {
+  return agent ? agentShortName(agent) : null;
 }
 
 export interface BubbleState {

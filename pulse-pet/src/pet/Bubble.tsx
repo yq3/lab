@@ -1,5 +1,6 @@
 import { usePetStore } from "./petStore";
 import { t } from "../lib/i18n";
+import { bubbleAgentBadge } from "../lib/bubble-queue";
 
 /**
  * 宠物气泡（v2 M2 排队模型下的显示位，V2-DESIGN §2.6.3）：
@@ -12,6 +13,10 @@ import { t } from "../lib/i18n";
  *   「稍后 10 分钟」——hover 浮现不喧宾（208px 单行气泡内用 ⏱ 10min 短标 +
  *   title 完整语义），点击 invoke reminders_snooze 气泡即消；点宠物仍 =
  *   确认（两动作并存）。exec 结果气泡无 reminder 载荷，天然不显示按钮。
+ * - v2 M6（V2-DESIGN §6.2，TC-M6-03-4）：条目携带 agent 时渲染前置等宽
+ *   徽标 `[oc] `/`[cc] `/`[task] `（技术名不翻译；缺省不渲染——提醒气泡
+ *   无徽标，回归项）。徽标形态（气泡 [oc]）与 M5 会话列表（无括号 oc 列
+ *   徽标）刻意不同，勿顺手统一（P3-2）。
  */
 export default function Bubble() {
   const bubble = usePetStore((s) => s.bubble);
@@ -19,12 +24,14 @@ export default function Bubble() {
   const cur = bubble.current;
   if (!cur) return null;
   const showSnooze = cur.level === "critical" && cur.reminder != null;
+  const badge = bubbleAgentBadge(cur.agent);
   return (
     <div
       className={`pet-bubble level-${cur.level}${showSnooze ? " snoozable" : ""}`}
       role="status"
       key={cur.id}
     >
+      {badge && <span className="pet-bubble-agent">[{badge}]</span>}
       {cur.text}
       {showSnooze && (
         <button

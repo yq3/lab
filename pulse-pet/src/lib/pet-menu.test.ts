@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildPetMenuItems,
   clampMenuPosition,
+  todayByAgentText,
   todayTokenValue,
   type TodayTokenState,
 } from "./pet-menu";
@@ -109,5 +110,73 @@ describe("M8 i18n：右键菜单文案随语言", () => {
       (i) => i.id === "toggle-pass-through",
     );
     expect(on?.label).toContain("pass-through: on");
+  });
+});
+
+// ---- v2 M6（V2-DESIGN §6.2，TC-M6-04）：今日 token agent 分布行 ----
+
+describe("todayByAgentText：agent 分布行（双 agent 有数据才显示）", () => {
+  it("双源两行 → 「oc 36.0M · cc 3.0M」（降序、formatTokens 口径）", () => {
+    expect(
+      todayByAgentText({
+        input: 1_000_000,
+        output: 0,
+        cache_read: 0,
+        cost: 0,
+        by_agent: [
+          { agent: "opencode", total: 36_000_000 },
+          { agent: "claude-code", total: 3_000_000 },
+        ],
+      }),
+    ).toBe("oc 36.0M · cc 3.0M");
+  });
+
+  it("单项不显示（单 agent 无辨识需求）→ null", () => {
+    expect(
+      todayByAgentText({
+        input: 100,
+        output: 0,
+        cache_read: 0,
+        cost: 0,
+        by_agent: [{ agent: "opencode", total: 100 }],
+      }),
+    ).toBeNull();
+  });
+
+  it("零数据省略（by_agent 空 / 缺省）→ null", () => {
+    expect(
+      todayByAgentText({ input: 0, output: 0, cache_read: 0, cost: 0, by_agent: [] }),
+    ).toBeNull();
+    expect(todayByAgentText({ input: 0, output: 0, cache_read: 0, cost: 0 })).toBeNull();
+  });
+
+  it("未知 agent 用短名兜底（原名直出）", () => {
+    expect(
+      todayByAgentText({
+        input: 0,
+        output: 0,
+        cache_read: 0,
+        cost: 0,
+        by_agent: [
+          { agent: "codex", total: 5_000 },
+          { agent: "opencode", total: 2_000 },
+        ],
+      }),
+    ).toBe("codex 5.0k · oc 2.0k");
+  });
+});
+
+describe("buildPetMenuItems：分布行随今日 token 信息项（M6 sub 行）", () => {
+  it("byAgent 文本挂第 0 项 sub；无分布 → 无 sub", () => {
+    const withDist = buildPetMenuItems(false, {
+      status: "ok",
+      text: "39.0M",
+      byAgent: "oc 36.0M · cc 3.0M",
+    });
+    expect(withDist[0].sub).toBe("oc 36.0M · cc 3.0M");
+    const single = buildPetMenuItems(false, { status: "ok", text: "42M" });
+    expect(single[0].sub).toBeUndefined();
+    const loading = buildPetMenuItems(false, { status: "loading" });
+    expect(loading[0].sub).toBeUndefined();
   });
 });

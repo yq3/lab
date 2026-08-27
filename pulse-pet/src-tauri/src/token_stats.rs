@@ -102,12 +102,28 @@ pub struct TokenRow {
 
 /// 今日 token 聚合（M3 §3.2 `token_stats_today`；三层快捷查看共享单一数据源）。
 /// reasoning 不计（SCOPE D 裁定，与 GLM 官方展示同口径）。
+///
+/// v2 M6（V2-DESIGN §6.2）：+`by_agent`——今日 agent 分布行（落 TodayStats
+/// 结构内、随 `{today, degraded}` 包装返回，P3-3）；`total` 口径 = 今日总量
+/// 同口径（in+out+cache_read、不含 reasoning、mock 过滤）——三层数值交叉
+/// 断言由此成立；有数据的 agent 按 total 降序，零数据 agent 省略（空 vec）。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TodayStats {
     pub input: i64,
     pub output: i64,
     pub cache_read: i64,
     pub cost: f64,
+    /// v2 M6：agent 分布行（单 agent 一行；`#[serde(default)]` 兼容旧序列化
+    /// 数据的单测夹具）。
+    #[serde(default)]
+    pub by_agent: Vec<AgentTodayTotal>,
+}
+
+/// v2 M6：`by_agent` 的行类型（agent 归属 + 今日同口径总量）。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AgentTodayTotal {
+    pub agent: String,
+    pub total: i64,
 }
 
 /// M5 双源查询返回体（C1/N-4 承载定案）：
@@ -493,6 +509,8 @@ pub fn local_today_start_ms(now_ms: i64) -> i64 {
 }
 
 /// 今日聚合核心（已开连接上执行；含 mock 过滤）。
+/// v2 M6（§6.2）：`by_agent` 填 opencode 单行（total>0 才有行；CC 行由
+/// `today_stats_dual` 合并时追加——opencode 源在 SQL 里 agent 恒单值）。
 pub fn query_today_on(
     conn: &Connection,
     from_ms: i64,
@@ -510,9 +528,39 @@ pub fn query_today_on(
             output: r.get(1)?,
             cache_read: r.get(2)?,
             cost: r.get(3)?,
+            by_agent: Vec::new(),
         })
     })
     .map_err(|e| StatsError::new(ERR_QUERY, format!("查询失败：{e}")))
+    .map(|mut t| {
+        t.by_agent = agent_today_rows(AGENT_OPENCODE, &t);
+        t
+    })
+}
+
+/// by_agent 行构造（v2 M6 §6.2）：total = in+out+cache_read（今日总量同口径），
+/// **>0 才有行**（零数据 agent 省略——「单项不显示」的数据面基础）。
+fn agent_today_rows(agent: &str, t: &TodayStats) -> Vec<AgentTodayTotal> {
+    let total = t.input + t.output + t.cache_read;
+    if total > 0 {
+        vec![AgentTodayTotal {
+            agent: agent.to_string(),
+            total,
+        }]
+    } else {
+        Vec::new()
+    }
+}
+
+/// 双源 by_agent 合并（v2 M6 §6.2）：opencode 行 + CC 行拼接后按 total 降序
+///（平局按 agent 名稳定序）。
+fn merge_by_agent(
+    mut rows: Vec<AgentTodayTotal>,
+    extra: Vec<AgentTodayTotal>,
+) -> Vec<AgentTodayTotal> {
+    rows.extend(extra);
+    rows.sort_by(|a, b| b.total.cmp(&a.total).then(a.agent.cmp(&b.agent)));
+    rows
 }
 
 /// 今日聚合编排：from = 本地今天 0 点、to = now；全套错误处理原样透传
@@ -801,6 +849,7 @@ pub fn today_stats_dual(
         output: 0,
         cache_read: 0,
         cost: 0.0,
+        by_agent: Vec::new(),
     };
     for r in cc_rows_all.iter() {
         if let Some(t) = r.time_updated {
@@ -812,11 +861,16 @@ pub fn today_stats_dual(
             }
         }
     }
+    // v2 M6（§6.2）：CC 分布行（今日同口径；>0 才有行）
+    let cc_by_agent = agent_today_rows(AGENT_CLAUDE_CODE, &cc_today);
     match today_stats(data_dir, now_ms) {
         Ok(mut t) => {
             t.input += cc_today.input;
             t.output += cc_today.output;
             t.cache_read += cc_today.cache_read;
+            // v2 M6：by_agent = opencode 行 + CC 行，按 total 降序（query_today_on
+            // 已填 opencode 行；degraded 场景下同理仅 CC 行）
+            t.by_agent = merge_by_agent(std::mem::take(&mut t.by_agent), cc_by_agent);
             Ok(TodayResponse {
                 today: t,
                 degraded: None,
@@ -824,6 +878,7 @@ pub fn today_stats_dual(
         }
         Err(e) => {
             if cc_has_data {
+                cc_today.by_agent = cc_by_agent;
                 Ok(TodayResponse {
                     today: cc_today,
                     degraded: Some(e.to_string()),
@@ -1849,6 +1904,109 @@ mod tests {
         assert_eq!(build_cc_idle_report(&cache, &nodb, &cc_dir, "cc-nope", now, 60_000), None);
     }
 
+    // ---- v2 M6（V2-DESIGN §6.2，TC-M6-04-4）：today by_agent 分组 ----
+
+    #[test]
+    fn m6_today_by_agent_single_source_one_row() {
+        // 单源（仅 opencode）→ 单行 {opencode, total}；total = in+out+cache_read
+        //（今日总量同口径：reasoning 999 不计）——三层数值交叉断言的基础
+        let dir = make_db("m6-oc", CREATE_SESSION);
+        let d = chrono_local_midnight(2026, 8, 27);
+        insert_session_model(
+            &dir, "s1", "p1", 0.1, (100, 20, 999, 30, 0), d, d + ms(1),
+            Some(&model_json("glm-5.3", "zhipuai")), None,
+        );
+        let cache = Arc::new(Mutex::new(TranscriptCache::default()));
+        let no_cc = temp_dir("m6-oc-cc").join("missing");
+        let now = d + 9 * 3600 * 1000;
+        let t = today_stats_dual(&dir, &no_cc, &cache, now).unwrap();
+        assert_eq!(
+            t.today.by_agent,
+            vec![AgentTodayTotal { agent: AGENT_OPENCODE.into(), total: 150 }],
+            "单源单行：opencode in100+out20+cache_read30（reasoning 不计）"
+        );
+        // 交叉断言：分布行总和 == 今日总量同口径（TC-M6-04-2）
+        let total = t.today.input + t.today.output + t.today.cache_read;
+        assert_eq!(t.today.by_agent.iter().map(|r| r.total).sum::<i64>(), total);
+    }
+
+    #[test]
+    fn m6_today_by_agent_dual_source_two_rows_desc() {
+        // 双源 → 两行、按 total 降序（cc 6000 > oc 150）
+        let dir = make_db("m6-oc2", CREATE_SESSION);
+        let d = chrono_local_midnight(2026, 8, 27);
+        insert_session_model(
+            &dir, "s1", "p1", 0.1, (100, 20, 0, 30, 0), d, d + ms(1),
+            Some(&model_json("glm-5.3", "zhipuai")), None,
+        );
+        let cc_dir = temp_dir("m6-cc");
+        write_cc_session(&cc_dir, "cc-1", d + ms(3600), (5000, 1000)); // cc total 6000
+        let cache = Arc::new(Mutex::new(TranscriptCache::default()));
+        let now = d + 9 * 3600 * 1000;
+        let t = today_stats_dual(&dir, &cc_dir, &cache, now).unwrap();
+        assert_eq!(
+            t.today.by_agent,
+            vec![
+                AgentTodayTotal { agent: AGENT_CLAUDE_CODE.into(), total: 6000 },
+                AgentTodayTotal { agent: AGENT_OPENCODE.into(), total: 150 },
+            ],
+            "双源双行、有数据的 agent 按 total 降序"
+        );
+    }
+
+    #[test]
+    fn m6_today_by_agent_zero_data_omitted() {
+        // 零数据（空 db + 无 CC）→ by_agent 省略（空 vec——前端不显示分布行）
+        let dir = make_db("m6-zero", CREATE_SESSION);
+        let cache = Arc::new(Mutex::new(TranscriptCache::default()));
+        let no_cc = temp_dir("m6-zero-cc").join("missing");
+        let d = chrono_local_midnight(2026, 8, 27);
+        let t = today_stats_dual(&dir, &no_cc, &cache, d + 9 * 3600 * 1000).unwrap();
+        assert!(t.today.by_agent.is_empty(), "零数据 → by_agent 省略");
+    }
+
+    #[test]
+    fn m6_today_by_agent_mock_filtered() {
+        // mock 过滤：providerID='mock' 探测行的 token 不计入 by_agent
+        //（与今日总量同口径——mock 行在全部查询中过滤，S4）
+        let dir = make_db("m6-mock", CREATE_SESSION);
+        let d = chrono_local_midnight(2026, 8, 27);
+        insert_session_model(
+            &dir, "s-mock", "p1", 0.0, (700, 0, 0, 0, 0), d, d + ms(1),
+            Some(&model_json("probe-model", "mock")), None,
+        );
+        insert_session_model(
+            &dir, "s-real", "p1", 0.1, (100, 20, 0, 30, 0), d, d + ms(2),
+            Some(&model_json("glm-5.3", "zhipuai")), None,
+        );
+        let cache = Arc::new(Mutex::new(TranscriptCache::default()));
+        let no_cc = temp_dir("m6-mock-cc").join("missing");
+        let t = today_stats_dual(&dir, &no_cc, &cache, d + 9 * 3600 * 1000).unwrap();
+        assert_eq!(
+            t.today.by_agent,
+            vec![AgentTodayTotal { agent: AGENT_OPENCODE.into(), total: 150 }],
+            "mock 行 700 token 不计入 by_agent"
+        );
+    }
+
+    #[test]
+    fn m6_today_by_agent_degraded_cc_only_single_row() {
+        // degraded（opencode 源错误 × CC 有数据）→ by_agent 仅 cc 单行
+        //（降级返回 CC-only 的分布也一致；pet 侧静默消费）
+        let cc_dir = temp_dir("m6-deg-cc");
+        let d = chrono_local_midnight(2026, 8, 27);
+        write_cc_session(&cc_dir, "cc-1", d + ms(3600), (1000, 200)); // 1200
+        let nodb = temp_dir("m6-deg-nodb");
+        let cache = Arc::new(Mutex::new(TranscriptCache::default()));
+        let t = today_stats_dual(&nodb, &cc_dir, &cache, d + 9 * 3600 * 1000).unwrap();
+        assert!(t.degraded.is_some());
+        assert_eq!(
+            t.today.by_agent,
+            vec![AgentTodayTotal { agent: AGENT_CLAUDE_CODE.into(), total: 1200 }],
+            "degraded CC-only → 单行 cc"
+        );
+    }
+
     // ---- 真实库对账（TC-TK-06；手动跑：--ignored --nocapture） ----
 
     /// v2 M5 真实双源对账（手动）：本机 opencode.db + ~/.claude/projects。
@@ -1884,6 +2042,10 @@ mod tests {
             "[dual] today: input={} output={} cache_read={} cost={:.4} degraded={:?}",
             t.today.input, t.today.output, t.today.cache_read, t.today.cost, t.degraded
         );
+        // v2 M6：by_agent 分布（冒烟可见）
+        for r in &t.today.by_agent {
+            println!("       agent {} = {}", r.agent, r.total);
+        }
     }    #[test]
     #[ignore = "manual: 需本机真实 opencode.db（对账证据用）"]
     fn real_db_reconciliation_manual() {
@@ -1898,14 +2060,22 @@ mod tests {
         // ours：by day / by session
         let day_rows = query_stats(&dir, from, to, "day").unwrap();
         let sess_rows = query_stats(&dir, from, to, "session").unwrap();
-        // reference：直接执行 DESIGN §4.1 原始 SQL（另一条只读连接）
+        // reference：直接执行与 M5 实现同口径的原始 SQL（另一条只读连接）——
+        // GROUP BY day, agent, model_id（agent 恒单值 'opencode'，列+分组保持
+        // 形状统一）+ mock 过滤（S4：providerID='mock' 探测行全查询过滤）。
+        //〔v2-m5 移交 TEST_BUG，M6 顺手修：原参考 SQL 仍 DESIGN §4.1 旧口径
+        //   （GROUP BY day,project_id + 全量 session），与 M5 实现不对账。〕
         let conn = open_readonly(&path).unwrap();
         let (ref_day_cost, ref_day_cnt): (f64, i64) = conn
             .query_row(
-                "SELECT IFNULL(SUM(cost),0), COUNT(*) FROM (\
+                "SELECT IFNULL(SUM(cost),0), IFNULL(COUNT(*),0) FROM (\
                  SELECT strftime('%Y-%m-%d', time_updated/1000,'unixepoch','localtime') AS day, \
-                 project_id, SUM(cost) AS cost FROM session \
-                 WHERE time_updated >= ?1 AND time_updated <= ?2 GROUP BY day, project_id)",
+                 'opencode' AS agent, \
+                 CASE WHEN json_valid(model) THEN json_extract(model,'$.id') END AS model_id, \
+                 SUM(cost) AS cost FROM session \
+                 WHERE time_updated >= ?1 AND time_updated <= ?2 \
+                 AND COALESCE(CASE WHEN json_valid(model) THEN json_extract(model,'$.providerID') END,'') <> 'mock' \
+                 GROUP BY day, agent, model_id)",
                 [from, to],
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
@@ -1913,7 +2083,8 @@ mod tests {
         let (ref_sess_cost, ref_sess_cnt): (f64, i64) = conn
             .query_row(
                 "SELECT IFNULL(SUM(cost),0), COUNT(*) FROM session \
-                 WHERE time_updated >= ?1 AND time_updated <= ?2",
+                 WHERE time_updated >= ?1 AND time_updated <= ?2 \
+                 AND COALESCE(CASE WHEN json_valid(model) THEN json_extract(model,'$.providerID') END,'') <> 'mock'",
                 [from, to],
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )

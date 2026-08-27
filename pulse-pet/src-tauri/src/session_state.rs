@@ -4,9 +4,11 @@
 //! - 每个会话以复合键 `agent:sessionId`（v2 M1 起）维护独立的 `SessionRecord`
 //!   （最近一次归一化状态 + 归属 agent + 该事件的时间戳）——opencode sessionID
 //!   （`ses_*`）与 CC UUID 均不含 `:`，天然无歧义（R6）。
-//! - 单只宠物显示所有 session 的「最高优先级」状态（clawd 式优先级合并）；
-//!   `display()` 返回 `DisplayState { kind, agent }`，归属来自 `SessionRecord.agent`
-//!   字段而非反解析 key（V2-DESIGN §1.5 P3-1）。
+//! - 单只宠物显示按 **v2 M6 两层合并**（V2-DESIGN §6.1）：10s 活跃窗内按
+//!   既有优先级表合并（同 priority 平局取最新事件）；窗口空时显示最近活跃
+//!   session 的状态（fallback，不做全量优先级合并——陈旧 error 不复活抢镜）；
+//!   `display(now)` 返回 `DisplayState { kind, agent }`，归属来自
+//!   `SessionRecord.agent` 字段而非反解析 key（V2-DESIGN §1.5 P3-1）。
 //! - 长时间无事件的 session 回收为 `idle`（30s，`/health` 不参与）；任一瞬态
 //!   超时兜底：`N` 秒（默认 30s，可配）内无新事件 → 回退 `working`，再无事件 30s
 //!   → 回退 `idle`（§3.1 ③ / TC-EV-06）。
@@ -15,6 +17,14 @@
 
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
+
+/// v2 M6（V2-DESIGN §6.0 用户裁定）：活跃窗口 10s——对齐 opencode 流式心跳
+/// 实际节奏（插件 reaction 桶 10s 冷却 → 生成中会话约每 10s 一事件；活跃语义
+/// =「正在产出」，SCOPE 示例值 5s 太严会让生成中会话掉窗）。
+pub const ACTIVITY_WINDOW_MS: u64 = 10_000;
+
+/// 活跃窗口（`Duration` 形态，`display(now)` 消费）。
+pub const ACTIVITY_WINDOW: Duration = Duration::from_millis(ACTIVITY_WINDOW_MS);
 
 /// 归一化事件状态（与前端 `src/lib/state.ts` 的 8 种常量一一对应，两端一致）。
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
@@ -176,17 +186,64 @@ impl SessionStateMachine {
         self.sessions.len()
     }
 
-    /// 当前显示状态：所有 session 的优先级合并（无 session 时 idle + 空 agent）。
-    /// 归属 agent 来自获胜 `SessionRecord.agent` 字段（TC-INT-10-3）。
-    pub fn display(&self) -> DisplayState {
+    /// 当前显示状态（v2 M6 两层合并，V2-DESIGN §6.1，注入时钟保单测）：
+    ///
+    /// ① **活跃集** = `last_event_at >= now - ACTIVITY_WINDOW` 的 session；
+    /// ② 活跃集非空 → 集内按 `(priority, last_event_at)` 字典序取最大
+    ///    （既有优先级表不变；同 priority 平局取 last_event_at 最新者——防
+    ///    HashMap 迭代序任意决定胜者致芯片 agent 无因跳变，P2-2）；
+    /// ③ 活跃集空 → 全量按 `(last_event_at, priority)` 取最大（与 ② 互为
+    ///    镜像字典序）——显示最近活跃 session 的状态，不做全量优先级合并
+    ///    （陈旧 error 不复活抢镜）；
+    /// ④ sessions 空 → Idle（v1 语义，agent 空、前端芯片降级）。
+    ///
+    /// display 成为时间函数后，**无事件时**的显示切换（掉窗让位瞬间）依赖
+    /// lib.rs 的 1s 后台 notify 循环兜底（延迟 ≤1s）——该循环对 M6 语义
+    /// 不可或缺，不可被优化掉（P3-6 注钉同样落在 lib.rs 循环处）。
+    pub fn display(&self, now: Instant) -> DisplayState {
+        // ① 活跃集：last_event_at >= now - 10s（闭区间，对齐插件 10s 心跳节奏）。
+        //    checked_sub 防御 Instant 下界（进程启动 <10s 时全量视为活跃）；
+        //    未来时刻的事件（时钟回拨注入）按活跃处理（saturating 语义）。
+        let cutoff = now.checked_sub(ACTIVITY_WINDOW);
+        let mut winner: Option<&SessionRecord> = None;
+        for r in self.sessions.values() {
+            let active = match cutoff {
+                Some(c) => r.last_event_at >= c,
+                None => true,
+            };
+            if !active {
+                continue;
+            }
+            // ② 活跃集内 (priority, last_event_at) 字典序取最大：优先级表优先、
+            //    同 priority 平局取最新事件（与 ③ 互为镜像字典序，P2-2——
+            //    显式比较保证与 HashMap 迭代序无关）
+            let better = match winner {
+                None => true,
+                Some(w) => {
+                    (r.kind.priority(), r.last_event_at) > (w.kind.priority(), w.last_event_at)
+                }
+            };
+            if better {
+                winner = Some(r);
+            }
+        }
+        if let Some(r) = winner {
+            return DisplayState {
+                kind: r.kind,
+                agent: r.agent.clone(),
+            };
+        }
+        // ③ fallback：活跃集空 → 全量 (last_event_at, priority) 字典序最大
+        //    （最近活跃优先、平局取 priority 高者）
         self.sessions
             .values()
-            .max_by_key(|r| r.kind.priority())
+            .max_by_key(|r| (r.last_event_at, r.kind.priority()))
             .map(|r| DisplayState {
                 kind: r.kind,
                 agent: r.agent.clone(),
             })
             .unwrap_or(DisplayState {
+                // ④ sessions 空 → Idle（v1 语义，agent 空）
                 kind: Kind::Idle,
                 agent: String::new(),
             })
@@ -241,16 +298,16 @@ mod tests {
         let t = Instant::now();
         m.apply_event("opencode", "a", Kind::Editing, t);
         m.apply_event("opencode", "b", Kind::Error, t);
-        assert_eq!(m.display().kind, Kind::Error); // B error 覆盖 A editing（TC-EV-16）
+        assert_eq!(m.display(t).kind, Kind::Error); // B error 覆盖 A editing（TC-EV-16）
         m.apply_event("opencode", "b", Kind::Working, t);
-        assert_eq!(m.display().kind, Kind::Editing); // A editing 高于 B working
+        assert_eq!(m.display(t).kind, Kind::Editing); // A editing 高于 B working
         m.apply_event("opencode", "a", Kind::Idle, t);
-        assert_eq!(m.display().kind, Kind::Working);
+        assert_eq!(m.display(t).kind, Kind::Working);
     }
 
     #[test]
     fn empty_machine_displays_idle() {
-        assert_eq!(SessionStateMachine::new().display().kind, Kind::Idle);
+        assert_eq!(SessionStateMachine::new().display(Instant::now()).kind, Kind::Idle);
     }
 
     #[test]
@@ -260,10 +317,10 @@ mod tests {
         m.apply_event("opencode", "a", Kind::Working, t0);
         // 29s 无事件 → 仍 working
         m.tick(t0 + secs(29), secs(30), secs(30));
-        assert_eq!(m.display().kind, Kind::Working);
+        assert_eq!(m.display(t0 + secs(29)).kind, Kind::Working);
         // 30s 无事件 → idle（TC-EV-17）
         m.tick(t0 + secs(30), secs(30), secs(30));
-        assert_eq!(m.display().kind, Kind::Idle);
+        assert_eq!(m.display(t0 + secs(30)).kind, Kind::Idle);
     }
 
     #[test]
@@ -273,16 +330,16 @@ mod tests {
         m.apply_event("opencode", "a", Kind::Editing, t0);
         // 29s → 仍 editing（瞬态尚未超时）
         m.tick(t0 + secs(29), secs(30), secs(30));
-        assert_eq!(m.display().kind, Kind::Editing);
+        assert_eq!(m.display(t0 + secs(29)).kind, Kind::Editing);
         // 30s → 回退 working（TC-EV-06 第一步）
         m.tick(t0 + secs(30), secs(30), secs(30));
-        assert_eq!(m.display().kind, Kind::Working);
+        assert_eq!(m.display(t0 + secs(30)).kind, Kind::Working);
         // working 再 29s → 仍 working
         m.tick(t0 + secs(59), secs(30), secs(30));
-        assert_eq!(m.display().kind, Kind::Working);
+        assert_eq!(m.display(t0 + secs(59)).kind, Kind::Working);
         // working 再 30s（距回退 30s）→ idle（TC-EV-06 第二步）
         m.tick(t0 + secs(60), secs(30), secs(30));
-        assert_eq!(m.display().kind, Kind::Idle);
+        assert_eq!(m.display(t0 + secs(60)).kind, Kind::Idle);
     }
 
     #[test]
@@ -292,7 +349,7 @@ mod tests {
         m.apply_event("opencode", "a", Kind::Thinking, t0);
         // 5s 超时兜底：5s 后 → working
         m.tick(t0 + secs(5), secs(5), secs(30));
-        assert_eq!(m.display().kind, Kind::Working);
+        assert_eq!(m.display(t0 + secs(5)).kind, Kind::Working);
     }
 
     #[test]
@@ -303,7 +360,7 @@ mod tests {
         // 20s 后又来一个新 editing 事件 → 计时重置，30s 后仍未超时
         m.apply_event("opencode", "a", Kind::Editing, t0 + secs(20));
         m.tick(t0 + secs(40), secs(30), secs(30));
-        assert_eq!(m.display().kind, Kind::Editing);
+        assert_eq!(m.display(t0 + secs(40)).kind, Kind::Editing);
     }
 
     // ---- P3-⑥：回收即 remove（内存不随 session 数无界增长） ----
@@ -318,7 +375,7 @@ mod tests {
         assert_eq!(m.len(), 3);
         m.tick(t0 + secs(30), secs(30), secs(30));
         assert_eq!(m.len(), 0, "非瞬态条目超时后应被 remove，而非常驻");
-        assert_eq!(m.display().kind, Kind::Idle, "缺席 = idle，显示语义不变");
+        assert_eq!(m.display(t0 + secs(30)).kind, Kind::Idle, "缺席 = idle，显示语义不变");
     }
 
     #[test]
@@ -330,7 +387,7 @@ mod tests {
         assert_eq!(m.len(), 0);
         // 回收后同一 session 来新事件 → 正常重建（不影响后续状态）
         m.apply_event("opencode", "a", Kind::Editing, t0 + secs(31));
-        assert_eq!(m.display().kind, Kind::Editing);
+        assert_eq!(m.display(t0 + secs(31)).kind, Kind::Editing);
         assert_eq!(m.len(), 1);
     }
 
@@ -358,12 +415,12 @@ mod tests {
         m.apply_event("opencode", "s1", Kind::Editing, t);
         m.apply_event("claude-code", "s1", Kind::Error, t);
         assert_eq!(m.len(), 2, "同 sessionId 不同 agent 应互不覆盖");
-        let d = m.display();
+        let d = m.display(t);
         assert_eq!(d.kind, Kind::Error); // error 优先级最高（TC-INT-05-2）
         assert_eq!(d.agent, "claude-code");
         // CC 会话回 idle 不影响 opencode 会话的 editing
         m.apply_event("claude-code", "s1", Kind::Idle, t);
-        let d = m.display();
+        let d = m.display(t);
         assert_eq!(d.kind, Kind::Editing);
         assert_eq!(d.agent, "opencode", "opencode 条目应原样保留");
         assert_eq!(m.len(), 2);
@@ -376,19 +433,19 @@ mod tests {
         let t = Instant::now();
         m.apply_event("opencode", "ses_aaa", Kind::Working, t);
         m.apply_event("claude-code", "uuid-bbb", Kind::WaitingPermission, t);
-        let d = m.display();
+        let d = m.display(t);
         assert_eq!(d.kind, Kind::WaitingPermission);
         assert_eq!(d.agent, "claude-code");
         // 获胜者更换后 agent 跟随
         m.apply_event("opencode", "ses_aaa", Kind::Error, t);
-        let d = m.display();
+        let d = m.display(t);
         assert_eq!(d.kind, Kind::Error);
         assert_eq!(d.agent, "opencode");
     }
 
     #[test]
     fn empty_machine_display_is_idle_with_empty_agent() {
-        let d = SessionStateMachine::new().display();
+        let d = SessionStateMachine::new().display(Instant::now());
         assert_eq!(d.kind, Kind::Idle);
         assert_eq!(d.agent, "");
     }
@@ -401,13 +458,13 @@ mod tests {
         let t = Instant::now();
         m.apply_event("claude-code", "c1", Kind::Error, t);
         m.apply_event("opencode", "o1", Kind::WaitingPermission, t);
-        assert_eq!(m.display().kind, Kind::Error);
+        assert_eq!(m.display(t).kind, Kind::Error);
         m.apply_event("claude-code", "c1", Kind::Testing, t); // CC 降级
-        assert_eq!(m.display().kind, Kind::WaitingPermission); // opencode 权限等待接管
-        assert_eq!(m.display().agent, "opencode");
+        assert_eq!(m.display(t).kind, Kind::WaitingPermission); // opencode 权限等待接管
+        assert_eq!(m.display(t).agent, "opencode");
         m.apply_event("opencode", "o1", Kind::Idle, t);
-        assert_eq!(m.display().kind, Kind::Testing);
-        assert_eq!(m.display().agent, "claude-code");
+        assert_eq!(m.display(t).kind, Kind::Testing);
+        assert_eq!(m.display(t).agent, "claude-code");
     }
 
     #[test]
@@ -423,4 +480,198 @@ mod tests {
         m.tick(t0 + secs(60), secs(30), secs(30));
         assert_eq!(m.len(), 0);
     }
+
+    // ---- v2 M6（V2-DESIGN §6.1，TC-M6-01）：两层合并算法 ----
+
+    /// 虚拟「现在」：加 60s 偏移，保证测试内任意 `t - ACTIVITY_WINDOW` 减法
+    /// 不触碰 Instant 下界（进程启动时刻）。
+    fn virtual_now() -> Instant {
+        Instant::now() + secs(60)
+    }
+
+    #[test]
+    fn m6_active_set_merges_by_priority() {
+        // ① 活跃集内优先级合并：双 session 均在 10s 窗内，error vs working
+        //    → error（正在发生的 error 本就该被看见）
+        let mut m = SessionStateMachine::new();
+        let t = virtual_now();
+        m.apply_event("opencode", "a", Kind::Working, t);
+        m.apply_event("claude-code", "b", Kind::Error, t - secs(2));
+        let d = m.display(t);
+        assert_eq!(d.kind, Kind::Error);
+        assert_eq!(d.agent, "claude-code");
+    }
+
+    #[test]
+    fn m6_same_priority_tie_picks_latest_last_event_at() {
+        // ② 同 priority 平局取 last_event_at 最新者（双 agent 同 kind——防
+        //    HashMap 迭代序任意决定胜者、芯片 agent 无因跳变，P2-2）
+        let mut m = SessionStateMachine::new();
+        let t = virtual_now();
+        m.apply_event("opencode", "a", Kind::Working, t - secs(8));
+        m.apply_event("claude-code", "b", Kind::Working, t - secs(3));
+        let d = m.display(t);
+        assert_eq!(d.kind, Kind::Working);
+        assert_eq!(d.agent, "claude-code", "同 kind 双 agent：事件更新近者胜");
+        // 插入序反转不改变胜者（HashMap 迭代序无关）
+        let mut m2 = SessionStateMachine::new();
+        m2.apply_event("claude-code", "b", Kind::Working, t - secs(3));
+        m2.apply_event("opencode", "a", Kind::Working, t - secs(8));
+        assert_eq!(m2.display(t).agent, "claude-code");
+    }
+
+    #[test]
+    fn m6_stale_error_yields_to_active_working() {
+        // ③ 掉窗让位（核心修复）：A error（10s+ 前事件后静默）+ B working
+        //    （2s 前）→ B（v1 中 error 持续抢镜至回收）
+        let mut m = SessionStateMachine::new();
+        let t = virtual_now();
+        m.apply_event("opencode", "a", Kind::Error, t - secs(12));
+        m.apply_event("claude-code", "b", Kind::Working, t - secs(2));
+        let d = m.display(t);
+        assert_eq!(d.kind, Kind::Working);
+        assert_eq!(d.agent, "claude-code");
+    }
+
+    #[test]
+    fn m6_empty_window_falls_back_to_most_recent() {
+        // ④ 窗口空 → 全量最近活跃（平局取 priority 高者）
+        let mut m = SessionStateMachine::new();
+        let t = virtual_now();
+        // 全部掉窗：editing(4) 更旧、working(1) 更新 → fallback 选 working
+        // （v1 全量优先级合并会选 editing——这正是 M6 修复点）
+        m.apply_event("opencode", "a", Kind::Editing, t - secs(20));
+        m.apply_event("claude-code", "b", Kind::Working, t - secs(15));
+        let d = m.display(t);
+        assert_eq!(d.kind, Kind::Working, "fallback 按 last_event_at，非优先级");
+        assert_eq!(d.agent, "claude-code");
+        // 平局（同 last_event_at）→ priority 高者（success(2) > working(1)）
+        let mut m2 = SessionStateMachine::new();
+        m2.apply_event("opencode", "a", Kind::Working, t - secs(25));
+        m2.apply_event("claude-code", "b", Kind::Success, t - secs(25));
+        let d2 = m2.display(t);
+        assert_eq!(d2.kind, Kind::Success);
+        assert_eq!(d2.agent, "claude-code");
+    }
+
+    #[test]
+    fn m6_solo_error_survives_via_fallback_until_reclaim() {
+        // ⑤ P1-1 钉子：solo error（无其他会话）经 fallback（最近活跃）仍选中，
+        // 显示至 30s 回收——有意行为（失败应被看见，M4 R6 语义；与 v1 无回归
+        // 无改善，非本里程碑问题域）
+        let mut m = SessionStateMachine::new();
+        let t0 = virtual_now();
+        m.apply_event("opencode", "a", Kind::Error, t0);
+        for q in [5u64, 15, 25, 29] {
+            let d = m.display(t0 + secs(q));
+            assert_eq!(d.kind, Kind::Error, "掉窗后 fallback 仍选中（{q}s 时刻）");
+            assert_eq!(d.agent, "opencode");
+        }
+        // 30s 回收 → idle
+        m.tick(t0 + secs(30), secs(30), secs(30));
+        let d = m.display(t0 + secs(30));
+        assert_eq!(d.kind, Kind::Idle, "回收后缺席 = idle");
+        assert_eq!(d.agent, "");
+    }
+
+    #[test]
+    fn m6_empty_sessions_display_idle_with_empty_agent() {
+        // ⑥ sessions 空 → idle（agent 空，前端芯片降级不显示）
+        let d = SessionStateMachine::new().display(virtual_now());
+        assert_eq!(d.kind, Kind::Idle);
+        assert_eq!(d.agent, "");
+    }
+
+    #[test]
+    fn m6_cross_agents_participate_equally() {
+        // ⑦ 跨 agent 同权：opencode / claude-code / task 伪 session 平等参与
+        //    （优先级表与窗口对三者一视同仁）
+        let mut m = SessionStateMachine::new();
+        let t = virtual_now();
+        m.apply_event("task", "task:7", Kind::Testing, t - secs(1));
+        m.apply_event("opencode", "s1", Kind::Editing, t - secs(2));
+        m.apply_event("claude-code", "u1", Kind::Working, t - secs(3));
+        let d = m.display(t);
+        assert_eq!(d.kind, Kind::Testing, "窗内按优先级合并（testing > editing > working）");
+        assert_eq!(d.agent, "task");
+        // task 伪 session 掉窗 + opencode 窗内 → opencode 接管
+        let mut m2 = SessionStateMachine::new();
+        m2.apply_event("task", "task:7", Kind::Testing, t - secs(30));
+        m2.apply_event("opencode", "s1", Kind::Editing, t - secs(2));
+        let d2 = m2.display(t);
+        assert_eq!(d2.kind, Kind::Editing);
+        assert_eq!(d2.agent, "opencode");
+    }
+
+    #[test]
+    fn m6_task_heartbeat_fallback_stable_during_user_silence() {
+        // ⑧ 伪 session 15s 心跳时序（心跳 15s > 窗口 10s 的系统性交互）：
+        //    手头静默期（相邻两事件之间，含 >10s 长间隙）例程 working 连续
+        //    显示不闪变（fallback 消除心跳节律闪烁）；手头事件到达即夺回；
+        //    例程 working(1) 压不过窗内手头 editing/testing
+        let mut m = SessionStateMachine::new();
+        let t0 = virtual_now();
+        // 手头会话 t0 一击后静默；例程 15s 心跳
+        m.apply_event("opencode", "s1", Kind::Editing, t0);
+        m.apply_event("task", "task:1", Kind::Working, t0 + secs(15));
+        // t0+20s：例程心跳 5s 前仍在窗内 → working（active 集）
+        assert_eq!(m.display(t0 + secs(20)).kind, Kind::Working);
+        // t0+26s：例程心跳 11s 前掉窗、手头 26s 前掉窗 → 窗口空，fallback 选
+        // 最近活跃 = 例程（t0+15）→ **仍是 working，显示不闪变**
+        let d = m.display(t0 + secs(26));
+        assert_eq!(d.kind, Kind::Working, "心跳间隙 fallback 连选例程，不闪变");
+        assert_eq!(d.agent, "task");
+        // 手头事件到达 → 即夺回（active 集内唯一）
+        m.apply_event("opencode", "s1", Kind::Editing, t0 + secs(28));
+        let d = m.display(t0 + secs(28));
+        assert_eq!(d.kind, Kind::Editing);
+        assert_eq!(d.agent, "opencode");
+        // 下一拍例程心跳到达（双方均在窗内）→ 例程 working(1) 压不过 editing(4)
+        m.apply_event("task", "task:1", Kind::Working, t0 + secs(30));
+        let d = m.display(t0 + secs(30));
+        assert_eq!(d.kind, Kind::Editing, "例程 working(1) 压不过窗内手头 editing");
+        assert_eq!(d.agent, "opencode");
+    }
+
+    #[test]
+    fn m6_waiting_permission_yields_when_out_of_window() {
+        // ⑨ P2-5 钉子：waiting-permission >10s 未审批且手头会话活跃 → review
+        //    姿态让位（接受 + 记录：终端弹窗本身持续可见、阻塞会话，不依赖
+        //    宠物二次提醒；10s 已覆盖「刚发生」的最重要时段）
+        let mut m = SessionStateMachine::new();
+        let t = virtual_now();
+        m.apply_event("claude-code", "u1", Kind::WaitingPermission, t - secs(12));
+        m.apply_event("opencode", "s1", Kind::Working, t - secs(2));
+        let d = m.display(t);
+        assert_eq!(d.kind, Kind::Working, "掉窗让位（语义钉子）");
+        assert_eq!(d.agent, "opencode");
+        // 窗内（≤10s）时 waiting-permission 仍按优先级显示（6 > 1）
+        let mut m2 = SessionStateMachine::new();
+        m2.apply_event("claude-code", "u1", Kind::WaitingPermission, t - secs(8));
+        m2.apply_event("opencode", "s1", Kind::Working, t - secs(2));
+        let d2 = m2.display(t);
+        assert_eq!(d2.kind, Kind::WaitingPermission);
+        assert_eq!(d2.agent, "claude-code");
+    }
+
+    #[test]
+    fn m6_window_boundary_is_inclusive_at_10s() {
+        // 窗口边界：last_event_at >= now - 10s——恰 10s 前的事件仍在窗内
+        //（对齐插件 reaction 桶 10s 冷却节奏：10s 心跳不会掉窗）
+        let mut m = SessionStateMachine::new();
+        let t = virtual_now();
+        m.apply_event("opencode", "a", Kind::Error, t - ACTIVITY_WINDOW);
+        m.apply_event("claude-code", "b", Kind::Working, t - secs(2));
+        assert_eq!(m.display(t).kind, Kind::Error, "恰 10s 前 → 仍在窗内（闭区间）");
+        // 越过边界（10s+50ms）→ 掉窗让位
+        let mut m2 = SessionStateMachine::new();
+        m2.apply_event("opencode", "a", Kind::Error, t - ACTIVITY_WINDOW - Duration::from_millis(50));
+        m2.apply_event("claude-code", "b", Kind::Working, t - secs(2));
+        assert_eq!(m2.display(t).kind, Kind::Working);
+    }
+
+    // ⑩ 既有 v1 display 断言修订 = 上方全部旧测试改注入时钟（同刻事件下行为
+    //    等价——同刻事件必同在活跃集内，两层合并退化为集内优先级合并 = v1
+    //    语义）；无事件时的掉窗让位依赖 lib.rs 1s 后台 notify 循环兜底
+    //   （延迟 ≤1s，循环不可被优化掉——注释钉在 lib.rs 循环处）。
 }

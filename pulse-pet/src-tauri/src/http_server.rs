@@ -69,10 +69,11 @@ impl DisplayNotifier {
     }
 
     /// 计算当前显示状态，`(kind, agent)` 变化时以 `(kind, agent)` 触发回调。
+    /// v2 M6：display 注入 `Instant::now()`（两层合并成为时间函数，V2-DESIGN §6.1）。
     pub fn notify(&self, state: &Arc<Mutex<SessionStateMachine>>) {
         let display = {
             let st = state.lock().unwrap_or_else(|p| p.into_inner());
-            st.display()
+            st.display(Instant::now())
         };
         let mut last = self.last.lock().unwrap_or_else(|p| p.into_inner());
         if *last != Some((display.kind, display.agent.clone())) {
@@ -167,7 +168,9 @@ pub struct StateEvent {
 /// v2 M3（V2-DESIGN §3.7.2）：状态事件携带非空 detail 时的透传回调
 /// （lib.rs 接 `emit_to("pet", "pulsepet://tool-bubble")`；App 侧过滤，
 /// Rust 不判开关）。
-pub type DetailHook = Arc<dyn Fn(&str) + Send + Sync>;
+/// v2 M6（V2-DESIGN §6.2）：回调签名 `(detail, agent)`——`/state` 请求已带
+/// agent，透传链路 M3 只透传 detail，本里程碑补齐（气泡徽标 [oc]/[cc] 数据源）。
+pub type DetailHook = Arc<dyn Fn(&str, &str) + Send + Sync>;
 
 /// 路由处理结果：要么直接响应，要么是一条待 apply 的合法事件。
 pub enum HandleOutcome {
@@ -477,9 +480,10 @@ fn handle_incoming(
             // v2 M3（§3.7.2，N8）：含非空 detail 的状态事件 → 透传回调（lib.rs
             // emit_to("pet", "pulsepet://tool-bubble")）。仅字符串非空校验，
             // 不解析不落盘；App 侧过滤（Rust 不判开关）。
+            // v2 M6（§6.2）：agent 一并透传（(detail, agent)）。
             if let Some(d) = ev.detail.as_deref() {
                 if !d.trim().is_empty() {
-                    detail_hook(d);
+                    detail_hook(d, &ev.agent);
                 }
             }
             notifier.notify(state);
@@ -640,7 +644,7 @@ mod tests {
         let state = Arc::new(Mutex::new(SessionStateMachine::new()));
         let notifier = Arc::new(DisplayNotifier::new(Arc::new(|_, _| {})));
         let idle_hook: IdleHook = Arc::new(|_, _| {});
-        let detail_hook: DetailHook = Arc::new(|_| {});
+        let detail_hook: DetailHook = Arc::new(|_, _| {});
         let activity = new_agent_activity();
         let cfg = HttpConfig {
             runtime_dir: tmp,
@@ -857,7 +861,7 @@ mod tests {
             state,
             notifier,
             idle_hook,
-            Arc::new(|_| {}),
+            Arc::new(|_, _| {}),
             TOKEN.to_string(),
             new_agent_activity(),
             cfg,
@@ -888,19 +892,20 @@ mod tests {
 
     /// v2 M3（§3.7.2，N8/TC-M3-14-4）：含非空 detail 的状态事件 → detail_hook
     /// 原样透传字符串（不解析——含 `:` 的 tpl 协议串照传）；无/空 detail 不触发。
+    /// v2 M6（§6.2，TC-M6-03-1）：agent 随 (detail, agent) 一并透传。
     #[test]
     fn integration_state_detail_forwards_to_detail_hook() {
         let tmp = std::env::temp_dir().join(format!("pulsepet-http-det-{}", std::process::id()));
         std::fs::create_dir_all(&tmp).unwrap();
         let state = Arc::new(Mutex::new(SessionStateMachine::new()));
         let notifier = Arc::new(DisplayNotifier::new(Arc::new(|_, _| {})));
-        let seen = Arc::new(Mutex::new(Vec::<String>::new()));
+        let seen = Arc::new(Mutex::new(Vec::<(String, String)>::new()));
         let seen_hook = seen.clone();
-        let detail_hook: DetailHook = Arc::new(move |d: &str| {
+        let detail_hook: DetailHook = Arc::new(move |d: &str, agent: &str| {
             seen_hook
                 .lock()
                 .unwrap_or_else(|p| p.into_inner())
-                .push(d.to_string());
+                .push((d.to_string(), agent.to_string()));
         });
         let cfg = HttpConfig {
             runtime_dir: tmp,
@@ -935,8 +940,8 @@ mod tests {
         }
         assert_eq!(
             seen.lock().unwrap().as_slice(),
-            ["edit:V2-DESIGN.md".to_string()],
-            "仅非空 detail 触发且原样透传"
+            [("edit:V2-DESIGN.md".to_string(), "opencode".to_string())],
+            "仅非空 detail 触发且 (detail, agent) 原样透传（M6 徽标数据源）"
         );
         h.shutdown();
     }
@@ -982,7 +987,7 @@ mod tests {
         std::thread::sleep(Duration::from_millis(100));
         {
             let st = state.lock().unwrap();
-            let d = st.display();
+            let d = st.display(Instant::now());
             assert_eq!(d.kind, Kind::Error, "error 应覆盖 editing（跨 agent 合并）");
             assert_eq!(d.agent, "claude-code");
         }
