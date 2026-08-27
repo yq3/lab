@@ -25,11 +25,19 @@
 //! 差值 < 阈值（默认 60s，`PULSEPET_TOKEN_REPORT_MAX_LAG_MS` 可配）才显示，避免
 //! 陈旧数字（TC-TK-11/12）。
 
+use std::collections::HashMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use rusqlite::{Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
+
+use crate::transcript::{self, TranscriptCache};
+
+/// agent 常量（v2 M5，V2-DESIGN §5.3）：opencode 恒单值；CC 行由 transcript 解析注入。
+pub const AGENT_OPENCODE: &str = "opencode";
+pub const AGENT_CLAUDE_CODE: &str = "claude-code";
 
 /// 错误码：数据库未运行/未初始化（TC-TK-03，含 WAL 缺失回退）。
 pub const ERR_NO_DATABASE: &str = "no-database";
@@ -67,6 +75,7 @@ impl std::error::Error for StatsError {}
 /// token 统计行（by session 为完整行；day/week/range 聚合行无 session_id/时间列）。
 /// M3（V2-DESIGN §3.2）：+model_id（仅按 id 归并）/project_name（basename）/
 /// title（by-session 独有，聚合行 None）。
+/// M5（V2-DESIGN §5.3）：+agent（opencode 恒 `"opencode"`；CC 行 `"claude-code"`）。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TokenRow {
     pub session_id: Option<String>,
@@ -87,6 +96,8 @@ pub struct TokenRow {
     pub project_name: Option<String>,
     /// 会话标题（by-session 独有；day/week/range 聚合行 None）。
     pub title: Option<String>,
+    /// v2 M5：来源 agent（`opencode` / `claude-code`）。
+    pub agent: String,
 }
 
 /// 今日 token 聚合（M3 §3.2 `token_stats_today`；三层快捷查看共享单一数据源）。
@@ -97,6 +108,23 @@ pub struct TodayStats {
     pub output: i64,
     pub cache_read: i64,
     pub cost: f64,
+}
+
+/// M5 双源查询返回体（C1/N-4 承载定案）：
+/// `degraded=Some` 仅在 opencode 源报错而 CC 源有数据时出现（原始错误
+/// "code: message" 供前端 title 提示）；CC 缺席时 rows 与 M3 原样一致、
+/// degraded=None（单源场景行为不变）。
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct QueryResponse {
+    pub rows: Vec<TokenRow>,
+    pub degraded: Option<String>,
+}
+
+/// M5 今日聚合返回体（同上语义）。
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct TodayResponse {
+    pub today: TodayStats,
+    pub degraded: Option<String>,
 }
 
 /// S4 裁定（2026-08-23）：`providerID='mock'` 的探测行（probe-model，token 全 0）
@@ -236,11 +264,13 @@ fn read_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TokenRow> {
         model_id: row.get("model_id")?,
         project_name: basename_of(row.get("project_worktree")?),
         title: row.get("title")?,
+        agent: row.get("agent")?,
     })
 }
 
 /// by session（原样语义，`WHERE time_updated` 范围 + `ORDER BY` 倒序；
-/// M3：+model_id/title 列 + LEFT JOIN project + mock 过滤）。
+/// M3：+model_id/title 列 + LEFT JOIN project + mock 过滤；
+/// M5：+agent 列（opencode 恒单值）。
 pub fn query_by_session(
     conn: &Connection,
     from_ms: i64,
@@ -248,11 +278,12 @@ pub fn query_by_session(
 ) -> Result<Vec<TokenRow>, StatsError> {
     let sql = format!(
         "SELECT {cols}, {model_id} AS model_id, s.title, \
-                p.worktree AS project_worktree \
+                p.worktree AS project_worktree, '{agent}' AS agent \
          FROM session s LEFT JOIN project p ON s.project_id = p.id \
          WHERE s.time_updated >= ?1 AND s.time_updated <= ?2 AND {mock} \
          ORDER BY s.time_updated DESC",
         cols = session_columns(),
+        agent = AGENT_OPENCODE,
         model_id = MODEL_ID_SQL,
         mock = MOCK_FILTER_SQL,
     );
@@ -313,15 +344,18 @@ fn query_grouped(
     to_ms: i64,
     day_expr: &str,
 ) -> Result<Vec<TokenRow>, StatsError> {
+    // M5：GROUP BY day, agent, model_id（agent 恒单值，列+分组保持形状统一，
+    // 与 CC 侧内存聚合 day × agent × model_id 对齐——V2-DESIGN §5.3）
     let sql = format!(
-        "SELECT {day_expr} AS day, {model_id} AS model_id, \
+        "SELECT {day_expr} AS day, {model_id} AS model_id, '{agent}' AS agent, \
                 SUM(cost) AS cost, \
                 SUM(tokens_input) AS tokens_input, SUM(tokens_output) AS tokens_output, \
                 SUM(tokens_reasoning) AS tokens_reasoning, \
                 SUM(tokens_cache_read) AS tokens_cache_read, \
                 SUM(tokens_cache_write) AS tokens_cache_write \
          FROM session WHERE time_updated >= ?1 AND time_updated <= ?2 AND {mock} \
-         GROUP BY day, model_id ORDER BY day DESC",
+         GROUP BY day, agent, model_id ORDER BY day DESC",
+        agent = AGENT_OPENCODE,
         model_id = MODEL_ID_SQL,
         mock = MOCK_FILTER_SQL,
     );
@@ -345,6 +379,7 @@ fn query_grouped(
                 model_id: row.get("model_id")?,
                 project_name: None,
                 title: None,
+                agent: row.get("agent")?,
             })
         })
         .map_err(|e| StatsError::new(ERR_QUERY, format!("查询失败：{e}")))?;
@@ -363,10 +398,11 @@ pub fn query_current_session(
 ) -> Result<Option<TokenRow>, StatsError> {
     let sql = format!(
         "SELECT {cols}, {model_id} AS model_id, s.title, \
-                p.worktree AS project_worktree \
+                p.worktree AS project_worktree, '{agent}' AS agent \
          FROM session s LEFT JOIN project p ON s.project_id = p.id \
          WHERE s.id = ?1 AND {mock}",
         cols = session_columns(),
+        agent = AGENT_OPENCODE,
         model_id = MODEL_ID_SQL,
         mock = MOCK_FILTER_SQL,
     );
@@ -572,6 +608,278 @@ pub fn report_max_lag_ms() -> i64 {
 }
 
 // ---------------------------------------------------------------------------
+// M5：双源查询（V2-DESIGN §5.3/§5.4，TC-M5-03/05/09）
+// ---------------------------------------------------------------------------
+
+/// CC 会话行 → TokenRow（agent=`claude-code`、cost 恒 0.0——S4 口径）。
+pub fn cc_to_token_row(r: &transcript::CcSessionRow) -> TokenRow {
+    TokenRow {
+        session_id: Some(r.session_id.clone()),
+        project_id: None,
+        day: None,
+        cost: r.cost,
+        tokens_input: r.tokens_input,
+        tokens_output: r.tokens_output,
+        tokens_reasoning: r.tokens_reasoning,
+        tokens_cache_read: r.tokens_cache_read,
+        tokens_cache_write: r.tokens_cache_write,
+        time_created: r.time_created,
+        time_updated: r.time_updated,
+        model_id: r.model_id.clone(),
+        project_name: r.project_name.clone(),
+        title: Some(r.title.clone()),
+        agent: AGENT_CLAUDE_CODE.to_string(),
+    }
+}
+
+/// CC 行窗口过滤 + 按 group_by 聚合（Rust 内存侧）：
+/// - session：完整行（时间倒序，与 opencode 统一排序在调用方）；
+/// - day/week：按 `day × agent × model_id` 聚合（本地日/周标签 = transcript
+///   纯函数，与 SQLite 'localtime' 同口径——S5/P2-4）；
+/// - range：按 `agent × model_id` 聚合（无 day 维，P3-6）。
+fn cc_group_rows(rows: &[TokenRow], group_by: &str, from_ms: i64, to_ms: i64) -> Vec<TokenRow> {
+    let in_win: Vec<&TokenRow> = rows
+        .iter()
+        .filter(|r| r.time_updated.is_some_and(|t| t >= from_ms && t <= to_ms))
+        .collect();
+    match group_by {
+        "session" => {
+            let mut v: Vec<TokenRow> = in_win.into_iter().cloned().collect();
+            v.sort_by(|a, b| b.time_updated.cmp(&a.time_updated));
+            v
+        }
+        "day" | "week" => {
+            let mut map: HashMap<(Option<String>, Option<String>), (i64, i64, i64, i64, i64, f64)> =
+                HashMap::new();
+            for r in in_win {
+                let Some(t) = r.time_updated else { continue };
+                let label = if group_by == "day" {
+                    transcript::local_day_label(t)
+                } else {
+                    transcript::sqlite_week_label(t)
+                };
+                let e = map.entry((label, r.model_id.clone())).or_insert((0, 0, 0, 0, 0, 0.0));
+                e.0 += r.tokens_input;
+                e.1 += r.tokens_output;
+                e.2 += r.tokens_reasoning;
+                e.3 += r.tokens_cache_read;
+                e.4 += r.tokens_cache_write;
+                e.5 += r.cost;
+            }
+            let mut out: Vec<TokenRow> = map
+                .into_iter()
+                .map(|((day, model), (i, o, rs, cr, cw, cost))| TokenRow {
+                    session_id: None,
+                    project_id: None,
+                    day,
+                    cost,
+                    tokens_input: i,
+                    tokens_output: o,
+                    tokens_reasoning: rs,
+                    tokens_cache_read: cr,
+                    tokens_cache_write: cw,
+                    time_created: None,
+                    time_updated: None,
+                    model_id: model,
+                    project_name: None,
+                    title: None,
+                    agent: AGENT_CLAUDE_CODE.to_string(),
+                })
+                .collect();
+            out.sort_by(|a, b| b.day.cmp(&a.day)); // day DESC 与 opencode 同序
+            out
+        }
+        _ => {
+            // range：agent × model_id
+            let mut map: HashMap<Option<String>, (i64, i64, i64, i64, i64, f64)> = HashMap::new();
+            for r in in_win {
+                let e = map.entry(r.model_id.clone()).or_insert((0, 0, 0, 0, 0, 0.0));
+                e.0 += r.tokens_input;
+                e.1 += r.tokens_output;
+                e.2 += r.tokens_reasoning;
+                e.3 += r.tokens_cache_read;
+                e.4 += r.tokens_cache_write;
+                e.5 += r.cost;
+            }
+            let mut out: Vec<TokenRow> = map
+                .into_iter()
+                .map(|(model, (i, o, rs, cr, cw, cost))| TokenRow {
+                    session_id: None,
+                    project_id: None,
+                    day: None,
+                    cost,
+                    tokens_input: i,
+                    tokens_output: o,
+                    tokens_reasoning: rs,
+                    tokens_cache_read: cr,
+                    tokens_cache_write: cw,
+                    time_created: None,
+                    time_updated: None,
+                    model_id: model,
+                    project_name: None,
+                    title: None,
+                    agent: AGENT_CLAUDE_CODE.to_string(),
+                })
+                .collect();
+            out.sort_by(|a, b| a.model_id.cmp(&b.model_id));
+            out
+        }
+    }
+}
+
+/// 双源查询编排（C1/N-4 容错）：
+/// - opencode 正常 → 双源合并（session 维时间倒序统一排序；day/week/range 两源
+///   concat）+ degraded=None；
+/// - opencode 报错 × CC 有数据 → 降级返回 CC-only + degraded=Some（部分源错误
+///   不整体遮蔽）；
+/// - 双源全缺（opencode 错 × CC 无数据）→ 既有错误路径透传（M3「无库→—」语义
+///   保留给全缺态）；
+/// - CC 缺席 → rows 与 M3 单测钉住的原样一致 + degraded=None（单源场景行为不变）。
+pub fn query_stats_dual(
+    data_dir: &Path,
+    cc_dir: &Path,
+    cache: &Arc<Mutex<TranscriptCache>>,
+    from_ms: i64,
+    to_ms: i64,
+    group_by: &str,
+) -> Result<QueryResponse, StatsError> {
+    if !matches!(group_by, "session" | "day" | "week" | "range") {
+        return Err(StatsError::new(
+            ERR_QUERY,
+            format!("invalid group_by: {group_by}（应为 session/day/week/range）"),
+        ));
+    }
+    let cc_rows_all = {
+        let mut c = cache.lock().unwrap_or_else(|p| p.into_inner());
+        c.refresh(cc_dir)
+    };
+    let cc_has_data = !cc_rows_all.is_empty();
+    let cc_tokens: Vec<TokenRow> = cc_rows_all.iter().map(cc_to_token_row).collect();
+    let cc_grouped = cc_group_rows(&cc_tokens, group_by, from_ms, to_ms);
+
+    match query_stats(data_dir, from_ms, to_ms, group_by) {
+        Ok(mut rows) => {
+            rows.extend(cc_grouped);
+            if group_by == "session" {
+                // 双源统一时间倒序（TC-M5-03-5）
+                rows.sort_by(|a, b| b.time_updated.cmp(&a.time_updated));
+            }
+            Ok(QueryResponse {
+                rows,
+                degraded: None,
+            })
+        }
+        Err(e) => {
+            if cc_has_data {
+                Ok(QueryResponse {
+                    rows: cc_grouped,
+                    degraded: Some(e.to_string()),
+                })
+            } else {
+                Err(e)
+            }
+        }
+    }
+}
+
+/// 今日双源聚合（M3 三层快捷查看自动覆盖 CC，TC-M5-03-6）：
+/// opencode SQL 当日聚合 + CC 缓存当日过滤求和；容错语义同 query_stats_dual。
+pub fn today_stats_dual(
+    data_dir: &Path,
+    cc_dir: &Path,
+    cache: &Arc<Mutex<TranscriptCache>>,
+    now_ms: i64,
+) -> Result<TodayResponse, StatsError> {
+    let from = local_today_start_ms(now_ms);
+    let cc_rows_all = {
+        let mut c = cache.lock().unwrap_or_else(|p| p.into_inner());
+        c.refresh(cc_dir)
+    };
+    let cc_has_data = !cc_rows_all.is_empty();
+    let mut cc_today = TodayStats {
+        input: 0,
+        output: 0,
+        cache_read: 0,
+        cost: 0.0,
+    };
+    for r in cc_rows_all.iter() {
+        if let Some(t) = r.time_updated {
+            if t >= from && t <= now_ms {
+                cc_today.input += r.tokens_input;
+                cc_today.output += r.tokens_output;
+                cc_today.cache_read += r.tokens_cache_read;
+                // cost 恒 0（S4）
+            }
+        }
+    }
+    match today_stats(data_dir, now_ms) {
+        Ok(mut t) => {
+            t.input += cc_today.input;
+            t.output += cc_today.output;
+            t.cache_read += cc_today.cache_read;
+            Ok(TodayResponse {
+                today: t,
+                degraded: None,
+            })
+        }
+        Err(e) => {
+            if cc_has_data {
+                Ok(TodayResponse {
+                    today: cc_today,
+                    degraded: Some(e.to_string()),
+                })
+            } else {
+                Err(e)
+            }
+        }
+    }
+}
+
+/// M5 CC 会话汇报（V2-DESIGN §5.4，TC-M5-05）：
+/// - 经 TranscriptCache sessionId 索引定位文件（缓存缺失由 find_session 内
+///   refresh 补建——idle 先于查询）；
+/// - 新鲜度护栏：**last_assistant_ts** 距 now < max_lag（N-1 专用口径，对齐
+///   opencode「最后 message 写入时间」语义）；
+/// - 五维有非零用量才出气泡（全零静默，TC-TK-12 口径）；
+/// - 文案无 cost 段（S4）；今日段 = today_stats_dual 双源合计（失败 → None
+///   静默省略，与 opencode 同模板）。
+pub fn build_cc_idle_report(
+    cache: &Arc<Mutex<TranscriptCache>>,
+    data_dir: &Path,
+    cc_dir: &Path,
+    session_id: &str,
+    now_ms: i64,
+    max_lag_ms: i64,
+) -> Option<(String, Option<i64>)> {
+    let row = {
+        let mut c = cache.lock().unwrap_or_else(|p| p.into_inner());
+        c.find_session(cc_dir, session_id)?
+    };
+    let fresh = row
+        .last_assistant_ts
+        .is_some_and(|t| (now_ms - t).abs() <= max_lag_ms);
+    if !fresh {
+        return None;
+    }
+    let has_usage = row.tokens_input > 0
+        || row.tokens_output > 0
+        || row.tokens_reasoning > 0
+        || row.tokens_cache_read > 0
+        || row.tokens_cache_write > 0;
+    if !has_usage {
+        return None;
+    }
+    let text = crate::i18n::current().cc_token_report(
+        &format_tokens_k(row.tokens_input),
+        &format_tokens_k(row.tokens_output),
+    );
+    let today = today_stats_dual(data_dir, cc_dir, cache, now_ms)
+        .ok()
+        .map(|t| t.today.input + t.today.output + t.today.cache_read);
+    Some((text, today))
+}
+
+// ---------------------------------------------------------------------------
 // Tauri 命令（DESIGN §4.2；在 lib.rs 注册）
 // ---------------------------------------------------------------------------
 
@@ -584,14 +892,25 @@ pub fn token_stats_opencode_path() -> Result<Option<PathBuf>, String> {
 }
 
 /// 聚合查询（group_by: session/day/week/range；错误序列化为 "code: message"）。
+/// M5：双源化（opencode SQL + CC transcript 缓存）→ 返回体 `{rows, degraded}`
+/// （C1/N-4）；async fn + spawn_blocking（扫描/解析与 SQL 均不承主线程，
+/// IPC 契约不变——同命令名同参数）。
 #[tauri::command]
-pub fn token_stats_query(
+pub async fn token_stats_query(
     from_ms: i64,
     to_ms: i64,
     group_by: String,
-) -> Result<Vec<TokenRow>, String> {
-    query_stats(&opencode_data_dir(), from_ms, to_ms, &group_by)
-        .map_err(|e| e.to_string())
+    cache: tauri::State<'_, Arc<Mutex<TranscriptCache>>>,
+) -> Result<QueryResponse, String> {
+    let data_dir = opencode_data_dir();
+    let cc_dir = transcript::cc_projects_dir();
+    let cache = cache.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        query_stats_dual(&data_dir, &cc_dir, &cache, from_ms, to_ms, &group_by)
+    })
+    .await
+    .map_err(|e| format!("join: {e}"))?
+    .map_err(|e| e.to_string())
 }
 
 /// 当前会话行（TC-TK-10/12）。
@@ -601,16 +920,21 @@ pub fn token_stats_current_session(session_id: String) -> Result<Option<TokenRow
 }
 
 /// 今日 token 聚合（M3 §3.2；悬停卡/右键菜单/面板今日 preset 三层共享）。
-/// async fn + spawn_blocking（沿 M1 §1.5 线程纪律；sqlite 查询 ~ms 级但保持纪律）；
-/// 错误序列化 "code: message"（no-database/legacy-storage/schema-mismatch 原样透传）。
+/// M5：双源合计（opencode SQL 当日聚合 + CC 缓存当日过滤求和）→ 返回体
+/// `{today, degraded}`；async fn + spawn_blocking（沿 M1 §1.5 线程纪律）；
+/// 错误序列化 "code: message"（双源全缺时 no-database/legacy-storage/
+/// schema-mismatch 原样透传）。
 #[tauri::command]
-pub async fn token_stats_today() -> Result<TodayStats, String> {
-    tauri::async_runtime::spawn_blocking(|| {
-        today_stats(&opencode_data_dir(), now_ms())
-    })
-    .await
-    .map_err(|e| format!("join: {e}"))?
-    .map_err(|e| e.to_string())
+pub async fn token_stats_today(
+    cache: tauri::State<'_, Arc<Mutex<TranscriptCache>>>,
+) -> Result<TodayResponse, String> {
+    let data_dir = opencode_data_dir();
+    let cc_dir = transcript::cc_projects_dir();
+    let cache = cache.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || today_stats_dual(&data_dir, &cc_dir, &cache, now_ms()))
+        .await
+        .map_err(|e| format!("join: {e}"))?
+        .map_err(|e| e.to_string())
 }
 
 /// 当前系统毫秒时间戳（气泡新鲜度比较用）。
@@ -999,6 +1323,7 @@ mod tests {
             model_id: None,
             project_name: None,
             title: None,
+            agent: AGENT_OPENCODE.into(),
         };
         let text = format_session_report(&row);
         assert_eq!(text, "本期用了 58.3k input / 910 output / $0.05");
@@ -1023,6 +1348,7 @@ mod tests {
             model_id: None,
             project_name: None,
             title: None,
+            agent: AGENT_OPENCODE.into(),
         };
         let now = ms(10_000);
         let lag = 60_000;
@@ -1334,9 +1660,231 @@ mod tests {
         assert_eq!(build_idle_report_with_today(&nodir, "x", now, 60_000), None);
     }
 
-    // ---- 真实库对账（TC-TK-06；手动跑：--ignored --nocapture） ----
+    // ---- M5：双源查询与容错（TC-M5-03/05/09） ----
+
+    /// 写一个 CC transcript 会话文件（双源测试 fixture；model=deepseek-v4-pro）。
+    fn write_cc_session(cc_root: &Path, sid: &str, ts_ms: i64, tokens: (i64, i64)) {
+        use chrono::TimeZone;
+        let proj = cc_root.join("munged-proj");
+        std::fs::create_dir_all(&proj).unwrap();
+        let ts = chrono::Utc
+            .timestamp_millis_opt(ts_ms)
+            .single()
+            .unwrap()
+            .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let user = serde_json::json!({
+            "type": "user", "timestamp": ts, "cwd": "/Users/youqi/develop/lab",
+            "message": {"role": "user", "content": "hi"}
+        });
+        let assistant = serde_json::json!({
+            "type": "assistant", "timestamp": ts, "uuid": "u-1",
+            "message": {
+                "id": "m-1", "model": "deepseek-v4-pro",
+                "usage": {
+                    "input_tokens": tokens.0, "output_tokens": tokens.1,
+                    "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0,
+                    "output_tokens_details": {"thinking_tokens": 0}
+                }
+            }
+        });
+        std::fs::write(
+            proj.join(format!("{sid}.jsonl")),
+            format!("{user}\n{assistant}\n"),
+        )
+        .unwrap();
+    }
 
     #[test]
+    fn m5_degraded_opencode_error_with_cc_data_degrades() {
+        // opencode 源缺失（无 db）× CC 有数据 → Ok(CC-only) + degraded=Some
+        let cc_dir = temp_dir("m5-cc");
+        let d = chrono_local_midnight(2026, 8, 25);
+        write_cc_session(&cc_dir, "cc-ses-1", d + ms(3600), (1000, 200));
+        let nodb = temp_dir("m5-nodb");
+        let cache = Arc::new(Mutex::new(TranscriptCache::default()));
+        let res = query_stats_dual(&nodb, &cc_dir, &cache, 0, d + ms(86_400), "session").unwrap();
+        assert!(res.degraded.is_some(), "opencode 错 × CC 有数据 → degraded=Some");
+        assert_eq!(res.rows.len(), 1);
+        assert_eq!(res.rows[0].agent, AGENT_CLAUDE_CODE);
+        assert_eq!(res.rows[0].tokens_input, 1000);
+        assert_eq!(res.rows[0].cost, 0.0, "CC cost 恒 0（S4）");
+        // today 同语义（pet 侧静默消费 CC-only 数值）
+        let now = d + 9 * 3600 * 1000;
+        let t = today_stats_dual(&nodb, &cc_dir, &cache, now).unwrap();
+        assert!(t.degraded.is_some());
+        assert_eq!(t.today.input, 1000);
+        assert_eq!(t.today.output, 200);
+        assert_eq!(t.today.cost, 0.0);
+    }
+
+    #[test]
+    fn m5_degraded_cc_absent_rows_unchanged_m3_regression() {
+        // CC 目录缺席 × opencode 正常 → rows 原样 + degraded=None（N-4 兼容口径回归）
+        let dir = make_db("m5-nocc", CREATE_SESSION);
+        let d = chrono_local_midnight(2026, 8, 25);
+        insert_session_model(
+            &dir, "s1", "p1", 0.1, (100, 20, 0, 30, 0), d, d + ms(1),
+            Some(&model_json("glm-5.3", "zhipuai")), None,
+        );
+        let cache = Arc::new(Mutex::new(TranscriptCache::default()));
+        let no_cc = temp_dir("m5-nocc-cc").join("missing"); // 不存在的目录
+        let expect = query_stats(&dir, 0, d + ms(10), "session").unwrap();
+        let res = query_stats_dual(&dir, &no_cc, &cache, 0, d + ms(10), "session").unwrap();
+        assert_eq!(res.degraded, None, "CC 缺席 → 无 degraded（M3 行为原样）");
+        assert_eq!(res.rows, expect, "CC 缺席 → rows 与 M3 钉住的原样一致");
+        // today 同语义
+        let now = d + 9 * 3600 * 1000;
+        let t = today_stats_dual(&dir, &no_cc, &cache, now).unwrap();
+        assert_eq!(t.degraded, None);
+        assert_eq!(t.today, today_stats(&dir, now).unwrap());
+    }
+
+    #[test]
+    fn m5_degraded_both_missing_error_passthrough() {
+        // 双源全缺 → 既有错误码透传（M3「无库→—」语义保留给全缺态）
+        let nodb = temp_dir("m5-both-nodb");
+        let no_cc = temp_dir("m5-both-nocc").join("missing");
+        let cache = Arc::new(Mutex::new(TranscriptCache::default()));
+        let err = query_stats_dual(&nodb, &no_cc, &cache, 0, 1, "session").unwrap_err();
+        assert_eq!(err.code, ERR_NO_DATABASE);
+        let err = today_stats_dual(&nodb, &no_cc, &cache, ms(1000)).unwrap_err();
+        assert_eq!(err.code, ERR_NO_DATABASE);
+    }
+
+    #[test]
+    fn m5_dual_query_merges_by_agent_dimension() {
+        let dir = make_db("m5-merge", CREATE_SESSION);
+        let d = chrono_local_midnight(2026, 8, 25);
+        insert_session_model(
+            &dir, "s-oc", "p1", 0.1, (100, 10, 0, 0, 0), d, d + ms(100),
+            Some(&model_json("glm-5.3", "zhipuai")), None,
+        );
+        let cc_dir = temp_dir("m5-merge-cc");
+        write_cc_session(&cc_dir, "cc-ses-1", d + ms(200), (50, 5));
+        let cache = Arc::new(Mutex::new(TranscriptCache::default()));
+        // day 维：两源各一行（agent 维度拆分），同日不拆柱
+        let res = query_stats_dual(&dir, &cc_dir, &cache, 0, d + ms(86_400), "day").unwrap();
+        assert_eq!(res.degraded, None);
+        assert_eq!(res.rows.len(), 2);
+        let oc = res.rows.iter().find(|r| r.agent == AGENT_OPENCODE).unwrap();
+        let cc = res.rows.iter().find(|r| r.agent == AGENT_CLAUDE_CODE).unwrap();
+        assert_eq!(oc.day.as_deref(), Some("2026-08-25"));
+        assert_eq!(cc.day.as_deref(), Some("2026-08-25"), "双源同日不拆柱（本地日对齐）");
+        assert_eq!(cc.tokens_input, 50);
+        assert_eq!(cc.model_id.as_deref(), Some("deepseek-v4-pro"));
+        // session 维：CC 行 time_updated 更晚 → 时间倒序统一排序（CC 在前）
+        let res = query_stats_dual(&dir, &cc_dir, &cache, 0, d + ms(86_400), "session").unwrap();
+        assert_eq!(res.rows[0].session_id.as_deref(), Some("cc-ses-1"));
+        assert_eq!(res.rows[1].session_id.as_deref(), Some("s-oc"));
+        assert_eq!(res.rows[1].agent, AGENT_OPENCODE);
+        // range 维：CC 按 agent×model_id 聚合（day=None）
+        let res = query_stats_dual(&dir, &cc_dir, &cache, 0, d + ms(86_400), "range").unwrap();
+        assert_eq!(res.rows.len(), 2);
+        for r in &res.rows {
+            assert_eq!(r.day, None, "range 行无 day 维");
+        }
+    }
+
+    #[test]
+    fn m5_cc_week_grouping_uses_sqlite_week_semantics() {
+        // CC 内存聚合 week 标签与 opencode SQL %Y-W%W 同语义（P2-4：双源同周不拆柱）
+        let dir = make_db("m5-week", CREATE_SESSION);
+        let d = chrono_local_midnight(2026, 8, 11); // 2026-W32
+        insert_session_model(
+            &dir, "s-oc", "p1", 0.1, (10, 1, 0, 0, 0), d, d + ms(1),
+            Some(&model_json("glm-5.3", "zhipuai")), None,
+        );
+        let cc_dir = temp_dir("m5-week-cc");
+        write_cc_session(&cc_dir, "cc-1", d + 12 * 3600 * 1000, (20, 2)); // 本地午间（防 UTC 跨日）
+        let cache = Arc::new(Mutex::new(TranscriptCache::default()));
+        let res = query_stats_dual(&dir, &cc_dir, &cache, 0, d + ms(86_400), "week").unwrap();
+        let oc = res.rows.iter().find(|r| r.agent == AGENT_OPENCODE).unwrap();
+        let cc = res.rows.iter().find(|r| r.agent == AGENT_CLAUDE_CODE).unwrap();
+        assert_eq!(oc.day.as_deref(), Some("2026-W32"));
+        assert_eq!(cc.day.as_deref(), oc.day.as_deref(), "双源同周标签一致");
+    }
+
+    #[test]
+    fn m5_today_dual_sums_both_sources() {
+        // 双源齐全 → 合计 + degraded=None（三层快捷查看自动覆盖 CC）
+        let dir = make_db("m5-today", CREATE_SESSION);
+        let d = chrono_local_midnight(2026, 8, 25);
+        let now = d + 9 * 3600 * 1000;
+        insert_session_model(
+            &dir, "s-oc", "p1", 0.1, (1000, 100, 0, 3000, 0), now - ms(10), now - ms(5),
+            Some(&model_json("glm-5.3", "zhipuai")), None,
+        );
+        let cc_dir = temp_dir("m5-today-cc");
+        write_cc_session(&cc_dir, "cc-1", now - ms(60), (500, 50));
+        write_cc_session(&cc_dir, "cc-old", d - ms(3600), (99_999, 0)); // 昨天的行不计
+        let cache = Arc::new(Mutex::new(TranscriptCache::default()));
+        let t = today_stats_dual(&dir, &cc_dir, &cache, now).unwrap();
+        assert_eq!(t.degraded, None);
+        assert_eq!(t.today.input, 1500);
+        assert_eq!(t.today.output, 150);
+        assert_eq!(t.today.cache_read, 3000);
+        assert!((t.today.cost - 0.1).abs() < 1e-9, "CC cost 恒 0 不影响费用合计");
+    }
+
+    #[test]
+    fn m5_build_cc_idle_report_guardrail_and_no_cost_segment() {
+        let cc_dir = temp_dir("m5-idle-cc");
+        let nodb = temp_dir("m5-idle-nodb"); // opencode 无库 → 今日段降级 CC-only
+        let now = chrono_local_midnight(2026, 8, 25) + 9 * 3600 * 1000;
+        let cache = Arc::new(Mutex::new(TranscriptCache::default()));
+        // 新鲜 + 有用量 → 文案（无 cost 段）+ 今日段（双源合计）
+        write_cc_session(&cc_dir, "cc-live", now - ms(2), (58_263, 910));
+        let (text, today) =
+            build_cc_idle_report(&cache, &nodb, &cc_dir, "cc-live", now, 60_000).unwrap();
+        assert_eq!(text, "本期用了 58.3k input / 910 output");
+        assert!(!text.contains('$'), "CC 汇报无 cost 段（S4 口径）");
+        assert_eq!(today, Some(58_263 + 910), "今日段 = in+out+cache_read 双源合计");
+        // 全零 → None（静默，TC-TK-12 口径）
+        write_cc_session(&cc_dir, "cc-zero", now - ms(2), (0, 0));
+        assert_eq!(build_cc_idle_report(&cache, &nodb, &cc_dir, "cc-zero", now, 60_000), None);
+        // 陈旧（last_assistant_ts 落后 >60s）→ None（N-1 护栏消费 last_assistant_ts）
+        write_cc_session(&cc_dir, "cc-stale", now - ms(120_000), (1000, 10));
+        assert_eq!(build_cc_idle_report(&cache, &nodb, &cc_dir, "cc-stale", now, 60_000), None);
+        // 文件缺席 → None
+        assert_eq!(build_cc_idle_report(&cache, &nodb, &cc_dir, "cc-nope", now, 60_000), None);
+    }
+
+    // ---- 真实库对账（TC-TK-06；手动跑：--ignored --nocapture） ----
+
+    /// v2 M5 真实双源对账（手动）：本机 opencode.db + ~/.claude/projects。
+    #[test]
+    #[ignore = "manual: 需本机真实 opencode.db + CC transcripts（冒烟证据用）"]
+    fn real_dual_query_manual() {
+        let dir = opencode_data_dir();
+        let cc_dir = transcript::cc_projects_dir();
+        let cache = Arc::new(Mutex::new(TranscriptCache::default()));
+        let now = now_ms();
+        let from = now - 7 * 24 * 3600 * 1000;
+        for g in ["session", "day", "week", "range"] {
+            let res = query_stats_dual(&dir, &cc_dir, &cache, from, now, g).unwrap();
+            let cc = res
+                .rows
+                .iter()
+                .filter(|r| r.agent == AGENT_CLAUDE_CODE)
+                .count();
+            println!(
+                "[dual] {g}: {} 行（cc={cc}）degraded={:?}",
+                res.rows.len(),
+                res.degraded
+            );
+            for r in res.rows.iter().filter(|r| r.agent == AGENT_CLAUDE_CODE).take(3) {
+                println!(
+                    "       cc 行: day={:?} model={:?} in={} out={} title={:?}",
+                    r.day, r.model_id, r.tokens_input, r.tokens_output, r.title
+                );
+            }
+        }
+        let t = today_stats_dual(&dir, &cc_dir, &cache, now).unwrap();
+        println!(
+            "[dual] today: input={} output={} cache_read={} cost={:.4} degraded={:?}",
+            t.today.input, t.today.output, t.today.cache_read, t.today.cost, t.degraded
+        );
+    }    #[test]
     #[ignore = "manual: 需本机真实 opencode.db（对账证据用）"]
     fn real_db_reconciliation_manual() {
         let dir = opencode_data_dir();

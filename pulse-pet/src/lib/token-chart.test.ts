@@ -1,16 +1,18 @@
 import { describe, expect, it } from "vitest";
 import {
+  agentsWithRows,
   computeModelChips,
   computeStackedBars,
   TOOLTIP_ROW_ORDER,
   type ModelKey,
 } from "./token-chart";
-import type { TokenRow } from "./token-stats";
+import { AGENT_CLAUDE_CODE, AGENT_OPENCODE, type TokenRow } from "./token-stats";
 
 function gRow(
   day: string,
   model: string | null,
   v: { i?: number; o?: number; c?: number; r?: number },
+  agent = AGENT_OPENCODE,
 ): TokenRow {
   return {
     session_id: null,
@@ -27,6 +29,7 @@ function gRow(
     model_id: model,
     project_name: null,
     title: null,
+    agent,
   };
 }
 
@@ -107,6 +110,42 @@ describe("computeStackedBars：三段堆叠柱（v2 M3 §3.5，TC-M3-05）", () 
     expect(withOpt).toEqual(withoutOpt);
   });
 
+  it("M5 agentFilter：勾选剔除（作用域仅柱图）；空集 → 空数组（空态复用模型口径）", () => {
+    // 双 agent 混合行：cc 行注入后勾选剔除
+    const mixed = [
+      gRow("2026-08-25", "glm", { i: 100 }, AGENT_OPENCODE),
+      gRow("2026-08-25", "deepseek", { i: 40 }, AGENT_CLAUDE_CODE),
+    ];
+    const onlyOc = computeStackedBars(
+      mixed,
+      new Set<ModelKey>(["glm", "deepseek"]),
+      { ...OPTS, agentFilter: new Set([AGENT_OPENCODE]) },
+    );
+    expect(onlyOc[0].input).toBe(100);
+    expect(onlyOc[0].total).toBe(100);
+    const onlyCc = computeStackedBars(
+      mixed,
+      new Set<ModelKey>(["glm", "deepseek"]),
+      { ...OPTS, agentFilter: new Set([AGENT_CLAUDE_CODE]) },
+    );
+    expect(onlyCc[0].input).toBe(40);
+    // agent 空集 → 无行保留 → 空数组（组件层显示空态文案）
+    expect(
+      computeStackedBars(mixed, new Set<ModelKey>(["glm", "deepseek"]), {
+        ...OPTS,
+        agentFilter: new Set<string>(),
+      }),
+    ).toEqual([]);
+    // 全量 agent 集合 = 不传等价（勾选剔除语义）
+    const allAgents = computeStackedBars(
+      mixed,
+      new Set<ModelKey>(["glm", "deepseek"]),
+      { ...OPTS, agentFilter: new Set([AGENT_OPENCODE, AGENT_CLAUDE_CODE]) },
+    );
+    const noFilter = computeStackedBars(mixed, new Set<ModelKey>(["glm", "deepseek"]), OPTS);
+    expect(allAgents).toEqual(noFilter);
+  });
+
   it("reasoning 不参与任何段（注入非零 reasoning 段高不变）", () => {
     const withR = [gRow("d", "glm", { i: 10, o: 10, c: 10, r: 999 })];
     const bars = computeStackedBars(withR, all, OPTS);
@@ -127,6 +166,51 @@ describe("computeModelChips：模型 chip 清单（§3.5）", () => {
       { key: "glm", total: 150 },
       { key: "kimi", total: 50 },
       { key: null, total: 1 },
+    ]);
+  });
+
+  // v2 M5 R2（TC-M5-04-2）：模型复选框联动收窄——agent tab 单选后 chip 清单
+  // 收窄为该 agent 有数据的模型；「全部」= 不传（并集，与 N12 同语义）
+  it("M5 R2：agentFilter 单元素集 → 仅该 agent 的模型；不传/全量集 = 双源并集", () => {
+    const mixed = [
+      gRow("d1", "glm", { i: 100 }, AGENT_OPENCODE),
+      gRow("d1", "glm", { i: 40 }, AGENT_CLAUDE_CODE),
+      gRow("d1", "deepseek", { i: 10 }, AGENT_CLAUDE_CODE),
+    ];
+    // 选中具体 agent（单元素集）→ 收窄为该 agent 有数据的模型
+    expect(
+      computeModelChips(mixed, new Set([AGENT_CLAUDE_CODE])),
+    ).toEqual([
+      { key: "glm", total: 40 },
+      { key: "deepseek", total: 10 },
+    ]);
+    expect(computeModelChips(mixed, new Set([AGENT_OPENCODE]))).toEqual([
+      { key: "glm", total: 100 },
+    ]);
+    // 「全部」= 不传（并集；同模型跨 agent 归并合法，TC-M5-03-4）
+    expect(computeModelChips(mixed)).toEqual([
+      { key: "glm", total: 140 },
+      { key: "deepseek", total: 10 },
+    ]);
+    // 全量集 = 不传等价（与 computeStackedBars agentFilter 语义对齐）
+    expect(computeModelChips(mixed, new Set([AGENT_OPENCODE, AGENT_CLAUDE_CODE]))).toEqual(
+      computeModelChips(mixed),
+    );
+  });
+});
+
+describe("agentsWithRows：agent tab 选项清单（v2 M5 R2，TC-M5-04-1）", () => {
+  it("仅有数据的 agent、distinct、按字典序稳定排列；空行 → 空数组", () => {
+    const rows = [
+      gRow("d1", "glm", { i: 1 }, AGENT_CLAUDE_CODE),
+      gRow("d1", "kimi", { i: 2 }, AGENT_OPENCODE),
+      gRow("d2", "glm", { i: 3 }, AGENT_CLAUDE_CODE),
+    ];
+    expect(agentsWithRows(rows)).toEqual([AGENT_OPENCODE, AGENT_CLAUDE_CODE].sort());
+    expect(agentsWithRows([])).toEqual([]);
+    // 无数据 agent 不出现（tab 不渲染，「全部」恒显由组件层并列补上）
+    expect(agentsWithRows([gRow("d1", "glm", {}, AGENT_OPENCODE)])).toEqual([
+      AGENT_OPENCODE,
     ]);
   });
 });

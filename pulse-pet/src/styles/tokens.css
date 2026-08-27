@@ -23,6 +23,8 @@
   --accent-ink: #b4531c;
   --ok: #4a7c59;
   --danger: #b3402f;
+  /* v2 M5：degraded 细横幅（警示级，介于 ok 与 danger 之间） */
+  --warn: #a5812f;
   --chart-output: #d96c2c;
   --chart-input: #9c6b3f;
   --chart-cache: #d8ccae;
@@ -43,6 +45,8 @@
   --accent-ink: #8fd8d2;
   --ok: #82b986;
   --danger: #e07263;
+  /* v2 M5：degraded 细横幅（警示级，介于 ok 与 danger 之间） */
+  --warn: #cbb26a;
   --chart-output: #62c6c0;
   --chart-input: #7286a5;
   --chart-cache: #39414b;

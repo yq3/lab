@@ -13,6 +13,7 @@ mod runtime;
 mod session_state;
 mod theme;
 mod token_stats;
+mod transcript;
 mod todos;
 mod tray;
 mod windows;
@@ -87,45 +88,62 @@ fn get_display_state(state: tauri::State<'_, Arc<Mutex<SessionStateMachine>>>) -
 /// total = in + out + cache_read（reasoning 不计，与 token_stats_today 同口径）；
 /// 今日聚合失败（today=None）时静默省略追加段、本期文案照常（TC-M3-09-3）。
 ///
-/// 查询与气泡下发以闭包注入（`idle_hook_body` 单测断言 CC idle 零查询）。
+/// v2 M5（V2-DESIGN §5.4）：`agent == "claude-code"` 经 `cc_dispatch` 派发——
+/// http 请求线程仅做派发，解析（缓存未命中 scan 补建）→ 护栏 → apply+emit
+/// 全部在后台线程完成（不 join 回 http 线程，N-3）。
+///
+/// 查询与气泡下发以闭包注入（`idle_hook_body` 单测断言 CC idle 零 opencode 查询）。
 fn idle_hook_body(
     state: &Arc<Mutex<SessionStateMachine>>,
     emit_bubble: &dyn Fn(String),
     query_report: &dyn Fn(&str, i64) -> Option<(String, Option<i64>)>,
+    cc_dispatch: &dyn Fn(&str),
     agent: &str,
     session_id: &str,
 ) {
-    // TC-INT-11：claude-code 的 idle 不触发任何 opencode.db 查询
-    if agent != "opencode" {
-        // 分流决策记录（低频：每 CC 轮次结束一条；排障时区分「CC idle 被
-        // 正常分流跳过」与「事件没到达」）
-        plog!("[pulsepet] idle hook: skip token report (agent={agent}, opencode-only)");
-        return;
-    }
-    let now = token_stats::now_ms();
-    if let Some((text, today)) = query_report(session_id, now) {
-        let full = match today {
-            Some(total) => {
-                let seg = crate::i18n::current().token_report_today(&token_stats::format_tokens_k(total));
-                format!("{text}{seg}")
+    match agent {
+        "opencode" => {
+            let now = token_stats::now_ms();
+            if let Some((text, today)) = query_report(session_id, now) {
+                let full = match today {
+                    Some(total) => {
+                        let seg = crate::i18n::current()
+                            .token_report_today(&token_stats::format_tokens_k(total));
+                        format!("{text}{seg}")
+                    }
+                    // 今日聚合失败（跨午夜竞态等）→ 静默省略追加段（TC-M3-09-3）
+                    None => text,
+                };
+                {
+                    let mut st = state.lock().unwrap_or_else(|p| p.into_inner());
+                    st.apply_event("opencode", session_id, Kind::Success, Instant::now());
+                }
+                emit_bubble(full);
             }
-            // 今日聚合失败（跨午夜竞态等）→ 静默省略追加段（TC-M3-09-3）
-            None => text,
-        };
-        {
-            let mut st = state.lock().unwrap_or_else(|p| p.into_inner());
-            st.apply_event("opencode", session_id, Kind::Success, Instant::now());
         }
-        emit_bubble(full);
+        "claude-code" => {
+            // v2 M5：CC idle → 派发后台线程（解析/护栏/apply+emit 均在后台，
+            // 本线程只派发——不阻塞 http 响应，N-3）。opencode.db 零查询。
+            cc_dispatch(session_id);
+        }
+        other => {
+            // 分流决策记录（低频：每 CC 轮次结束一条；排障时区分「CC idle 被
+            // 正常分流跳过」与「事件没到达」）
+            plog!("[pulsepet] idle hook: skip token report (agent={other}, unknown)");
+        }
     }
 }
 
 fn make_idle_hook(
     state: &Arc<Mutex<SessionStateMachine>>,
     app: &tauri::AppHandle,
+    cc_cache: &Arc<Mutex<transcript::TranscriptCache>>,
+    notifier: &Arc<http_server::DisplayNotifier>,
 ) -> http_server::IdleHook {
     let state = state.clone();
     let app = app.clone();
+    let cc_cache = cc_cache.clone();
+    let notifier = notifier.clone();
     Arc::new(move |agent: &str, session_id: &str| {
         idle_hook_body(
             &state,
@@ -141,6 +159,48 @@ fn make_idle_hook(
                     now,
                     token_stats::report_max_lag_ms(),
                 )
+            },
+            &|sid| {
+                // v2 M5（§5.4，N-3）：后台线程内直接完成
+                // 「解析（缓存未命中 scan 补建）→ 护栏判定 → apply + notify + emit」，
+                // 不 join 回 http 线程（AppHandle/State 的 Arc 均 Send 可移入）。
+                // 竞态诚实口径（P2-3）：护栏只防陈旧不防尾行未 flush——
+                // Stop 先于 transcript 尾行落盘时可能欠计最后一条 message（接受）。
+                let sid = sid.to_string();
+                let state = state.clone();
+                let app = app.clone();
+                let cache = cc_cache.clone();
+                let notifier = notifier.clone();
+                std::thread::spawn(move || {
+                    let now = token_stats::now_ms();
+                    if let Some((text, today)) = token_stats::build_cc_idle_report(
+                        &cache,
+                        &token_stats::opencode_data_dir(),
+                        &transcript::cc_projects_dir(),
+                        &sid,
+                        now,
+                        token_stats::report_max_lag_ms(),
+                    ) {
+                        let full = match today {
+                            Some(total) => {
+                                let seg = crate::i18n::current()
+                                    .token_report_today(&token_stats::format_tokens_k(total));
+                                format!("{text}{seg}")
+                            }
+                            None => text,
+                        };
+                        {
+                            let mut st = state.lock().unwrap_or_else(|p| p.into_inner());
+                            // 复合键 claude-code:{sessionId}（P2-5）
+                            st.apply_event("claude-code", &sid, Kind::Success, Instant::now());
+                        }
+                        // apply + notify 成对（后台线程内 apply 后立即推送，
+                        // 不依赖 1s tick 兜底）
+                        notifier.notify(&state);
+                        let _ = app
+                            .emit("pulsepet://bubble", serde_json::json!({ "text": full }));
+                    }
+                });
             },
             agent,
             session_id,
@@ -219,6 +279,10 @@ pub fn run() {
             // integrations_status 读取为 lastEventAt。与 state 同批 manage
             // （issue #9 铁律：窗口创建循环之前）。
             let activity = http_server::new_agent_activity();
+            // v2 M5（V2-DESIGN §5.2，TC-M5-02）：CC transcript 文件级缓存
+            // （managed state——查询命令与 CC idle hook 双方访问，P2-1；
+            // issue #9 铁律：窗口创建循环之前 manage）。
+            let cc_cache = Arc::new(Mutex::new(transcript::TranscriptCache::default()));
             // 显示状态变化 → Tauri event 推给前端（http-bridge → petStore）；
             // v2 M1 payload 携带归属 agent（前端只存不显示，向后兼容旧解析）
             let emit_handle = app.handle().clone();
@@ -234,7 +298,7 @@ pub fn run() {
             let server = http_server::start(
                 state.clone(),
                 notifier.clone(),
-                make_idle_hook(&state, app.handle()),
+                make_idle_hook(&state, app.handle(), &cc_cache, &notifier),
                 // v2 M3（§3.7.2，N8）：含非空 detail 的状态事件 → 定向 pet 窗
                 // 透传字符串（不解析不判开关——App 侧过滤）
                 {
@@ -275,6 +339,7 @@ pub fn run() {
 
             app.manage(state);
             app.manage(activity);
+            app.manage(cc_cache);
             app.manage(shutdown);
             // Moved 防抖保存器（P2-5）
             app.manage(windows::PositionSaver::new(app.handle().clone()));
@@ -460,6 +525,7 @@ mod tests {
         let state = Arc::new(Mutex::new(SessionStateMachine::new()));
         let queries = AtomicUsize::new(0);
         let emitted = AtomicUsize::new(0);
+        let dispatched = AtomicUsize::new(0);
         idle_hook_body(
             &state,
             &|_| {
@@ -469,12 +535,20 @@ mod tests {
                 queries.fetch_add(1, Ordering::SeqCst);
                 Some(("本期用了 1k input / 0 output / $0".to_string(), None))
             },
+            &|_sid| {
+                dispatched.fetch_add(1, Ordering::SeqCst);
+            },
             "claude-code",
             "cc-uuid-1",
         );
         assert_eq!(queries.load(Ordering::SeqCst), 0, "CC idle 不查 opencode.db");
-        assert_eq!(emitted.load(Ordering::SeqCst), 0, "CC idle 无气泡/无 success 注入");
-        // 未知 agent 同样零查询（白名单外值到不了这里，防御性钉住）
+        assert_eq!(emitted.load(Ordering::SeqCst), 0, "CC idle 无同步气泡/无 success 注入");
+        assert_eq!(
+            dispatched.load(Ordering::SeqCst),
+            1,
+            "CC idle → 派发后台线程（http 线程只派发，N-3）"
+        );
+        // 未知 agent 零查询零派发（白名单外值到不了这里，防御性钉住）
         idle_hook_body(
             &state,
             &|_| {},
@@ -482,10 +556,14 @@ mod tests {
                 queries.fetch_add(1, Ordering::SeqCst);
                 None
             },
+            &|_sid| {
+                dispatched.fetch_add(1, Ordering::SeqCst);
+            },
             "codex",
             "x",
         );
         assert_eq!(queries.load(Ordering::SeqCst), 0);
+        assert_eq!(dispatched.load(Ordering::SeqCst), 1, "未知 agent 不派发 CC 路径");
     }
 
     #[test]
@@ -493,6 +571,7 @@ mod tests {
         let state = Arc::new(Mutex::new(SessionStateMachine::new()));
         let bubbles = Mutex::new(Vec::<String>::new());
         let queries = AtomicUsize::new(0);
+        let dispatched = AtomicUsize::new(0);
         idle_hook_body(
             &state,
             &|text| {
@@ -506,10 +585,14 @@ mod tests {
                     Some(42_000_000),
                 ))
             },
+            &|_sid| {
+                dispatched.fetch_add(1, Ordering::SeqCst);
+            },
             "opencode",
             "ses_a",
         );
         assert_eq!(queries.load(Ordering::SeqCst), 1, "opencode idle 查一次库");
+        assert_eq!(dispatched.load(Ordering::SeqCst), 0, "opencode idle 不走 CC 派发");
         assert_eq!(
             bubbles.lock().unwrap().as_slice(),
             ["本期用了 58.3k input / 910 output / $0.05 · 今日 42.0M"],
@@ -533,6 +616,7 @@ mod tests {
                 emitted.fetch_add(1, Ordering::SeqCst);
             },
             &|_sid, _now| None,
+            &|_sid| {},
             "opencode",
             "ses_none",
         );
@@ -553,6 +637,7 @@ mod tests {
             &|_sid, _now| {
                 Some(("本期用了 58.3k input / 910 output / $0.05".to_string(), None))
             },
+            &|_sid| {},
             "opencode",
             "ses_a",
         );
@@ -573,6 +658,7 @@ mod tests {
             &state,
             &|text| bubbles.lock().unwrap().push(text),
             &|_sid, _now| Some(("本期用了 1 input / 0 output / $0".to_string(), Some(999_999_999 + 1))),
+            &|_sid| {},
             "opencode",
             "ses_a",
         );
@@ -602,5 +688,29 @@ mod order_nails {
             manage_at < windows_at,
             "AgentActivity 的 manage 必须在窗口创建循环之前（issue #9 铁律）"
         );
+    }
+
+    /// v2 M5（TC-M5-02-1）：TranscriptCache 的 manage 同样必须在窗口创建
+    /// 循环之前（issue #9 铁律——查询命令/CC idle hook 双方访问的 managed
+    /// state，Windows 上窗口先建会在 WebView 异步初始化期间派发 IPC 触发
+    /// state() panic）。
+    #[test]
+    fn cc_transcript_cache_managed_before_window_creation() {
+        let src = include_str!("lib.rs");
+        let manage_at = src
+            .find("app.manage(cc_cache)")
+            .expect("lib.rs 须含 app.manage(cc_cache)（issue #9）");
+        let windows_at = src
+            .find("for wc in app.config().app.windows.iter()")
+            .expect("lib.rs 须含窗口创建循环");
+        assert!(
+            manage_at < windows_at,
+            "TranscriptCache 的 manage 必须在窗口创建循环之前（issue #9 铁律）"
+        );
+        // 状态构造也在窗口创建前（与 manage 同段）
+        let construct_at = src
+            .find("Arc::new(Mutex::new(transcript::TranscriptCache::default()))")
+            .expect("lib.rs 须含 TranscriptCache 构造");
+        assert!(construct_at < windows_at);
     }
 }

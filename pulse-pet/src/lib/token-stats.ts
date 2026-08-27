@@ -29,7 +29,13 @@ export interface TokenRow {
   project_name: string | null;
   /** v2 M3：会话标题（by-session 独有；聚合行 null）。 */
   title: string | null;
+  /** v2 M5：来源 agent（`opencode` / `claude-code`）。 */
+  agent: string;
 }
+
+/** v2 M5：agent 常量（与 Rust token_stats.rs 一致）。 */
+export const AGENT_OPENCODE = "opencode";
+export const AGENT_CLAUDE_CODE = "claude-code";
 
 /** v2 M3：今日 token 聚合（token_stats_today；三层快捷查看共享单一数据源）。 */
 export interface TodayStats {
@@ -37,6 +43,23 @@ export interface TodayStats {
   output: number;
   cache_read: number;
   cost: number;
+}
+
+/**
+ * v2 M5（C1/N-4）：双源查询返回体包装——`degraded` 仅在 opencode 源报错而
+ * CC 源有数据时为非空（原始错误 "code: message"）；CC 缺席时 rows 与 M3
+ * 原样一致、degraded=null（单源场景行为不变）。degraded 横幅仅 panel；
+ * pet 侧（菜单/idle 追加段）静默消费合计数值、不呈现 degraded。
+ */
+export interface TokenQueryResult {
+  rows: TokenRow[];
+  degraded: string | null;
+}
+
+/** v2 M5：今日聚合返回体包装（语义同上）。 */
+export interface TodayQueryResult {
+  today: TodayStats;
+  degraded: string | null;
 }
 
 export type GroupBy = "session" | "day" | "week" | "range";
@@ -88,18 +111,21 @@ export function isTauriRuntime(): boolean {
   );
 }
 
-/** 调 `token_stats_query`（from/to 毫秒；group_by 维度由前端传，TC-TK-07）。 */
+/**
+ * 调 `token_stats_query`（from/to 毫秒；group_by 维度由前端传，TC-TK-07）。
+ * v2 M5：返回体为 `{rows, degraded}` 包装（C1/N-4 承载定案）。
+ */
 export async function fetchTokenRows(
   fromMs: number,
   toMs: number,
   groupBy: GroupBy,
-): Promise<TokenRow[]> {
+): Promise<TokenQueryResult> {
   if (!isTauriRuntime()) {
     throw new StatsError("query", t("token.needApp"));
   }
   const { invoke } = await import("@tauri-apps/api/core");
   try {
-    return await invoke<TokenRow[]>("token_stats_query", {
+    return await invoke<TokenQueryResult>("token_stats_query", {
       fromMs,
       toMs,
       groupBy,
@@ -111,16 +137,18 @@ export async function fetchTokenRows(
 
 /**
  * v2 M3（§3.2/§3.4）：今日 token 聚合（`token_stats_today`——from=本地今天 0 点、
- * mock 过滤、reasoning 不计均在 Rust 侧）。错误经 parseStatsError 结构化透传
- * （no-database 等，悬停卡「暂无数据」/菜单「—」态的来源）。
+ * mock 过滤、reasoning 不计均在 Rust 侧）。v2 M5：双源合计，返回体
+ * `{today, degraded}`；pet 侧消费方只取 today（静默呈现 CC-only 数值、
+ * 不呈现 degraded——宠物不打扰原则）。错误经 parseStatsError 结构化透传
+ * （no-database 等，菜单「—」态的来源；双源全缺才走错误路径）。
  */
-export async function fetchTodayStats(): Promise<TodayStats> {
+export async function fetchTodayStats(): Promise<TodayQueryResult> {
   if (!isTauriRuntime()) {
     throw new StatsError("query", t("token.needApp"));
   }
   const { invoke } = await import("@tauri-apps/api/core");
   try {
-    return await invoke<TodayStats>("token_stats_today");
+    return await invoke<TodayQueryResult>("token_stats_today");
   } catch (e) {
     throw parseStatsError(e);
   }

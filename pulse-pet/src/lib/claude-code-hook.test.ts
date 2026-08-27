@@ -14,8 +14,10 @@ import {
   EDIT_TOOLS,
   MAX_STDIN_BYTES,
   TEST_CMD_RE,
+  buildDetail,
   classifyHookInput,
   classifyToolUse,
+  extractDetailParam,
   isPayloadTooLarge,
   processHookInput,
   sanitizeMessage,
@@ -313,6 +315,83 @@ describe("TC-INT-02：CC hook 行为契约（零阻塞）", () => {
       expect(res.stderr.toString()).toContain("outcome:");
     } finally {
       rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("TC-M5-06：CC 工具级气泡 detail 提取（M3 规则 CC 工具族平移）", () => {
+  it("编辑族：Edit/Write/MultiEdit/NotebookEdit → edit basename", () => {
+    for (const tool of ["Edit", "Write", "MultiEdit", "NotebookEdit"]) {
+      expect(extractDetailParam(tool, { file_path: "/Users/secret/path/V2-DESIGN.md" })).toBe(
+        "V2-DESIGN.md",
+      );
+      expect(buildDetail(tool, { file_path: "/a/b/c.ts" })).toBe("edit:c.ts");
+    }
+  });
+
+  it("Bash：剥 KEY=value + 首词 basename（M3 强化规则同款）", () => {
+    expect(extractDetailParam("Bash", { command: "npm test" })).toBe("npm");
+    expect(extractDetailParam("Bash", { command: "FOO=secret npm run build" })).toBe("npm");
+    expect(extractDetailParam("Bash", { command: "/opt/homebrew/bin/npm test" })).toBe("npm");
+    expect(extractDetailParam("Bash", { command: "   " })).toBeNull();
+    expect(extractDetailParam("Bash", {})).toBeNull();
+    expect(buildDetail("Bash", { command: "npm test" })).toBe("bash:npm");
+  });
+
+  it("Read → read basename；Grep/Glob → search 净化 ≤40", () => {
+    expect(extractDetailParam("Read", { file_path: "/x/y/token.txt" })).toBe("token.txt");
+    expect(extractDetailParam("Grep", { pattern: "TODO|FIXME" })).toBe("TODO|FIXME");
+    const long = "x".repeat(80);
+    expect((extractDetailParam("Glob", { pattern: long }) ?? "").length).toBe(40);
+    // 含路径分隔符 → 末段
+    expect(extractDetailParam("Grep", { pattern: "/a/b/pattern" })).toBe("pattern");
+    expect(buildDetail("Read", { file_path: "/a/b.md" })).toBe("read:b.md");
+  });
+
+  it("WebFetch/WebSearch → web hostname；无 URL 时 query 净化", () => {
+    expect(
+      extractDetailParam("WebFetch", { url: "https://maven.aliyun.com/repository/central/x" }),
+    ).toBe("maven.aliyun.com");
+    expect(extractDetailParam("WebSearch", { query: "how to test" })).toBe("how to test");
+    expect(extractDetailParam("WebFetch", {})).toBeNull();
+    expect(buildDetail("WebFetch", { url: "https://example.com/p" })).toBe("web:example.com");
+  });
+
+  it("白名单外工具 / 无参 → 不携带 detail（null）", () => {
+    expect(extractDetailParam("Bash123", { command: "x" })).toBeNull();
+    expect(extractDetailParam("", {})).toBeNull();
+    expect(buildDetail("UnknownTool", {})).toBeNull();
+  });
+
+  it("PreToolUse 事件经 processHookInput 附带 detail 到 POST body", async () => {
+    const runtime = mkdtempSync(join(tmpdir(), "pulsepet-cchook-detail-"));
+    try {
+      writeFileSync(join(runtime, "endpoint"), "127.0.0.1:47895");
+      writeFileSync(join(runtime, "update-token"), "tok-cc-9");
+      let body: Record<string, unknown> | undefined;
+      const fetchImpl = (async (_url: string, init?: Record<string, any>) => {
+        body = JSON.parse(init?.body ?? "{}");
+        return { status: 200 };
+      }) as unknown as typeof fetch;
+      const out = await processHookInput({
+        input: JSON.stringify(
+          ccInput("PreToolUse", {
+            tool_name: "Edit",
+            tool_input: { file_path: "/Users/youqi/develop/lab/V2-DESIGN.md" },
+          }),
+        ),
+        fetchImpl,
+        dir: runtime,
+      });
+      expect(out).toBe("posted");
+      expect(body).toEqual({
+        sessionId: "cc-uuid-1",
+        kind: "editing",
+        agent: "claude-code",
+        detail: "edit:V2-DESIGN.md",
+      });
+    } finally {
+      rmSync(runtime, { recursive: true, force: true });
     }
   });
 });

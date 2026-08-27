@@ -20,9 +20,11 @@ export async function fetchTodayStatsCached(now = Date.now()): Promise<TodayStat
   if (cache && now - cache.at < TODAY_CACHE_MS) {
     return cache.data;
   }
-  const data = await fetchTodayStats();
-  cache = { at: now, data };
-  return data;
+  // v2 M5：双源合计（opencode + CC）；pet 侧静默消费数值、不呈现 degraded
+  // （宠物不打扰原则——C1/N-4 定案：degraded 横幅仅 panel）
+  const { today } = await fetchTodayStats();
+  cache = { at: now, data: today };
+  return today;
 }
 
 /** TodayStats → 菜单信息项三态文案（total = in+out+cache_read，reasoning 不计）。 */

@@ -28,6 +28,32 @@ export function isPayloadTooLarge(byteLength: number): boolean;
 /** 净化错误文案中的家目录路径（仅 PULSEPET_HOOK_DEBUG=1 时输出）。 */
 export function sanitizeMessage(message: unknown, homeDir?: string): string;
 
+// ---- v2 M5：工具级气泡 detail 协议（M3 extractDetailParam 规则 CC 工具族平移）----
+
+/** CC 工具族 → 模板 ID（白名单五模板）。 */
+export const CC_DETAIL_TPLS: Readonly<Record<string, ReadonlySet<string>>>;
+
+/** detail param 上限（与 App 桥侧 sanitizeToolParam 同口径）。 */
+export const CC_DETAIL_PARAM_MAX: number;
+
+/** 工具 → 模板 ID；白名单外 → null。 */
+export function ccDetailTplOf(toolName: unknown): string | null;
+
+/** 路径 basename（跨平台）。 */
+export function ccBasenameOf(s: unknown): string;
+
+/** 提取 detail param（TC-SEC 净化：仅 basename/首词/hostname/≤40 pattern）。 */
+export function extractDetailParam(
+  toolName: unknown,
+  toolInput?: Record<string, unknown>,
+): string | null;
+
+/** detail = "<tplId>:<param>"（提取失败 → null）。 */
+export function buildDetail(
+  toolName: unknown,
+  toolInput?: Record<string, unknown>,
+): string | null;
+
 export function runtimeDir(): string;
 export function killswitchActive(dir?: string): boolean;
 

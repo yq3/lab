@@ -124,6 +124,15 @@ impl Lang {
         }
     }
 
+    /// M5（V2-DESIGN §5.4）：CC 会话汇报气泡——**无 cost 段**（S4 口径：CC
+    /// 无可靠单价表，诚实优于假精确）；今日段复用 token_report_today 拼接。
+    pub fn cc_token_report(&self, input: &str, output: &str) -> String {
+        match self {
+            Lang::Zh => format!("本期用了 {input} input / {output} output"),
+            Lang::En => format!("This session: {input} input / {output} output"),
+        }
+    }
+
     // ---- atlas 回退提示（TC-SP-05/09 措辞；zh 与 M5 定案逐字一致）----
 
     pub fn atlas_notice_grid(&self, id: &str, width: u32, height: u32) -> String {
@@ -426,6 +435,31 @@ mod tests {
             Lang::En.token_report_today("42M"),
             "zh/en 互异（防粘贴错语言）"
         );
+        set(Lang::Zh); // 恢复默认
+    }
+
+    #[test]
+    fn cc_token_report_bilingual_without_cost_segment() {
+        // M5（TC-M5-05-6）：CC 汇报无 cost 段 + 双语互异
+        set(Lang::Zh);
+        assert_eq!(
+            current().cc_token_report("58.3k", "910"),
+            "本期用了 58.3k input / 910 output"
+        );
+        set(Lang::En);
+        assert_eq!(
+            current().cc_token_report("58.3k", "910"),
+            "This session: 58.3k input / 910 output"
+        );
+        assert_ne!(
+            Lang::Zh.cc_token_report("1", "1"),
+            Lang::En.cc_token_report("1", "1"),
+            "zh/en 互异（防粘贴错语言）"
+        );
+        // 无 cost 段（与 opencode 模板的区别钉住——S4 口径）
+        for l in [Lang::Zh, Lang::En] {
+            assert!(!l.cc_token_report("1", "1").contains('$'));
+        }
         set(Lang::Zh); // 恢复默认
     }
 

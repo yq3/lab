@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  AGENT_OPENCODE,
   formatCost,
   formatTokens,
   localDayEndMs,
@@ -27,6 +28,7 @@ function row(overrides: Partial<TokenRow> = {}): TokenRow {
     model_id: null,
     project_name: null,
     title: null,
+    agent: AGENT_OPENCODE,
     ...overrides,
   };
 }
