@@ -34,6 +34,11 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+/// Windows 子进程抑制控制台窗口标志（issue #19：GUI 子系统下裸 spawn 控制台
+/// 子进程会闪窗抢焦点）。action_exec.rs 有一份同语义常量（模块解耦各持一份）。
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
 /// App 内嵌脚本（源文件单一来源；install.sh 同源拷贝，md5 天然一致）。
 pub const BUNDLED_OPENCODE_HOOK: &str = include_str!("../../../opencode-plugin/pulse-pet-hook.js");
 pub const BUNDLED_CC_HOOK: &str = include_str!("../../../opencode-plugin/claude-code-hook.js");
@@ -843,12 +848,17 @@ fn read_activity_last_event(
 }
 
 /// node 探测（每次 doctor 现测不缓存，~50-200ms；阻塞 → 只在 spawn_blocking 内调）。
+/// Windows 下必须 CREATE_NO_WINDOW（issue #19）：release 为 GUI 子系统，裸 spawn
+/// 控制台子进程会闪现控制台窗口扰动面板焦点 → doctor/focus 自激励死循环。
 fn detect_node() -> bool {
-    std::process::Command::new("node")
-        .arg("--version")
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+    let mut cmd = std::process::Command::new("node");
+    cmd.arg("--version");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    cmd.output().map(|o| o.status.success()).unwrap_or(false)
 }
 
 /// 状态名（日志用；与 ConfigState 三态对应）。
@@ -1681,6 +1691,23 @@ mod tests {
         }
         assert!(code.contains("spawn_blocking"), "阻塞 I/O 须经 spawn_blocking");
         assert!(code.contains("plog!"), "安装动作须落 plog!");
+    }
+
+    #[test]
+    fn detect_node_suppresses_console_window() {
+        // issue #19 钉子：detect_node 的 spawn 必须 CREATE_NO_WINDOW——release
+        // GUI 子系统下闪控制台窗会扰动面板焦点，与 Settings focus 刷新构成
+        // doctor/focus 自激励死循环（Windows release 独有，dev 不复现）。
+        let src = include_str!("mod.rs");
+        let code = src.split("#[cfg(test)]").next().unwrap_or("");
+        assert!(
+            code.contains("cmd.creation_flags(CREATE_NO_WINDOW)"),
+            "detect_node 须在 Windows 下加 CREATE_NO_WINDOW（issue #19）"
+        );
+        assert!(
+            code.contains("const CREATE_NO_WINDOW: u32 = 0x0800_0000"),
+            "CREATE_NO_WINDOW 常量缺失或值错误（issue #19）"
+        );
     }
 
     #[test]

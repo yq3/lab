@@ -76,3 +76,28 @@ export function composeActionNotice(
   if (!msg) return null;
   return `${prefix}${msg}`;
 }
+
+// ---- focus 触发刷新冷却（issue #19 防自激励加固） ----
+
+/** focus 触发 doctor 刷新的冷却窗口：距上一次任意 doctor 调用 3s 内的 focus 事件不刷新。 */
+export const INTG_FOCUS_REFRESH_COOLDOWN_MS = 3000;
+
+/**
+ * focus 触发的 doctor 刷新是否放行（冷却判定，纯函数，issue #19）。
+ *
+ * 背景：doctor 每次调用 spawn `node --version` 探测；Windows release（GUI
+ * 子系统）下若 spawn 闪控制台窗扰动焦点，focus 事件与 doctor 会构成
+ * 「探测 → 闪窗 → 重获焦点 → 再探测」的自激励死循环（~4 轮/s）。以「上次
+ * 任意 doctor 调用时刻」为基准冷却 focus 路径，循环在第一圈即被掐断。
+ *
+ * 仅限 focus 触发路径：mount / `panel://tab` / 安装操作后的重拉不受限
+ * （保持「重开面板即刷新」语义）。Rust 侧 CREATE_NO_WINDOW（R1）为主修复，
+ * 本冷却为第二道防线。
+ */
+export function focusRefreshAllowed(
+  lastDoctorAt: number | null,
+  now: number,
+): boolean {
+  if (lastDoctorAt == null) return true;
+  return now - lastDoctorAt >= INTG_FOCUS_REFRESH_COOLDOWN_MS;
+}

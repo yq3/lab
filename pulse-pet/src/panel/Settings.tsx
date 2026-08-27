@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   fetchPetOptions,
   selectPet,
@@ -10,6 +10,7 @@ import { setPassThrough, PANEL_TAB_EVENT, normalizeTab } from "../lib/interactio
 import {
   composeActionNotice,
   fetchIntegrations,
+  focusRefreshAllowed,
   installIntegration,
   uninstallIntegration,
   uiStateOf,
@@ -77,6 +78,10 @@ export default function Settings() {
   const [intgBusy, setIntgBusy] = useState<IntegrationId | null>(null);
   const [intgErrors, setIntgErrors] = useState<Record<string, string>>({});
   const [intgNotices, setIntgNotices] = useState<Record<string, IntegrationStatus>>({});
+  /** issue #19：上次任意 doctor 调用时刻——focus 路径刷新的冷却基准
+   *（防「探测闪窗 → 重获焦点 → 再探测」自激励循环；mount/tab/操作后
+   * 重拉不受限，见 focusRefreshAllowed）。 */
+  const lastDoctorAtRef = useRef<number | null>(null);
   const passThrough = usePetStore((s) => s.passThrough);
   const lang = useLangStore((s) => s.lang); // M8 i18n：语言变化时本页文案重渲染
   const themePref = useThemeStore((s) => s.preference); // v2 M2 外观
@@ -115,6 +120,7 @@ export default function Settings() {
    * message 组装在 Rust 侧随语言变化，故切语言后同样重拉）。 */
   const loadIntegrations = useCallback(async () => {
     if (!isTauriRuntime()) return;
+    lastDoctorAtRef.current = Date.now();
     try {
       const list = await fetchIntegrations();
       setIntg(list);
@@ -164,7 +170,11 @@ export default function Settings() {
           await getCurrentWindow().onFocusChanged(({ payload: focused }) => {
             if (focused) {
               void load();
-              void loadIntegrations();
+              // issue #19：focus 路径受冷却约束——3s 内已有 doctor 调用则跳过，
+              // 掐断「node 探测闪窗 → 重获焦点 → 再探测」的自激励循环
+              if (focusRefreshAllowed(lastDoctorAtRef.current, Date.now())) {
+                void loadIntegrations();
+              }
             }
           }),
         );

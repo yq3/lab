@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { composeActionNotice, uiStateOf, type IntegrationStatus } from "./integrations";
+import {
+  composeActionNotice,
+  focusRefreshAllowed,
+  INTG_FOCUS_REFRESH_COOLDOWN_MS,
+  uiStateOf,
+  type IntegrationStatus,
+} from "./integrations";
 import { t, DICT } from "./i18n";
 
 /** 构造一条 IntegrationStatus（字段缺省按健康值）。 */
@@ -60,5 +66,28 @@ describe("v2 M2 L2（P3-1）：提示条语言不烘焙——渲染时以当前�
     expect(zh).toBe("操作完成：已安装 · v0.2.0");
     expect(en).toBe("Done: 已安装 · v0.2.0");
     expect(zh).not.toBe(en);
+  });
+});
+
+describe("focusRefreshAllowed：focus 触发 doctor 刷新冷却（issue #19 防自激励）", () => {
+  it("从未调用过 doctor（null）→ 放行（mount 后首个 focus 正常刷新）", () => {
+    expect(focusRefreshAllowed(null, 12345)).toBe(true);
+  });
+
+  it("距上次 doctor 调用不足冷却窗 → 拒绝（掐断「探测 → 闪窗 → 重获焦点 → 再探测」循环第一圈）", () => {
+    const t0 = 1_000_000;
+    // 实测循环圈长 ≈ probe(200ms) + 派发(35ms)，远小于 3s 冷却
+    expect(focusRefreshAllowed(t0, t0 + 235)).toBe(false);
+    expect(focusRefreshAllowed(t0, t0 + INTG_FOCUS_REFRESH_COOLDOWN_MS - 1)).toBe(false);
+  });
+
+  it("距上次 doctor 调用 ≥ 冷却窗 → 放行（真实用户切走再切回仍刷新）", () => {
+    const t0 = 1_000_000;
+    expect(focusRefreshAllowed(t0, t0 + INTG_FOCUS_REFRESH_COOLDOWN_MS)).toBe(true);
+    expect(focusRefreshAllowed(t0, t0 + 60_000)).toBe(true);
+  });
+
+  it("冷却时长为 3s（钉住常量，调阈值须连动本组用例语义）", () => {
+    expect(INTG_FOCUS_REFRESH_COOLDOWN_MS).toBe(3000);
   });
 });

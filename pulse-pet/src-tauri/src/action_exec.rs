@@ -40,6 +40,12 @@ use crate::reminder_scheduler::{
 };
 use crate::session_state::{Kind, SessionStateMachine};
 
+/// Windows 子进程抑制控制台窗口标志（issue #19 同类清扫）：release 为 GUI
+/// 子系统，exec 定时任务 / abort 路径裸 spawn powershell/taskkill 会闪窗抢
+/// 焦点。integrations/mod.rs 有一份同语义常量（模块解耦各持一份）。
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
 /// exec 并发上限（§4.5：并发满 2 进等待队列）。
 pub const MAX_CONCURRENT_EXECS: usize = 2;
 /// 执行期间伪 session 心跳周期（P2-9：30s idle 回收的 1/2，裕量 15s）。
@@ -381,6 +387,8 @@ fn build_shell_command(command: &str) -> tokio::process::Command {
     #[cfg(windows)]
     {
         cmd.arg("-NoProfile").arg("-Command").arg(command);
+        // issue #19 同类清扫：抑制控制台宿主窗口（不影响子进程自身开 GUI 窗）
+        cmd.creation_flags(CREATE_NO_WINDOW);
     }
     #[cfg(not(any(unix, windows)))]
     {
@@ -433,8 +441,10 @@ pub fn kill_process_tree(pid: u32) {
     }
     #[cfg(windows)]
     {
+        use std::os::windows::process::CommandExt;
         let _ = std::process::Command::new("taskkill")
             .args(["/T", "/F", "/PID", &pid.to_string()])
+            .creation_flags(CREATE_NO_WINDOW)
             .status();
     }
 }
@@ -903,6 +913,23 @@ fn notify_slot_free<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn exec_spawns_suppress_console_window() {
+        // issue #19 同类清扫钉子：exec 定时任务（powershell）与 abort 路径
+        // （taskkill）的 spawn 必须 CREATE_NO_WINDOW——release GUI 子系统下
+        // 裸 spawn 会闪控制台窗抢焦点（每次定时任务执行都会触发）。
+        let src = include_str!("action_exec.rs");
+        let code = src.split("#[cfg(test)]").next().unwrap_or("");
+        assert!(
+            code.matches("creation_flags(CREATE_NO_WINDOW)").count() >= 2,
+            "build_shell_command 与 kill_process_tree 须各加 CREATE_NO_WINDOW（issue #19）"
+        );
+        assert!(
+            code.contains("const CREATE_NO_WINDOW: u32 = 0x0800_0000"),
+            "CREATE_NO_WINDOW 常量缺失或值错误（issue #19）"
+        );
+    }
 
     fn ctx() -> (Arc<Mutex<RunningTasks>>, RunCtx) {
         let reg = Arc::new(Mutex::new(RunningTasks::default()));
