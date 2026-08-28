@@ -3,6 +3,7 @@ import {
   actionBadge,
   actionBadgeTitle,
   buildOpencodeCommand,
+  execBadge,
   formatInterval,
   formatWindow,
   isCrossMidnight,
@@ -473,10 +474,13 @@ describe("v2 M4：ruleToForm 往返保真（快捷开关不丢 exec/定点语义
 });
 
 describe("v2 M4：动作徽标 + 调度摘要（§4.7 列表行）", () => {
-  it("actionBadge：💧 notify / ⚡ exec / 📋 todo", () => {
-    expect(actionBadge({ kind: "custom", action_type: "notify" })).toBe("💧");
+  it("actionBadge：🔔 notify / ⚡ exec / 📋 todo（§十二 F10：💧→🔔）", () => {
+    expect(actionBadge({ kind: "custom", action_type: "notify" })).toBe("🔔");
     expect(actionBadge({ kind: "custom", action_type: "exec" })).toBe("⚡");
     expect(actionBadge({ kind: "todo", action_type: "notify" })).toBe("📋");
+    // §十二 F10 审查 P3-1：历史行（无 kind 字段）共用 execBadge 助手
+    expect(execBadge("exec")).toBe("⚡");
+    expect(execBadge("notify")).toBe("🔔");
     expect(actionBadgeTitle({ kind: "custom", action_type: "exec" })).toContain("执行命令");
   });
 

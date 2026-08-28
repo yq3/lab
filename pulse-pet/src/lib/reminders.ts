@@ -1,8 +1,9 @@
 /**
  * reminders：M4 提醒的 TS 侧纯函数与 Rust 命令封装（DESIGN §5.4/§5.2，TC-RM 章节）。
  *
- * - 类型 `ReminderRule` / `ReminderStat` 与 Rust `reminder_scheduler.rs` 的 serde
- *   字段一一对应（snake_case，与 M3 TokenRow 同风格）。
+ * - 类型 `ReminderRule` 与 Rust `reminder_scheduler.rs` 的 serde 字段一一对应
+ *   （snake_case，与 M3 TokenRow 同风格；§十二 F14：`ReminderStat` 随历史统计
+ *   区移除清退）。
  * - `sanitizeReminderText`：气泡文案净化（TC-RM-15）——在 M3 `sanitizeBubbleText`
  *   （单行 1-140）之上叠加"不展示原始路径/URL/secret 样式 token"的脱敏（DESIGN
  *   §3.1 净化策略在提醒文案上的应用）；React 纯文本渲染天然无注入执行。
@@ -82,12 +83,6 @@ export interface ReminderInput {
   schedule_at?: string | null;
   /** v2 M4：daily 的星期过滤 JSON 文本。 */
   schedule_weekdays?: string | null;
-}
-
-export interface ReminderStat {
-  kind: string;
-  today: number;
-  total: number;
 }
 
 /** `reminder://trigger` payload（Rust `TriggerPayload`）。 */
@@ -368,10 +363,17 @@ export function formatLogTime(ts: string | null): string {
 
 // ---- v2 M4：动作徽标 + 调度摘要 + opencode 模板（§4.6/§4.7） ----
 
-/** 动作徽标：💧 notify / ⚡ exec（todo 派生行 📋 保持 M2 展示）。 */
+/** exec/notify 徽标（无 kind 上下文场景复用——action_logs 历史行无 kind 字段，
+ *  §十二 F10 审查 P3-1：actionBadge 与 Tasks 历史行共用此助手消重复）。 */
+export function execBadge(actionType: string): string {
+  return actionType === "exec" ? "⚡" : "🔔";
+}
+
+/** 动作徽标：🔔 notify / ⚡ exec（todo 派生行 📋 保持 M2 展示）——
+ * §十二 F10（2026-08-28）：notify 💧 → 🔔（用户裁定，与 ⚡/📋 区分度最佳）。 */
 export function actionBadge(rule: Pick<ReminderRule, "kind" | "action_type">): string {
   if (rule.kind === "todo") return "📋";
-  return rule.action_type === "exec" ? "⚡" : "💧";
+  return execBadge(rule.action_type);
 }
 
 /** 动作徽标 title 说明（悬停提示）。 */
@@ -593,11 +595,8 @@ export async function deleteReminder(id: number): Promise<void> {
   return invoke("reminders_delete", { id });
 }
 
-export async function fetchReminderStats(): Promise<ReminderStat[]> {
-  if (!isTauriRuntime()) throw notInApp();
-  const { invoke } = await import("@tauri-apps/api/core");
-  return invoke<ReminderStat[]>("reminders_stats");
-}
+// §十二 F14（2026-08-28）：fetchReminderStats/ReminderStat 随「历史统计」区
+// 移除一并清退（Rust reminders_stats 命令同步删除；reminder_logs 记账保留）
 
 export async function fetchFireworksGlobal(): Promise<boolean> {
   if (!isTauriRuntime()) throw notInApp();

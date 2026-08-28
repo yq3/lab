@@ -384,23 +384,11 @@ export default function Settings() {
         ))}
       </select>
 
-      {/* 回退提示（TC-SP-05/09/11③）：当前加载与用户选择不一致时说明原因 */}
+      {/* 回退提示（TC-SP-05/09/11③）：当前加载与用户选择不一致时说明原因。
+          §十二 二轮微调（2026-08-28）：「当前渲染」信息行移除（settings.current/
+          fellBack 键清退）——回退可见性由本 notice 横幅 + 下拉 requestedMissing
+          占位项承担 */}
       {current?.notice && <p className="settings-notice">⚠️ {current.notice}</p>}
-      {current && (
-        <p className="settings-current">
-          {t("settings.current", {
-            id: current.currentId,
-            source: sourceLabel(current.currentSource),
-            cols: current.cols,
-            rows: current.rows,
-            fw: current.frameW,
-            fh: current.frameH,
-          })}
-          {current.requested && current.requested !== current.currentId && (
-            <>{t("settings.fellBack", { id: current.requested })}</>
-          )}
-        </p>
-      )}
 
       {/* 损坏 / 非标准素材明细（下拉项旁的回退提示，TC-SP-11③） */}
       {options?.some((o) => !o.ok) && (
@@ -413,19 +401,21 @@ export default function Settings() {
         </ul>
       )}
 
-      {/* §十一（V2-OPEN-ITEMS）：大小三档分段控件（复用主题 theme-seg 形态；
-          切换即时生效 + 重启保留；184/220/280 逻辑像素，内置猫锚定中档） */}
+      {/* §十一（V2-OPEN-ITEMS）：大小三档；§十二 F6（2026-08-28）：分段控件改
+          下拉（照语言/宠物选择形态）；切换即时生效 + 重启保留；184/220/280
+          逻辑像素，内置猫锚定中档 */}
       {sizeError && <p className="settings-error">⚠️ {sizeError}</p>}
-      <div className="theme-seg" role="radiogroup" aria-label={t("settings.size")}>
+      <label className="settings-pet-label" htmlFor="size-select">
+        {t("settings.size")}
+      </label>
+      <select
+        id="size-select"
+        value={petSize}
+        disabled={sizeBusy || !isTauriRuntime()}
+        onChange={(e) => void onSize(e.target.value as PetSize)}
+      >
         {(["small", "medium", "large"] as PetSize[]).map((v) => (
-          <button
-            key={v}
-            role="radio"
-            aria-checked={petSize === v}
-            disabled={sizeBusy || !isTauriRuntime()}
-            className={petSize === v ? "seg active" : "seg"}
-            onClick={() => void onSize(v)}
-          >
+          <option key={v} value={v}>
             {t(
               v === "small"
                 ? "settings.sizeSmall"
@@ -433,40 +423,62 @@ export default function Settings() {
                   ? "settings.sizeMedium"
                   : "settings.sizeLarge",
             )}
-          </button>
+          </option>
         ))}
-      </div>
+      </select>
 
-      <h2>{t("settings.interaction")}</h2>
-      {/* M6 P2 ②：穿透错误独立展示（不再借用全局 error 位，避免连带清 atlas 横幅） */}
+      {/* §十二 F6（2026-08-28）：交互与工具播报合并一区（原两个 h2 区），
+          照功能管理 todo 插件卡片行形态（intg-row + 右侧开关带已启用/已停用） */}
+      <h2>{t("settings.sectionInteraction")}</h2>
       {passThroughError && <p className="settings-error">⚠️ {passThroughError}</p>}
-      <label className="settings-check">
-        <input
-          type="checkbox"
-          checked={passThrough}
-          disabled={passThroughBusy || !isTauriRuntime()}
-          onChange={(e) => void onPassThrough(e.target.checked)}
-        />
-        <span>{t("settings.passThrough")}</span>
-      </label>
+      {toolBroadcastError && <p className="settings-error">⚠️ {toolBroadcastError}</p>}
+      <div className="intg-list">
+        {/* 二轮续（2026-08-28）：粗体名独占一行 + 描述另起一行（原同行横排改两行） */}
+        <div className="intg-row plugin-row">
+          <div className="intg-row-head">
+            <span className="intg-name">{t("settings.passThrough")}</span>
+            <span className="intg-row-actions">
+              <label
+                className="reminder-check compact"
+                title={passThrough ? t("reminders.enabledOn") : t("reminders.enabledOff")}
+              >
+                <input
+                  type="checkbox"
+                  checked={passThrough}
+                  disabled={passThroughBusy || !isTauriRuntime()}
+                  onChange={(e) => void onPassThrough(e.target.checked)}
+                />
+                {passThrough ? t("todo.plugin.enabled") : t("todo.plugin.disabled")}
+              </label>
+            </span>
+          </div>
+          <p className="intg-desc">{t("settings.passThroughDesc")}</p>
+        </div>
+        <div className="intg-row plugin-row">
+          <div className="intg-row-head">
+            <span className="intg-name">{t("settings.toolBroadcast")}</span>
+            <span className="intg-row-actions">
+              <label
+                className="reminder-check compact"
+                title={toolBroadcast ? t("reminders.enabledOn") : t("reminders.enabledOff")}
+              >
+                <input
+                  type="checkbox"
+                  checked={toolBroadcast}
+                  disabled={toolBroadcastBusy || !isTauriRuntime()}
+                  onChange={(e) => void onToolBroadcast(e.target.checked)}
+                />
+                {toolBroadcast ? t("todo.plugin.enabled") : t("todo.plugin.disabled")}
+              </label>
+            </span>
+          </div>
+          <p className="intg-desc">{t("settings.toolBroadcastDesc")}</p>
+        </div>
+      </div>
       <p className="settings-hotkey-hint">
         {t("settings.hotkeys")}
         {import.meta.env.DEV ? t("settings.hotkeys.debug") : ""}
       </p>
-
-      {/* v2 M3（§3.7.2，P2-4）：「宠物与播报」区——工具播报开关（settings-check
-          形态，与穿透同款；不放「功能管理」区——该区语义为插件启停） */}
-      <h2>{t("settings.sectionPet")}</h2>
-      {toolBroadcastError && <p className="settings-error">⚠️ {toolBroadcastError}</p>}
-      <label className="settings-check">
-        <input
-          type="checkbox"
-          checked={toolBroadcast}
-          disabled={toolBroadcastBusy || !isTauriRuntime()}
-          onChange={(e) => void onToolBroadcast(e.target.checked)}
-        />
-        <span>{t("settings.toolBroadcast")}</span>
-      </label>
 
       {/* M8：语言切换（v1 双语 zh/en） */}
       <h2>{t("settings.language")}</h2>
@@ -483,18 +495,24 @@ export default function Settings() {
         <option value="en">{t("settings.languageEn")}</option>
       </select>
 
-      {/* v2 M2：外观（主题三档分段控件；panel 窗专属，TC-UI-01） */}
+      {/* v2 M2：外观（主题三档；§十二 F6：改下拉；二轮微调 2026-08-28：删
+          「界面主题」label，themeHint 小字上移至 label 位）；panel 窗专属，TC-UI-01 */}
       <h2>{t("settings.theme")}</h2>
       {themeError && <p className="settings-error">⚠️ {themeError}</p>}
-      <div className="theme-seg" role="radiogroup" aria-label={t("settings.theme")}>
+      {/* 二轮微调：hint 上移替代 label 位；审查 P3-8：转 <label> 关联 select（a11y）。
+          三轮回归修复：label 样式类改 settings-pet-label（与其他下拉标签同族
+          ——ink-soft 12px；原误挂 settings-current 脚注级 ink-faint 导致同字号
+          不同灰）；settings-current 回归纯脚注（热键/管理提示/备份提示） */}
+      <label className="settings-pet-label" htmlFor="theme-select">
+        {t("settings.themeHint")}
+      </label>
+      <select
+        id="theme-select"
+        value={themePref}
+        onChange={(e) => void onTheme(e.target.value as ThemePreference)}
+      >
         {(["auto", "light", "dark"] as ThemePreference[]).map((v) => (
-          <button
-            key={v}
-            role="radio"
-            aria-checked={themePref === v}
-            className={themePref === v ? "seg active" : "seg"}
-            onClick={() => void onTheme(v)}
-          >
+          <option key={v} value={v}>
             {t(
               v === "auto"
                 ? "settings.themeAuto"
@@ -502,10 +520,9 @@ export default function Settings() {
                   ? "settings.themeLight"
                   : "settings.themeDark",
             )}
-          </button>
+          </option>
         ))}
-      </div>
-      <p className="settings-current">{t("settings.themeHint")}</p>
+      </select>
 
       {/* v2 M2：功能管理（插件启停 = feature flag，TC-UI-07）；核心三 tab 不在列 */}
       <h2>{t("plugins.manage")}</h2>
@@ -537,6 +554,9 @@ export default function Settings() {
 
       {/* v2 M1：接入管理（V2-DESIGN §1.7，TC-INT-09） */}
       <h2>{t("integrations.title")}</h2>
+      {/* §十二 F7：备份提示区级一处；二轮续：文案点明同目录 + 移至标题下（照
+          功能管理 hint 位形态，卡片列表上方） */}
+      <p className="settings-current">{t("integrations.backupNote")}</p>
       {intgErrors.__load && <p className="settings-error">⚠️ {intgErrors.__load}</p>}
       <div className="intg-list">
         {(intg ?? []).map((s) => {
@@ -581,7 +601,6 @@ export default function Settings() {
                 <p className="intg-row-notice">✅ {actionNotice}</p>
               )}
               {intgErrors[s.id] && <p className="intg-row-error">⚠️ {intgErrors[s.id]}</p>}
-              <p className="intg-note">{t("integrations.backupNote")}</p>
             </div>
           );
         })}

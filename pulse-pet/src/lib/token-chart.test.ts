@@ -223,3 +223,44 @@ describe("TOOLTIP_ROW_ORDER：tooltip 行序（用户 2026-08-25 裁定修订，
     expect([...TOOLTIP_ROW_ORDER].reverse()).toEqual(["output", "input", "cacheRead"]);
   });
 });
+
+describe("§十二 F2（2026-08-28）：柱宽上限 + ≤7 天窗口补零柱", () => {
+  const all = new Set<ModelKey>(["glm"]);
+
+  it("F2① 柱宽上限：单柱 barW ≤ 56 且柱中心 = 画布中心（原 slot×0.6 会宽达 108）", () => {
+    const bars = computeStackedBars([gRow("2026-08-28", "glm", { i: 10 })], all, OPTS);
+    expect(bars).toHaveLength(1);
+    expect(bars[0].w).toBe(56);
+    // x = pad + (slot-barW)/2 → 中心 = (200)/2 = 100
+    expect(bars[0].x + bars[0].w / 2).toBe(OPTS.width / 2);
+  });
+
+  it("F2③ expectedLabels 7 天窗口：缺日补零柱、恒 7 柱、顺序随窗口", () => {
+    const rows = [gRow("2026-08-26", "glm", { i: 10 }), gRow("2026-08-28", "glm", { i: 5 })];
+    const week = ["2026-08-22", "2026-08-23", "2026-08-24", "2026-08-25", "2026-08-26", "2026-08-27", "2026-08-28"];
+    const bars = computeStackedBars(rows, all, { ...OPTS, expectedLabels: week });
+    expect(bars.map((b) => b.label)).toEqual(week);
+    // 零柱：total 0、三段高 0、贴基线
+    const zero = bars[0];
+    expect(zero.total).toBe(0);
+    expect(zero.segs.every((s) => s.h === 0)).toBe(true);
+    // 有数据日照常
+    expect(bars.find((b) => b.label === "2026-08-26")?.total).toBe(10);
+  });
+
+  it("F2③ expectedLabels >7 枚：忽略（30d/custom 维持「有数据才出柱」）", () => {
+    const rows = [gRow("d02", "glm", { i: 1 }), gRow("d09", "glm", { i: 2 })];
+    const many = Array.from({ length: 30 }, (_, i) => `d${String(i + 1).padStart(2, "0")}`);
+    const bars = computeStackedBars(rows, all, { ...OPTS, expectedLabels: many });
+    expect(bars).toHaveLength(2);
+    expect(bars.map((b) => b.label)).toEqual(["d02", "d09"]);
+  });
+
+  it("F2③ expectedLabels 空数组：忽略（等价不传）", () => {
+    const bars = computeStackedBars([gRow("d1", "glm", { i: 1 })], all, {
+      ...OPTS,
+      expectedLabels: [],
+    });
+    expect(bars).toHaveLength(1);
+  });
+});

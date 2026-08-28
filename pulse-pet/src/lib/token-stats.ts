@@ -269,6 +269,25 @@ export function localDateStr(d = new Date()): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
+/**
+ * §十二 F2（2026-08-28）：查询窗口内的本地日标签全列表（含两端天）——
+ * day 维度 ≤7 天窗口「补零柱」的数据源（token-chart computeStackedBars 的
+ * expectedLabels）。按日期分量步进（不按 86400e3 毫秒加法，DST 安全）。
+ */
+export function dayLabelsBetween(fromMs: number, toMs: number): string[] {
+  const out: string[] = [];
+  const end = new Date(toMs);
+  end.setHours(0, 0, 0, 0);
+  const endMs = end.getTime();
+  const cur = new Date(fromMs);
+  cur.setHours(0, 0, 0, 0);
+  while (cur.getTime() <= endMs && out.length < 400) {
+    out.push(localDateStr(cur));
+    cur.setDate(cur.getDate() + 1);
+  }
+  return out;
+}
+
 // ---- KPI 汇总 ----
 
 export interface KpiTotals {

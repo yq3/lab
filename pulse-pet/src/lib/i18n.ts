@@ -74,8 +74,7 @@ const zh: Dict = {
   "token.agent.claudeCode": "Claude Code",
   // v2 M5 R2（TC-M5-04-1）：agent tab「全部」项（恒显，默认选中）
   "token.agent.all": "全部",
-  // v2 M5：费用口径标注（CC 恒 0——第三方 key 下单价表不可信，S4 裁定）
-  "token.costOpencodeOnly": "费用仅统计 opencode（Claude Code 无可靠费用数据）",
+  // §十二 F3（2026-08-28）：token.costOpencodeOnly 费用口径标注键清退（用户裁定）
   // v2 M5（TC-M5-07）：例程会话 ⚡ 徽标 title 提示（零 schema 改动）
   "token.taskBadge": "定时任务例程",
   // v2 M5（C1/N-4）：degraded 细横幅（仅 panel；opencode 源不可用 × CC 有数据）
@@ -112,8 +111,8 @@ const zh: Dict = {
   "reminders.enabled": "启用",
   "reminders.enabledOn": "启用中",
   "reminders.enabledOff": "已停用",
-  "reminders.fireworks": "烟花",
-  "reminders.fireworksOverride": "单条烟花覆盖（TC-RM-11）",
+  // §十二 F12（2026-08-28）：reminders.fireworks/fireworksOverride 随 todo
+  // 派生行烟花勾选项移除清退（烟花随全局总开关，OR 语义不变）
   "reminders.test": "试一试",
   "reminders.edit": "编辑",
   "reminders.delete": "删除",
@@ -121,8 +120,10 @@ const zh: Dict = {
   "reminders.deleteHint": "再次点击确认删除",
   "reminders.form.newTitle": "新建例程",
   "reminders.form.editTitle": "编辑例程 #{n}",
+  // §十二 F12（2026-08-28）：todoHint 修正过时文案——todo 编辑态实际无任何
+  // 可调字段（锁定块包住全部控件），提示只指路 Todo 页
   "reminders.form.todoHint":
-    "📋 Todo 派生提醒（单次，由 Todo 插件管理类型/间隔/时刻——在 Todo 页改任务的截止或提前提醒即可）。此处仅可调整文案、启用与烟花；改动会随任务下次保存被任务标题覆盖。",
+    "📋 Todo 派生提醒（单次，由 Todo 插件管理）——在 Todo 页调整任务的截止时间或提前提醒即可；此处无可调整项。",
   "reminders.form.type": "类型",
   "reminders.form.label": "文案（气泡显示，纯文本 1-140 字符）",
   "reminders.form.labelPlaceholder": "如：该喝水啦 💧",
@@ -135,10 +136,7 @@ const zh: Dict = {
   "reminders.form.save": "保存修改",
   "reminders.form.create": "新建",
   "reminders.form.cancel": "取消编辑",
-  "reminders.stats.title": "历史统计（reminder_logs）",
-  "reminders.stats.empty": "暂无提醒记录。",
-  "reminders.stats.today": "今日 {n} 次",
-  "reminders.stats.total": "累计 {n} 次",
+  // §十二 F14（2026-08-28）：reminders.stats.*（4 键）随「历史统计」区移除清退
   "reminders.toast.fired": "已触发「{label}」",
   "reminders.toast.dedup": "3 分钟内已触发过，去重拦截（TC-RM-05）",
   "reminders.toast.paused": "所有提醒已暂停（托盘「暂停所有提醒」），恢复后再试",
@@ -301,8 +299,9 @@ const zh: Dict = {
   "settings.languageFail": "切换语言失败：{msg}",
   "settings.pet": "宠物",
   "settings.petLabel": "选择宠物（切换立即生效；重启保留）",
-  // §十一（V2-OPEN-ITEMS）：大小三档分段控件
-  "settings.size": "大小",
+  // §十一（V2-OPEN-ITEMS）：大小三档分段控件；§十二 二轮微调（2026-08-28）：
+  // label「大小」→「宠物大小」
+  "settings.size": "宠物大小",
   "settings.sizeSmall": "小",
   "settings.sizeMedium": "中",
   "settings.sizeLarge": "大",
@@ -311,15 +310,18 @@ const zh: Dict = {
   "settings.source.builtin": "内置",
   "settings.missingOption": "{id} — 素材损坏或不存在，已回退",
   "settings.brokenOption": " — 素材损坏/非标准，不可选",
-  "settings.current": "当前渲染：{id}（来源 {source}，{cols}×{rows} 网格，单帧 {fw}×{fh}）",
-  "settings.fellBack": "，已从「{id}」回退",
-  "settings.interaction": "交互",
-  "settings.passThrough":
-    "点击穿透（纯展示模式）：开启后鼠标事件透出——宠物不可拖拽、右键菜单不可达，动画照常播放；可经全局热键 ⌘/Ctrl+Shift+Alt+P 或托盘菜单「切换交互模式」切回。",
-  // v2 M3（§3.7.2，P2-4）：「宠物与播报」区（工具播报开关；不放「功能管理」区）
-  "settings.sectionPet": "宠物与播报",
-  "settings.toolBroadcast":
-    "工具播报：agent 使用工具时宠物气泡播报（如「正在编辑 X.md」）；关闭立即静默，插件照常上报。",
+  // §十二 二轮微调（2026-08-28）：「当前渲染」行移除，current/fellBack 键清退
+  //（回退可见性仍由 settings.notice 横幅与下拉 requestedMissing 占位承担）
+  // §十二 F6（2026-08-28）：交互与工具播报合并一区（卡片行形态）——
+  // 原「交互」「宠物与播报」两个 h2 区键（settings.interaction/sectionPet）清退；
+  // 二轮微调：区名「交互与播报」→「交互管理」，卡片文案拆粗体名 + 常规描述两键
+  "settings.sectionInteraction": "交互管理",
+  "settings.passThrough": "点击穿透（纯展示模式）",
+  "settings.passThroughDesc":
+    "开启后鼠标事件透出——宠物不可拖拽、右键菜单不可达，动画照常播放；可经全局热键 ⌘/Ctrl+Shift+Alt+P 或托盘菜单「切换交互模式」切回。",
+  "settings.toolBroadcast": "工具播报",
+  "settings.toolBroadcastDesc":
+    "agent 使用工具时宠物气泡播报（如「正在编辑 X.md」）；关闭立即静默，插件照常上报。",
   "settings.toolBroadcastFail": "工具播报开关保存失败：{msg}",
   "settings.hotkeys": "全局热键：⌘/Ctrl+Shift+P 唤起/隐藏面板；⌘/Ctrl+Shift+Alt+P 切换穿透；",
   "settings.hotkeys.debug": " ⌘/Ctrl+Shift+Alt+F 调试烟花（仅开发构建）。",
@@ -328,7 +330,8 @@ const zh: Dict = {
   "settings.languageZh": "中文",
   "settings.languageEn": "English",
 
-  // ---- v2 M2 外观（主题三档，V2-DESIGN §2.3）----
+  // ---- v2 M2 外观（主题三档，V2-DESIGN §2.3；§十二 F6：改下拉；二轮微调：
+  //     themeLabel 键清退——hint 上移替代 label 位）----
   "settings.theme": "外观",
   "settings.themeHint": "面板主题（跟随系统或固定浅色/深色；重启保留；气泡与右键菜单不随主题变）",
   "settings.themeAuto": "跟随系统",
@@ -350,9 +353,9 @@ const zh: Dict = {
   "integrations.nodeReady": "node 已就绪",
   "integrations.lastEvent": "事件正常",
   "integrations.noEvent": "最近无事件",
-  "integrations.backupNote": "修改前自动备份",
-  "integrations.opencodeDesc": "opencode 插件",
-  "integrations.claudeDesc": "Claude Code hooks",
+  "integrations.backupNote": "修改前自动备份至同目录",
+  "integrations.opencodeDesc": "opencode",
+  "integrations.claudeDesc": "Claude Code",
   "integrations.fail": "操作失败：{msg}",
   "integrations.actionDone": "操作完成：",
 
@@ -430,8 +433,7 @@ const en: Dict = {
   "token.agent.opencode": "opencode",
   "token.agent.claudeCode": "Claude Code",
   "token.agent.all": "All",
-  // v2 M5：费用口径标注（CC 恒 0——第三方 key 下单价表不可信，S4 裁定）
-  "token.costOpencodeOnly": "Cost covers opencode only (no reliable Claude Code cost)",
+  // §十二 F3（2026-08-28）：token.costOpencodeOnly 费用口径标注键清退（用户裁定）
   // v2 M5（TC-M5-07）：例程会话 ⚡ 徽标 title 提示（零 schema 改动）
   "token.taskBadge": "Scheduled routine",
   // v2 M5（C1/N-4）：degraded 细横幅（仅 panel；opencode 源不可用 × CC 有数据）
@@ -468,8 +470,8 @@ const en: Dict = {
   "reminders.enabled": "Enabled",
   "reminders.enabledOn": "Enabled",
   "reminders.enabledOff": "Disabled",
-  "reminders.fireworks": "Fireworks",
-  "reminders.fireworksOverride": "Per-rule fireworks override (TC-RM-11)",
+  // §十二 F12（2026-08-28）：fireworks/fireworksOverride keys retired with the
+  // todo-row fireworks checkbox (global toggle covers it; OR semantics unchanged)
   "reminders.test": "Test",
   "reminders.edit": "Edit",
   "reminders.delete": "Delete",
@@ -477,8 +479,10 @@ const en: Dict = {
   "reminders.deleteHint": "Click again to confirm delete",
   "reminders.form.newTitle": "New routine",
   "reminders.form.editTitle": "Edit routine #{n}",
+  // §十二 F12（2026-08-28）：todoHint corrected — todo edit state has no
+  // adjustable fields (locked); the hint just points to the Todo page
   "reminders.form.todoHint":
-    "📋 Derived todo reminder (one-shot; type/interval/time are managed by the Todo plugin — change the task's due or lead time on the Todo page). Only text, enabled and fireworks can be adjusted here; edits will be overwritten by the task title on its next save.",
+    "📋 Derived todo reminder (one-shot, managed by the Todo plugin) — adjust the task's due time or lead time on the Todo page; nothing to adjust here.",
   "reminders.form.type": "Type",
   "reminders.form.label": "Text (shown in bubble, plain text, 1-140 chars)",
   "reminders.form.labelPlaceholder": "e.g. Drink some water 💧",
@@ -491,10 +495,7 @@ const en: Dict = {
   "reminders.form.save": "Save changes",
   "reminders.form.create": "Create",
   "reminders.form.cancel": "Cancel editing",
-  "reminders.stats.title": "History (reminder_logs)",
-  "reminders.stats.empty": "No reminder records yet.",
-  "reminders.stats.today": "Today: {n}",
-  "reminders.stats.total": "Total: {n}",
+  // §十二 F14（2026-08-28）：reminders.stats.* keys retired with the stats section
   "reminders.toast.fired": "Fired “{label}”",
   "reminders.toast.dedup": "Already fired within 3 minutes, deduplicated (TC-RM-05)",
   "reminders.toast.paused": "All reminders are paused (tray “Pause all reminders”) — resume first",
@@ -655,8 +656,8 @@ const en: Dict = {
   "settings.languageFail": "Failed to switch language: {msg}",
   "settings.pet": "Pet",
   "settings.petLabel": "Select pet (applies immediately; persisted across restarts)",
-  // §十一（V2-OPEN-ITEMS）：大小三档分段控件
-  "settings.size": "Size",
+  // §十一（V2-OPEN-ITEMS）：size tiers；§十二 二轮微调：label Size → Pet size
+  "settings.size": "Pet size",
   "settings.sizeSmall": "Small",
   "settings.sizeMedium": "Medium",
   "settings.sizeLarge": "Large",
@@ -665,14 +666,17 @@ const en: Dict = {
   "settings.source.builtin": "Built-in",
   "settings.missingOption": "{id} — broken or missing, fell back",
   "settings.brokenOption": " — broken/non-standard, not selectable",
-  "settings.current": "Now rendering: {id} (source {source}, {cols}×{rows} grid, frame {fw}×{fh})",
-  "settings.fellBack": ", fell back from “{id}”",
-  "settings.interaction": "Interaction",
-  "settings.passThrough":
-    "Click-through (display-only mode): when on, mouse events pass through — the pet cannot be dragged and the right-click menu is unavailable, while animations keep playing; toggle back via global hotkey ⌘/Ctrl+Shift+Alt+P or the tray menu “Toggle interaction mode”.",
-  "settings.sectionPet": "Pet & Broadcast",
-  "settings.toolBroadcast":
-    "Tool broadcast: the pet bubble reports tool usage (e.g. “Editing X.md”); turning it off silences immediately while the plugin keeps reporting.",
+  // §十二 二轮微调（2026-08-28）："Now rendering" line removed; keys retired
+  // (fallback visibility stays via the notice banner + missing-option placeholder)
+  // §十二 F6（2026-08-28）：merged interaction section (card rows); round 2:
+  // section renamed, card text split into bold name + regular description keys
+  "settings.sectionInteraction": "Interaction",
+  "settings.passThrough": "Pass-through (display-only mode)",
+  "settings.passThroughDesc":
+    "When on, mouse events pass through — the pet cannot be dragged and the right-click menu is unavailable, while animations keep playing; toggle back via global hotkey ⌘/Ctrl+Shift+Alt+P or the tray menu “Toggle interaction mode”.",
+  "settings.toolBroadcast": "Tool broadcast",
+  "settings.toolBroadcastDesc":
+    "The pet bubble reports tool usage (e.g. “Editing X.md”); turning it off silences immediately while the plugin keeps reporting.",
   "settings.toolBroadcastFail": "Failed to save tool broadcast switch: {msg}",
   "settings.hotkeys": "Global hotkeys: ⌘/Ctrl+Shift+P show/hide panel; ⌘/Ctrl+Shift+Alt+P toggle pass-through;",
   "settings.hotkeys.debug": " ⌘/Ctrl+Shift+Alt+F debug fireworks (dev builds only).",
@@ -681,7 +685,8 @@ const en: Dict = {
   "settings.languageZh": "中文",
   "settings.languageEn": "English",
 
-  // ---- v2 M2 appearance (theme, V2-DESIGN §2.3) ----
+  // ---- v2 M2 appearance (theme; §十二 F6 dropdown; round 2: themeLabel key
+  //      retired — hint moved above the select in the label position) ----
   "settings.theme": "Appearance",
   "settings.themeHint": "Panel theme (follow system or fixed light/dark; persisted; bubble and right-click menu keep their pet-world look)",
   "settings.themeAuto": "Follow system",
@@ -703,9 +708,9 @@ const en: Dict = {
   "integrations.nodeReady": "node ready",
   "integrations.lastEvent": "Receiving events",
   "integrations.noEvent": "No recent events",
-  "integrations.backupNote": "Changes are backed up automatically",
-  "integrations.opencodeDesc": "opencode plugin",
-  "integrations.claudeDesc": "Claude Code hooks",
+  "integrations.backupNote": "Changes are backed up automatically to the same directory",
+  "integrations.opencodeDesc": "opencode",
+  "integrations.claudeDesc": "Claude Code",
   "integrations.fail": "Operation failed: {msg}",
   "integrations.actionDone": "Done: ",
 

@@ -5,7 +5,7 @@
 > 性质：两项 **Windows 特有缺陷**，根因已定位、修复方案已裁定（R1-R5，见 [§三](#三修复任务清单r1r5统一实施)）。
 > **状态（2026-08-27 闭环）**：R1-R5 **已修复并随 `pulse-pet-v0.2.1` 发布**——实施 commit `6f9e0be`（R1-R4）/ `9e609d6`（R5）/ `acc12b3`（本文件）/ `f2cf13e`（版本 bump 四件套），tag `pulse-pet-v0.2.1`（CI run 33071206433 双矩阵 success，安装包挂 draft Release）。测试基线全绿（`cargo test` 320+3 钉子 / `npm test` 409 / `tsc --noEmit`），committer 评审 APPROVED（P0/P1=0，三条 P3 加固已落地）。**Windows release 实机三场景验证通过（2026-08-27，v0.2.1，§四）**，#19 / #20 可闭环。
 > 共同背景：与 v1 issue #9 同源——Windows 上 WebView2 环境创建异步、主线程泵消息期间页面已加载执行（GUI 子系统 + 控制台子进程交互）的时序盲区；v1 里程碑"Windows 实机验证后移"的欠账在 v2 实机使用中集中显性化。macOS 开发机均无法复现。
-> 构成说明（2026-08-27 补充）：§一~§四为 issue #19/#20 专项记录（**已闭环**）；§五起为 **v2 六里程碑（M1~M6）工作流检查点遗留事项汇总**（supervised-coding 2026-08-27 归档，来源 `.opencode/workflows/task-pulsepet-v2-m1~m6.md`），清偿后回写勾选并注来源任务 ID 与日期；**§十一为 2026-08-28 新增**：宠物大小三档 + 视觉归一化特性（设计 + 实施同日完成，含 en 右键菜单裁剪与 atlas 短缓冲两处存量缺陷清偿，见 §11.5 与 `docs/v2/pet-size.md`）。
+> 构成说明（2026-08-27 补充）：§一~§四为 issue #19/#20 专项记录（**已闭环**）；§五起为 **v2 六里程碑（M1~M6）工作流检查点遗留事项汇总**（supervised-coding 2026-08-27 归档，来源 `.opencode/workflows/task-pulsepet-v2-m1~m6.md`），清偿后回写勾选并注来源任务 ID 与日期；**§十一为 2026-08-28 新增**：宠物大小三档 + 视觉归一化特性（设计 + 实施同日完成，含 en 右键菜单裁剪与 atlas 短缓冲两处存量缺陷清偿，见 §11.5 与 `docs/v2/pet-size.md`）；**§十二为 2026-08-28 二次新增**：v2 收尾用户反馈批次 F1~F16（气泡汇总 / Token 页柱图与文案 / 例程页全宽·notify 徽标·todo 类别列·todo 烟花勾选项·日期时间控件规格·历史统计区移除 / 设置页控件形态·接入卡缩高·命名统一·宠物下拉字样·二轮微调 / Windows 托盘与任务栏图标资产；**2026-08-28 用户批准后同日全部实施**，F16 为实施后目验二轮微调，见 §12.4）；**§十三为 2026-08-28 三次新增**：新增第三 agent 接入成本审计（预研备查——约 12 处老代码必改 + agent registry 收敛机会，是否立项待决策）。
 
 ---
 
@@ -120,7 +120,7 @@ R5 配套钉子（并入 R4 实施）：`order_nails` 新增断言 conf 里 pet 
 |---|---|---|---|
 | 1 | TC-M5-08 | 退出 opencode 与 CC 后临时改名 `~/.claude/projects` → 打开 Token 页 | 安静回退 opencode-only，无错误横幅无 degraded 字段 |
 | 2 | TC-M5-09 | 退出 opencode 后临时改名 opencode.db（CC 有数据）→ Token 页 → 恢复 | CC-only 数据 + 「opencode 源不可用」细横幅（仅 panel）；恢复后消失；双缺走既有错误路径 |
-| 3 | TC-M5-05 | 真实 Claude Code 干活一个会话至 Stop | `[cc] 本期用了 Xk input / Yk output · 今日 T` 汇报气泡（无 cost 段） |
+| 3 | TC-M5-05 | 真实 Claude Code 干活一个会话至 Stop | `[cc] 本次会话消耗 token Xk · 今日 T` 汇报气泡（§十二 F1 改单总量口径，2026-08-28） |
 | 4 | TC-M5-06 | 真实 CC 会话中触发编辑/命令工具 | `[cc] 正在编辑 X` / `[cc] 正在跑 X` 工具级气泡 |
 
 ### 5.3 v2-m6 实机目验 2 项（并入用户目验批次）
@@ -317,9 +317,120 @@ Rust：
 
 ---
 
+## 十二、v2 收尾用户反馈批次（2026-08-28，F1~F16；**全部已实施**）
+
+> 来源：用户日常使用反馈（2026-08-28，15 项——会话气泡汇总 1 + Token 页 3 + 面板布局 1 + 设置页 4：控件形态 / 接入卡缩高 / 命名统一 / 宠物下拉字样 + 例程页 5：notify 徽标 / todo 类别列 / todo 烟花勾选项 / 日期时间控件规格 / 历史统计区移除 + Windows 平台 1：托盘/任务栏图标猫太小），根因均已源码定位，方案已与用户对齐（含多项裁定，见各行）。F16 为同日实施后目验的二轮微调（5 点，见行内）。
+> **状态（2026-08-28 实施）**：用户批准后同日全部实施（F4 先行、F1~F3/F5~F15 随后），逐项落点见 §12.4；基线 `cargo test` 346 passed+3 ignored / `npm test` 439 / `npx tsc --noEmit` 0 错 / `npm run build` 通过。用户目验项见 §12.3 第三条（日常使用顺带）；F15 任务栏 exe 图标需 Windows release 实机。
+
+### 12.1 清单
+
+| # | 事项 | 根因（源码级） | 修复方案（已裁定） | 改动面 |
+|---|---|---|---|---|
+| F1 ✅ | 会话结束气泡显示 input/output 明细，只要一个汇总总量 | Rust `i18n.rs:110` `token_report`（zh「本期用了 X input / Y output / $cost」，opencode 路径）+ `:129` `cc_token_report`（CC 路径无 cost 段）；目标口径 = 面板 KPI `sumRows`（`token-stats.ts:284`）：**total = in + out + cache_read，reasoning 不计** | 两模板改单总量参数（zh「本次会话消耗 token {total}」措辞基准，en 对应改写）；**cost 段一并去掉**（2026-08-28 裁定）；「· 今日 T」追加段保留（口径相同，`token_report_today` 不动） | `i18n.rs` 两函数 + `token_stats.rs:603` `format_session_report` / `:921` CC 调用处 + 测试断言 ~15 处（`token_stats.rs:1378/1435/1692/1888`、`i18n.rs:409-461`、`lib.rs:583-715`）；文档联动：V2-DESIGN §3.2/§5.4、V2-TEST-CASES TC-M3-09-1 / TC-M5-05、本文件 §5.2-3 预期文案（TC-TK-10 属 v1 线留档） |
+| F2 ✅ | 柱图三问：今日单柱过宽 / 日期标签不与柱中心对齐 / 近 7 天零值日缺柱 | ① `token-chart.ts:94` barW = slot×0.6，n=1 时 ≈362px；② `TokenStats.tsx:583-598` 仅渲染首尾标签且首标签左对齐 x=PAD（单柱时柱居中、标签在左缘）；③ `computeStackedBars` 无查询窗口概念、只聚合有数据的日 → 零值日无柱 | ① barW 加上限 cap（~56px，终值实施目测定）；② n≤7 改 per-bar 居中标签（textAnchor=middle、x=柱中心），n>7 维持首尾两枚；③ `StackedBarOptions` 增查询窗口（`resolveQueryRange` 的 fromMs/toMs 已有），**仅 day 维度 ≤7 天窗口逐日补零柱**（今日=1 柱、7d 恒 7 柱；周维度与 >7 天跨度不补——2026-08-28 裁定） | `token-chart.ts` + `TokenStats.tsx:227/:583` + `token-chart.test.ts` 新钉子（补零 / 柱宽上限 / 标签中心 x）；`bars.length===0` 空态分支对 day+≤7d 不再可达（仅 week / 30d / custom） |
+| F3 ✅ | 「费用仅统计 opencode（Claude Code 无可靠费用数据）」标注语去掉 | `TokenStats.tsx:344-346` 消费点 + i18n 键 `token.costOpencodeOnly`（`i18n.ts:78` zh / `:434` en）+ `global.css:761` `.token-kpi-note` | 四处连删；`i18n.test.ts:134-160` 存在性断言改**清退断言**（仿 `token.kpi.totalSub` 先例） | 4 文件 |
+| F4 | 「Token 时序」标题 12px 比正文 13px 还小；各 tab 区块标题字号不一（设置页 h2 13px、其余 tab h3 12px） | `global.css:810-816` `.token-section h3 { font-size:12px }`（Token/例程/待办页所有 section 标题）+ `:483-489` `.panel-settings h2 { font-size:13px }`（设置页） | 四 tab 区块标题统一 **14px**（2026-08-28 裁定并扩围至设置页 h2；层级已核验：h1 17 > 区块标题 14 > 正文 13） | ✅ **已实施（2026-08-28）**：CSS 两处（h3 12→14px、设置页 h2 13→14px）；基线 npm test 433 / tsc 0 错 |
+| F5 ✅ | 面板全屏放大后例程页内容钉在 860px 偏左、不随窗口横向扩展 | `global.css:1103-1105` `.reminders { max-width:860px }`（唯一被钉宽的 tab，其余 tab 均全宽自适应） | 删该规则，与 Token/设置页一致全宽 | CSS 一处 |
+| F6 ✅ | 设置页控件形态统一：大小/主题三档改下拉、交互/工具播报改卡片行开关 | 大小（`Settings.tsx:416-438`）与主题（`:486-508`）用 `theme-seg` 分段控件，与语言/宠物选择的下拉形态不一致；交互（`:440-455`）与工具播报（`:457-469`）用 `settings-check` 裸复选框，与功能管理 todo 插件卡片行形态不一致，且分属两个 h2 区 | ① 大小/主题 → 照语言形态：`settings-pet-label` label + 原生 `select`（复用 `.panel-settings select` 既有样式）；option 文案复用现有键（sizeSmall/Medium/Large、themeAuto/Light/Dark）；busy 禁用 / 失败横幅 / 乐观回滚语义全保留；大小下拉留在「宠物」区内，主题 hint 小字保留。② 交互/工具播报 → 照 todo 插件开关卡片行（`intg-list` + `intg-row`，右侧 `reminder-check compact` 复选框带「已启用/已停用」）；**两行合并为一个 h2 区**（2026-08-28 裁定，区名实施时定，如「交互与播报」）；穿透热键提示小字留在卡片行下方 | `Settings.tsx` + `global.css`（`.theme-seg` 成死代码一并清退：`:430` dark 变体 + `:450-479`）+ i18n 新区名键（zh/en 成对）；状态文案复用 `todo.plugin.enabled/disabled` 还是新增 `settings.state*` 实施时定；**无 Rust 改动** |
+| F7 ✅ | 设置页-接入管理卡片偏高，稍微缩小 | `.intg-row` padding 12px×2（`global.css:592`）+ 每卡固定 4 行（head 行按钮 28px 撑底 + path + message + note）≈ 114px/卡；`.intg-note`「修改前自动备份」（`:668`，i18n `integrations.backupNote`）两卡重复同样文案 | ① padding 12→8px、`.intg-path` margin 6→4、notice/error 行距微收；② **备份提示去重**（2026-08-28 裁定）：删每卡 `.intg-note` 行，提升为接入管理区底部一处提示——每卡共省 ~33px | `Settings.tsx`（删 `:584` 每卡 note + 区底加一处）+ `global.css` 微调；i18n 键复用不新增；**无 Rust 改动**；联动：`.intg-row` 共用类——功能管理插件行与 F6 卡片行同向变紧凑（方向一致，无冲突） |
+| F8 ✅ | 接入管理两卡命名不一（「opencode 插件」vs「Claude Code hooks」） | i18n `integrations.opencodeDesc`（`i18n.ts:354` zh「opencode 插件」/ `:707` en "opencode plugin"）与 `integrations.claudeDesc`（`:355` / `:708`「Claude Code hooks」）术语混用；且「插件」一词已被功能管理区（PulsePet 内置插件）占用，跨区撞名 | **按宿主名**（2026-08-28 裁定）：两卡名只写「opencode」/「Claude Code」，zh/en 同值（产品名不翻译，符合既有 i18n 约定）；Rust doctor 文案（`intg_*` 模板）核对无「插件/hooks」术语，不受影响；README/设计文档术语不动（仅 UI 文案） | `i18n.ts` 两键 zh/en 共 4 处值改写；无组件、无 Rust 改动 |
+| F9 ✅ | 宠物下拉框去掉「内置小猫」「内置小狗」字样 | 字样烧在内置素材元数据：`src-tauri/assets/blinking-kitty/pet.json` `displayName: "blinking-kitty（内置小猫）"`、`wagging-doggy/pet.json` 同款；下拉 option = `displayName + （来源）`（`Settings.tsx:381`）→ 现显示「blinking-kitty（内置小猫）（内置）」双重标注 | 两份 pet.json 的 `displayName` 去掉「（内置小猫）/（内置小狗）」后缀 → 下拉显示「blinking-kitty（内置）」「wagging-doggy（内置）」，来源标注（内置）保留（分组信息不丢）；`description` 字段不动（不在下拉展示）；codex/petdex 素材 displayName 来自各自 pet.json，不受影响 | 仅两份 assets 数据文件（`include_bytes!` 编译期内嵌，改后需重编译生效）；测试核验：cargo 侧 displayName 断言均为 `contains(id)`（`atlas.rs:1243/1255/1418/1421`）不受影响、无需改测试；前端无相关断言 |
+| F10 ✅ | notify 型例程动作徽标 💧 → 🔔 | `reminders.ts:374` `actionBadge`（notify → 💧 / exec → ⚡ / todo → 📋）驱动例程列表行首列与执行历史筛选下拉（`Tasks.tsx:853`）；`Tasks.tsx:903` 历史行另有同款硬编码——notify 型（新建例程默认）全显水滴，与「提醒」语义不贴 | notify 分支 💧 → **🔔**（2026-08-28 裁定，与 ⚡/📋 区分度最佳）；`Tasks.tsx:903` 硬编码统一改走 `actionBadge`（消重复）；**类别徽标 `kindEmoji` 的 hydration=💧 保留**（「💧 喝水」是类别语义，与动作徽标独立）；文案里的 💧（「该喝水啦 💧」模板/placeholder）不动 | `reminders.ts` 一处 + `Tasks.tsx:903` + `reminders.test.ts:476` 钉子断言改 🔔 + 注释口径三处（`reminders.ts:371`/`Tasks.tsx:41`/`global.css:1393`）+ 文档两处（V2-DESIGN §4.7、V2-TEST-CASES 的「💧 notify」字样）同步；无 Rust 改动 |
+| F11 ✅ | todo 派生行在例程页也显示类别「待办」 | `Tasks.tsx:467-469` 条件排除：`{r.kind !== "todo" && (<span className="reminder-kind">…)}`——todo 派生行无类别列（其余行显示 💧 喝水 / ☕ 休息 / ⭐ 自定义） | 删除该条件，todo 行统一渲染类别列「📋 待办」，与其他行格式一致；`kindLabel`/`kindEmoji`/i18n 键 `reminders.kind.todo`（zh「待办」/ en "Todo"）**全部现成零新增**；目验点：todo 行首列动作徽标已是 📋，类别列再 📋 相邻略重复，如嫌冗余可类别列只显文字「待办」（实施时目验定） | `Tasks.tsx` 一处条件；核对无组件测试钉住该行为；文档口径（V2-DESIGN §4.7 列表描述）顺带补注「todo 行含类别列」；无 Rust 改动 |
+| F12 ✅ | todo 派生行例程列表的「烟花」勾选项去掉 | `Tasks.tsx:508-517`：`{r.kind === "todo" && (<label …「烟花」…>)}`——仅 todo 派生行渲染（普通例程行本就无），是 TC-RM-11「单条烟花覆盖」在 todo 行的快捷入口；且该入口属半截入口——Todo 页无烟花字段、todo 编辑表单全锁定（仅提示+按钮），todoHint 自述「改动会随任务下次保存被覆盖」 | 删除该渲染块，todo 行与普通行一致只留「启用」开关；**数据语义不变**（`use_fireworks` 字段与 `usesFireworks` OR 判定照旧，全局烟花总开关仍覆盖 todo 行）；i18n 死键清退（`reminders.fireworks` / `reminders.fireworksOverride` 仅此一处消费，zh/en 4 处，核对 i18n.test 键清单断言）；**附带发现存量缺陷**：todoHint 文案「此处仅可调整文案、启用与烟花」与现状不符（todo 编辑态实际无任何可调字段）——顺带修正或删提示，实施时定 | `Tasks.tsx` 一处 + `i18n.ts` 两键清退 + 文档联动（TC-RM-11 / V2-DESIGN §4.7 列表描述同步）；无 Rust 改动 |
+| F13 ✅ | 「一次」调度分支的日期时间控件大小怪异 | `global.css:1250-1254` 统一控件基线选择器（32px 高 / 2px token 边框 / 统一 padding 与字号）列了 text/number/time/date/select，**漏 `input[type="datetime-local"]`**（全仓唯一消费点 `Tasks.tsx:734` once 分支）→ 走浏览器默认样式（macOS WKWebView 上明显超 32px、无 token 边框、默认 padding/字号），与旁边基线控件并排大小突兀，连带整列观感拥挤 | 选择器列表补 `input[type="datetime-local"]` 一项——高度/padding/边框/字号/底色全走 32px 控件基线；补齐后 label 上、控件下的堆叠形态与表单其他字段完全一致，**无需横排改造**（用户初判为 label 与控件挤同列，根因核验后定位在控件规格缺失） | `global.css` 一处选择器；无组件、无 i18n、无 Rust 改动；无测试钉住 |
+| F14 ✅ | 例程页底部「历史统计」区移除（无意义信息） | `Tasks.tsx:930-947` 统计区 ← `reminders.ts:596` `fetchReminderStats` ← Rust `reminders_stats` 命令，按 kind 显示「今日 N 次 / 累计 N 次」。评估定论（2026-08-28 用户认同）：**无行动价值**（知道被提醒几次不指导任何决策，行级「上次 X」+ 调度摘要已够）；与行级信息冗余；v1 M4 提醒记账遗留（TC-RM-13），与 v2 例程页身份错位（有诊断价值的执行历史已覆盖 exec，统计区反而只含 notify 三类）；i18n 标题还暴露内部表名「历史统计（reminder_logs）」 | **整区移除 + 链路清退**：删统计区与 stats state/调用；`fetchReminderStats`/`ReminderStat` 类型删；Rust `reminders_stats` 命令 + `lib.rs` 注册 + 查询与测试删；i18n `reminders.stats.*` 四键清退（zh/en 8 处，核对 i18n.test 键清单断言）；**记账写日志保留**（`reminder_logs` 写入不动——排障/未来功能燃料，只删查询与展示） | `Tasks.tsx` + `reminders.ts` + Rust（命令/注册/测试）+ `i18n.ts` + 文档联动（TC-RM-13 口径作废同步）；提醒触发日志照常落库，验收含此项 |
+| F15 ✅ | Windows 任务栏与托盘的猫图标太小 | 托盘 = `tray.rs:101` 硬编码 `icons/32x32.png`（Windows 100% DPI 下缩到 16px 显示，125%/150% 也仅 20/24px）；任务栏 = exe 图标 `icon.ico`（pet 窗口 `skipTaskbar:true`，任务栏按钮是 panel 窗口/exe 图标，典型显示 20-24px）；**macOS 无感原因**：retina 菜单栏按 32 物理像素 1:1 显示同一资产——Windows 视觉尺寸直接减半，故为 Windows 特有观感。美术层面（视觉子代理分析 + alpha 实测）：① 大尺寸版留白多——512 版猫横向仅占 60-70%（bbox 70%×82%），各尺寸裁切不一；② 细线条像素画小尺寸存在感弱。系统显示尺寸（16-24px）不可改，唯一杠杆 = 同样像素里猫占得更满更清晰 | **重制图标资产（代码零改动）**：源图按猫轮廓紧裁切放大至 ~95% 满幅 → `tauri icon` 一键重生成全套（32/64/128/128@2x/512/ico/icns），ico 内 16/24/32 档随之收紧；若 16px 下细节仍糊再补手绘像素版 16/24 档（二期可选）；macOS 菜单栏/dock 同向变大一点（正向副作用，目验不溢出）。**桌面宠物本体零影响**——atlas 素材（`assets/blinking-kitty|wagging-doggy/`）与 `icons/` 相互独立，渲染链路（PetCanvas + pet.size 档位）不交叉 | 仅 `src-tauri/icons/` 资产文件；无代码/i18n/Rust 改动；验收：dev 重编译即验托盘图，**任务栏 exe 图标需 Windows release 实机**（随打包生效，走 CI——同 #19/#20 验证路径）；预期为「变满变清晰」而非物理变大（系统尺寸限制） |
+| F16 ✅ | 设置页二轮微调（F6/F7 实施后目验反馈，5 点）：①「交互与播报」→「交互管理」；② 交互管理两卡长文案不全加粗（冒号前名称加粗、后段常规体）；③ 外观区删「界面主题」label，themeHint 上移至 label 位；④ 宠物区「当前渲染：…」信息行删；⑤ 大小 label「大小」→「宠物大小」。**二轮续（2 点）**：⑥ 交互卡粗体名独占一行、描述另起一行（原同行横排改两行）；⑦ 设置页非加粗小字字号统一（原 label 13 / hint 12 / desc 13 混排） | 均为 F6/F7 新形态的文案与字重打磨：①③⑤ i18n 值/键位；② 原 `intg-name` 整段 700 字重承载长句；④ `settings.current`/`fellBack` 唯一消费点；⑥⑦ `intg-desc` 同行横排 + 三档字号并存 | ① `sectionInteraction` 改值（en 同步 Interaction & Broadcast → Interaction，对齐「接入管理=Integrations」命名式）；② i18n 拆 `passThrough`/`toolBroadcast` 为粗体名 + `*Desc` 常规体两键；③ `themeLabel` 键清退、hint `<p>` 移至 select 上方；④ 「当前渲染」块删 + `settings.current`/`fellBack` 清退（回退可见性由 notice 横幅 + 下拉占位项承担）；⑤ `settings.size` 改值（zh 宠物大小 / en Pet size）；⑥ 描述移出 `intg-row-head` 为块级 `<p class="intg-desc">`；⑦ 小字统一 **12px**（`settings-pet-label` 13→12、`intg-desc` 13→12；`settings-current`/`hotkey-hint`/`intg-path`/`message`/`state-label` 原本 12px 不动；警示横幅 `settings-notice`/`error` 13px 属警示语义保留；`reminder-check` 13px 为例程页共用控件伴随文字不动）+ 死类 `.settings-check` 清退；**三轮**：备份提示文案「修改前自动备份」→「修改前自动备份至同目录」（en 同步）+ 位置从区底移至「接入管理」标题下（照功能管理 hint 位形态） | `i18n.ts` zh/en + `Settings.tsx` + `global.css`（新增 .intg-desc、字号统一、死类清退）+ `i18n.test.ts`（F6 测试扩为二轮版：清退 current/fellBack/themeLabel + 拆分键齐备 + 区名/大小钉值）；无 Rust 改动；基线 npm 439 / tsc 0 错 |
+
+### 12.2 已知边缘点（随需求自然产生，验收按此预期）
+
+| # | 点 | 说明 |
+|---|---|---|
+| 1 | 两种时间轴语义并存 | ≤7 天补零后为「日历等宽」；>7 天仍按有数据的日等分（缺日坍缩相邻，现状行为）。30 天补零其实也可读（柱宽 ≈12px），如嫌割裂可后续扩到 ≤30 天补、custom 不补 |
+| 2 | 空态语义变化 | 7d 全零显示 7 根零高柱而非「暂无数据」文案（今日同理 1 根）；模型全不勾的 noModels 空态不受影响（`effectiveSelected.size===0` 分支先行） |
+| 3 | 气泡两段数字可能高度重复 | 当天仅一个会话时「本次 …X · 今日 X」两段几乎相同（既有追加段设计如此，改汇总后更明显）；reasoning 不计入与 KPI 一致，属有意口径 |
+| 4 | CC 行 cost「—」失去解释文案 | F3 去标注后会话列表/详情 CC 行 cost「—」无来源说明，影响极小（接受） |
+
+### 12.3 实施与验收
+
+- 顺序：F4 / F5 / F3 / F6~F13、F15（CSS + 前端/数据/图标资产微改）→ F14（前端 + Rust 命令链路清退）→ F2（纯函数 + 组件）→ F1（Rust + 文档联动面最大，含 V2-DESIGN / V2-TEST-CASES / 本文件 §5.2-3 口径同步）。**F4 已于 2026-08-28 率先实施**（扩围含设置页 h2）。
+- 基线：`cargo test` + `npm test` + `npx tsc --noEmit` 全绿；F1 另跑 dev 冒烟看真实气泡文案；F2 实测今日单柱宽度与标签居中；F6 目验四控件与语言/插件行视觉一致且切换/失败/回滚行为不变；F9 dev 冒烟看下拉两行字样；F10/F11 目验例程列表与历史行徽标/类别列；F12 目验 todo 行仅剩启用开关、全局烟花开时 todo 到期仍有烟花（OR 语义钉子 `reminders.test.ts:171-174` 不动）。
+- 用户目验：今日单柱收窄 + 日期居中、7d 恒 7 柱（含零柱）、气泡只显总量、全屏例程页横向扩展、设置页控件形态统一、接入卡紧凑且备份提示仅区底一处、接入卡命名按宿主名、宠物下拉无「内置小猫/小狗」字样、notify 例程行/历史行徽标为 🔔、todo 派生行显「待办」类别、todo 派生行无烟花勾选项、「一次」分支日期时间控件与其他控件同高同边框、例程页无历史统计区且提醒日志照常落库、桌面宠物大小不变前提下 Windows 托盘/任务栏猫视觉占比显著提升（release 实机）。
+
+### 12.4 实施记录（2026-08-28）
+
+> 用户批准后同日实施完毕（顺序微改 → F2 → F1 → 图标 → 文档同步）。基线：`cargo test` 346 passed + 3 ignored / `npm test` 439（+6 新钉子与清退测试）/ `npx tsc --noEmit` 0 错 / `npm run build` 通过。
+
+| # | 实施落点 |
+|---|---|
+| F1 | `i18n.rs` `token_report`/`cc_token_report` 收敛为单总量模板（zh「本次会话消耗 token {total}」/ en "This session used {total} tokens"）；`token_stats.rs` `format_session_report` / `build_cc_idle_report` 改 in+out+cache_read；`format_cost_usd` 清退（气泡侧唯一消费方消失）；断言更新 token_stats.rs ×4 / i18n.rs ×3（含新增无 $ 钉子）/ lib.rs ×5 |
+| F2 | `token-chart.ts`：`expectedLabels` 补零（≤7 生效）+ `MAX_BAR_W=56` 柱宽上限；`token-stats.ts` 新增 `dayLabelsBetween`（DST 安全）；`TokenStats.tsx` day 维度接线 + 标签 n≤7 per-bar 居中（textAnchor=middle）/ n>7 维持首尾；`token-chart.test.ts` +4 钉子 |
+| F3 | `TokenStats.tsx` 注释行删 + `i18n.ts` 键清退（zh/en）+ `global.css` `.token-kpi-note` 清退 + `i18n.test.ts` 改清退断言 |
+| F5 | `global.css` `.reminders` max-width 删 |
+| F6 | `Settings.tsx`：大小/主题改下拉（label+select，busy/错误/回滚语义保留）；交互+工具播报合并「交互与播报」区（intg-row 卡片行 ×2 + 已启用/已停用）；`theme-seg` CSS 全清退（5 处 comma 选择器剥离，token-seg 保留）；i18n：`settings.interaction`/`sectionPet` 清退、`sectionInteraction`/`themeLabel` 新增（+清退断言测试） |
+| F7 | `.intg-row` padding 12→8、path margin 6→4、error/notice 4→2；`.intg-note` 规则清退；每卡备份提示 → 接入管理区底一处（`settings-current`） |
+| F8 | i18n `integrations.opencodeDesc/claudeDesc` zh/en 四值改宿主名「opencode」/「Claude Code」 |
+| F9 | 两份 pet.json `displayName` 去后缀（cargo 断言 `contains(id)` 不受影响，随批A 基线验证） |
+| F10 | `actionBadge` notify 💧→🔔；历史行经新共享助手 `execBadge`（审查 P3-1 落实——actionBadge 与 Tasks 历史行共用，历史行无 kind 字段故不能直接复用 actionBadge）+ `reminders.test.ts` 断言（含 execBadge 钉子）+ 注释三处（reminders.ts/Tasks.tsx/global.css） |
+| F11 | `Tasks.tsx` 类别列条件排除删除（kindEmoji/kindLabel/`reminders.kind.todo` 全现成） |
+| F12 | todo 行烟花勾选块删；i18n `reminders.fireworks`/`fireworksOverride` 清退（zh/en）；todoHint 过时文案修正（编辑态无任何可调字段）；`usesFireworks` OR 语义与 `reminders.test.ts:171-174` 钉子不动 |
+| F14 | 前端：stats state/拉取/统计区 + `fetchReminderStats`/`ReminderStat` 清退 + i18n stats 四键清退；Rust：`ReminderStat`/`stats()`/`reminders_stats` 命令 + lib.rs 注册 + 测试 stats 断言删（logs 记账路径保留，测试改名 `logs_trigger_ack_dismiss_paths`） |
+| F15 | 源图 alpha 紧裁 → 96% 满幅 1024（NEAREST 保像素风）→ `tauri icon` 重生成全套（32/64/128/128@2x/512/ico/icns/Square*）；32 版猫 bbox 实测 **81.2%×100%**（严格 alpha 阈值；视觉复核 ~90%×95%，旧版 75%×87.5%/70%×82.8% 显著提升；审查 P3-9 校准原"94%×100%"记录——该数为布局盒含居中留白的口径），轮廓/眼睛可辨、无裁切溢出（双独立复核一致）；android/ios 移动端目录清退；**桌面宠物本体零影响**（atlas 与 icons 独立） |
+| F16 | `i18n.ts`：sectionInteraction 改值「交互管理」/ en "Interaction"、size 改值「宠物大小」/ "Pet size"、themeLabel·current·fellBack 清退、passThrough/toolBroadcast 拆名+描述四键；`Settings.tsx`：卡片行加 intg-desc、themeHint 上移、「当前渲染」块删；`global.css` 增 `.intg-desc`；`i18n.test.ts` F6 测试扩为二轮版（npm 439 全绿）；**二轮续**：intg-desc 改块级两行结构（名称行下独立 <p>）、小字统一 12px（settings-pet-label/intg-desc 13→12）、死类 `.settings-check` 清退 |
+
+文档同步（随实施完成）：V2-DESIGN §3.2（M3 idle 汇报段 F1 修订注记）/ §5.4（CC 汇报文案两处）/ §4.7（列表描述 F10/F11/F12/F14 注记）；V2-TEST-CASES TC-M3-09-1 / TC-M5-05 / §4.7 列表（TC-M4-04）；本文件 §5.2-3（TC-M5-05 预期）。v1 线 TC-RM-11/TC-RM-13 历史验收记录不回改（docs/v1 留档原貌约定）。
+
+**审查轮（2026-08-28，tester + committer 双审后「应修尽修」）**：tester 全项 PASS（0 P1/P2 + 4 P3）；committer **APPROVED with comments**（无 P1；P2-1 + P3×10）。同批清偿：**P2-1** `chartDayLabels` deps 追加 rows（跨午夜驻留 Refresh 后标签窗口跟随前进，防 7d 8 柱/今日 2 柱陈旧窗口）+ **P3-1** 提取共享助手 `execBadge`（actionBadge 与历史行共用，消 F10 偏差）+ **P3-2** reminders.ts 文件头陈旧注释（ReminderStat 移除留痕）+ **P3-3/P3-4** README:268 / V2-SCOPE:54 旧气泡文案改单总量口径 + **P3-5** `dayLabelsBetween` 直测 ×3（两端含/跨月/倒置空表）+ **P3-6** themeLabel 恒真断言移除（HEAD 无此键，F6 增 F16 删同批净零，注释说明）+ **P3-7** `should_report` 口径差注释钉住（判定宽于显示有意为之，防误改 TC-TK-12 静默语义）+ **P3-8** Settings 尾部缩进修正 + themeHint 转 `<label htmlFor>`（a11y）+ **P3-9** §12.4 F15 占比数字按实测校准（81.2%×100%，三源口径注记）+ **P3-10** §12.1 F1 文档联动列去 TC-TK-10（v1 线）。清偿后基线复跑见 §12.3。
+
+---
+
+## 十三、新增第三 agent 接入成本审计（2026-08-28，预研备查）
+
+> 起因：用户问「新接入一个 agent（类似 opencode）是纯新增还是要改老代码」。全量扫描结论：**不是纯新增——约 12 处老代码必改**。分层抽象总体良好（状态机 / agent tab / 气泡链路均数据驱动零改动），但 agent 注册点**散落各层、各持一份微型注册表互不引用**（Rust 3 份：AGENT_WHITELIST / AGENT_* 常量 / ID_* 常量；TS 1 份：token-stats 常量 + switch；另有 i18n 键）。本节为预研记录备查；registry 收敛重构是否立项待用户决策。
+
+### 13.1 零改动面（已数据驱动）
+
+- 状态机 `session_state.rs`（复合键 `agent:sessionId`，agent 纯字符串透传，优先级合并只看 kind）
+- Token 页 agent tab / 模型 chips（`token-chart.ts:164` `agentsWithRows` 从 rows 动态导出——第三家有数据自动出 tab）
+- 气泡 `[徽标]` 渲染（payload.agent 透传 + 前端短名映射）、右键菜单 by_agent 分布行、工具级气泡（detail 协议 agent 无关，新插件发 detail 即得）
+- `POST /state` 契约（`http_server.rs:279-299` 只做白名单字符串校验，body 协议 agent 无关）
+- 例程功能（绑定 opencode CLI，与第三 agent 正交）；`action_exec.rs` 的 `task` 伪 agent 与 HTTP agent 不冲突（新 agent id 不能叫 "task"）
+
+### 13.2 纯新增面（照现有模式写新文件/函数，不动老代码）
+
+- 事件源 hook 脚本（照 `claude-code-hook.js` 模式抄，POST 协议现成）
+- 统计提取模块（`transcript.rs` 等价物）+ `cc_to_token_row` 式行转换 + `build_cc_idle_report` 式 idle 汇报
+- `integrations/` 第三套 install/uninstall/config_state/canonical 函数 + `BUNDLED_*_HOOK` 脚本文件
+- 前端 `src/lib/adapters/<new>.ts`——**注意：`AgentAdapter` 接口是装饰性抽象，主链路无人 import（归一化实际在插件脚本侧），新增 adapter 无运行时效果**
+
+### 13.3 必改老代码清单（~12 处硬编码分支）
+
+| # | 层 | 位置 | 现状 |
+|---|---|---|---|
+| 1 | Rust 事件入口 | `http_server.rs:41` `AGENT_WHITELIST` | 唯一明示注册点（注释注明「新增 agent 时同步」） |
+| 2 | Rust idle 分流 | `lib.rs:109` `idle_hook_body` match | 硬编码 `"opencode"`/`"claude-code"` 两臂 + 分支内字面量 |
+| 3 | Rust 统计编排 | `token_stats.rs` `query_stats_dual`/`today_stats_dual` + `token_stats_query`/`token_stats_today` 命令 | **双源硬编码**（`opencode_data_dir()` + cc cache 两源写死）；degraded 语义只建模「opencode 错 × CC 有数据」，第三源进来需重推 N 源容错 |
+| 4 | Rust 接入管理 | `integrations/mod.rs` `status_for` | `if id == ID_OPENCODE … else 当作 CC` 二元——第三 id **会错误落进 CC 探测分支** |
+| 5 | Rust 接入管理 | `mod.rs` `integrations_status` | 硬编码 `vec![两行]`——设置页只显示两个接入 |
+| 6 | Rust 接入管理 | `mod.rs` `integrations_install`/`integrations_uninstall` | id 守卫只认两 id + match 二元分发，无 trait 无注册表 |
+| 7 | 前端徽标 | `token-stats.ts:47` `agentShortName` switch | oc/cc/task/原名——气泡徽标、菜单分布行、会话徽标三处共用的单一映射点 |
+| 8 | 前端徽标 | **`TokenStats.tsx:83` `agentBadgeOf`** | **else 一律→"oc"——第三 agent 会被错标 oc，唯一「静默错误」级耦合**（其余处 fallback 显示原名，只是丑不算错） |
+| 9 | 前端展示规则 | `TokenStats.tsx:90` `agentLabel`、`:467/:502` cost「—」per-agent 规则 | 各自二元判断（新无费用 agent 需扩） |
+| 10 | 前端接入 UI | `Settings.tsx:545` nameKey 三元、`integrations.ts:33` `IntegrationId` 联合类型 | 第三接入显示错名 / 类型不含 |
+| 11 | i18n | `token.agent.*`、`integrations.*Desc`、`token.costOpencodeOnly`、`token.degraded` | ×zh/en 双份（键集合一致性测试强制同步）；注：`costOpencodeOnly` 随 F3 删除、`token.degraded` 措辞随 F1/N 源化重写——届时自然减负 |
+| 12 | 测试面 | `lib.rs:571-722` idle 分流单测、`token_stats.rs:1747-2040` 双源/degraded/by_agent 用例、前端 `token-chart.test.ts` 等 | 改白名单/编排后会红，需同步 |
+
+### 13.4 收敛机会（若确定接第三家再做）
+
+Rust 定义 `AgentSpec { id, short_name, bundled_hook, install/uninstall/status, idle_report, stats_source }` 数组——AGENT_WHITELIST、integrations 三命令 match、`status_for` 分支、`idle_hook_body` 分流、双源编排全部数据驱动（degraded 改「N 源中主源错误 × 其余有数据」）；前端建单一 `AGENTS` 注册表 `{id, short, i18nLabelKey, hasCost}` 供 `agentShortName`/`agentBadgeOf`/`agentLabel`/Settings nameKey/cost 列消费。收敛后新增 agent = **一个 hook 脚本 + 一套函数 + 一行注册 + i18n 键**，回归纯新增形态。**是否立项待用户决策；未收敛前按 §13.3 清单照做亦可。**
+
+---
+
 ## 附：清偿记录
 
 （清偿后回写：日期 + 来源任务 ID + 去向。已有示例：§6.2-5 TC-M4-18 核心面 2026-08-27 随 v0.2.1 §四场景 2 验证；§7-7 或已随 v0.2.1 R2 顺手消化，打磨轮核对）
 
 - [x] **§8-1 文档滞后（v2-m6 P3-②）**：✅ 已清偿 2026-08-27（文档维护轮，supervised-coding 执行）——V2-DESIGN §6.0/§6.2/§6.3/§6.4 共 7 处 + V2-TEST-CASES TC-M6-04/TC-M6-06-4 共 4 处对齐"右键菜单子行"口径，修订注记引用 §3.4 后裁定；改动在工作区待入库（与 V2-OPEN-ITEMS 本文件 §五~§十 一并提交）
 - [x] **§十一 宠物大小三档 + 视觉归一化**：✅ 已实施 2026-08-28（同日设计 + 实施）——Rust `pet_size.rs`/`windows.rs::apply_pet_size`/`atlas.rs` idle 度量 + 前端 `pet-scale.ts`/`size-bridge.ts`/档位化渲染/设置页分段控件；公式两处实施修订（帧上限替代全表 bbox，见 pet-size.md §3.4）；附带清偿 §11.5 en 菜单裁剪（文案缩短 + 防御 CSS）与 atlas 兜底短缓冲越界隐患（防御式访问，保持短以维持占位猫降级——committer P2-1 裁定）；基线 cargo 346 passed+3 ignored / npm 433 / tsc 0 错；dev 冒烟通过（large 档窗口 280×280 实测）+ committer 审查 APPROVED（六项审查意见当日落地）。完整留痕：`docs/v2/pet-size.md`；用户目验 TC-SZ-01~09 日常顺带
+- [x] **§十二 v2 收尾用户反馈批次 F1~F15**：✅ 已实施 2026-08-28（用户批准后同日）——F4 标题字号（先行）+ F1 气泡单总量 / F2 柱图三改（补零+柱宽上限+标签居中）/ F3 费用标注 / F5 例程页全宽 / F6 设置页控件形态统一（下拉+卡片行，theme-seg 清退）/ F7 接入卡缩高+备份提示去重 / F8 接入命名按宿主名 / F9 宠物下拉字样 / F10 notify 徽标 🔔 / F11 todo 类别列 / F12 todo 烟花勾选项（含 todoHint 修正）/ F13 datetime-local 控件基线 / F14 历史统计区移除（含 Rust `reminders_stats` 命令清退）/ F15 图标资产重制（紧裁 96% 满幅 + `tauri icon` 全套）。基线 cargo 346+3 ignored / npm 439 / tsc 0 错 / build 通过；逐项落点见 §12.4。用户目验项见 §12.3；F15 任务栏图标需 Windows release 实机。改动在工作区待入库

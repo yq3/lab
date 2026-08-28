@@ -162,13 +162,8 @@ pub struct NormalizedRule {
     pub use_fireworks: bool,
 }
 
-/// 历史统计（TC-RM-13：按 kind 聚合 reminder_logs）。
-#[derive(Debug, Clone, Serialize, PartialEq)]
-pub struct ReminderStat {
-    pub kind: String,
-    pub today: i64,
-    pub total: i64,
-}
+// §十二 F14（2026-08-28）：ReminderStat/stats()/reminders_stats 命令随面板
+// 「历史统计」区移除一并清退——reminder_logs 记账写路径保留（排障/未来燃料）。
 
 // ---------------------------------------------------------------------------
 // 纯函数核心（单测主战场）
@@ -1288,42 +1283,8 @@ pub fn list_action_logs(
     Ok((rows.filter_map(|r| r.ok()).collect(), total))
 }
 
-/// 历史统计（TC-RM-13）：按 kind 聚合（today = 本地当日触发数）。
-pub fn stats(conn: &Connection) -> Result<Vec<ReminderStat>, String> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT r.kind AS kind, l.triggered_at AS triggered_at \
-             FROM reminder_logs l JOIN reminders r ON r.id = l.reminder_id",
-        )
-        .map_err(|e| format!("stats prepare: {e}"))?;
-    let rows = stmt
-        .query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })
-        .map_err(|e| format!("stats query: {e}"))?;
-    let today = Local::now().date_naive();
-    let mut out: Vec<ReminderStat> = Vec::new();
-    for r in rows.flatten() {
-        let (kind, ts) = r;
-        let is_today = DateTime::parse_from_rfc3339(&ts)
-            .map(|d| d.with_timezone(&Local).date_naive() == today)
-            .unwrap_or(false);
-        if let Some(st) = out.iter_mut().find(|s| s.kind == kind) {
-            st.total += 1;
-            if is_today {
-                st.today += 1;
-            }
-        } else {
-            out.push(ReminderStat {
-                kind,
-                today: is_today as i64,
-                total: 1,
-            });
-        }
-    }
-    out.sort_by(|a, b| a.kind.cmp(&b.kind));
-    Ok(out)
-}
+// §十二 F14（2026-08-28）：stats()（按 kind 聚合 reminder_logs 的历史统计查询）
+// 随面板统计区移除清退——记账写路径（insert_log/ack_log/dismiss_log）保留。
 
 pub fn is_paused(conn: &Connection) -> bool {
     crate::db::get_state(conn, KEY_PAUSED).is_some_and(|v| v == "1")
@@ -1762,14 +1723,6 @@ pub fn reminders_get_paused(app: tauri::AppHandle) -> Result<bool, String> {
     let db = app.state::<Mutex<Connection>>();
     let conn = db.lock().map_err(|e| format!("db lock: {e}"))?;
     Ok(is_paused(&conn))
-}
-
-/// 历史统计（TC-RM-13）。
-#[tauri::command]
-pub fn reminders_stats(app: tauri::AppHandle) -> Result<Vec<ReminderStat>, String> {
-    let db = app.state::<Mutex<Connection>>();
-    let conn = db.lock().map_err(|e| format!("db lock: {e}"))?;
-    stats(&conn)
 }
 
 /// 手动触发（面板"试一试"）：返回 "fired" | "dedup" | "paused"。
@@ -2552,7 +2505,9 @@ mod tests {
     }
 
     #[test]
-    fn logs_trigger_ack_dismiss_and_stats_tc_rm_13() {
+    fn logs_trigger_ack_dismiss_paths() {
+        // §十二 F14（2026-08-28）：stats 断言随统计区移除清退，logs 记账/
+        // ack/dismiss 路径保留验证（原 TC-RM-13 记账面的测试延续）
         let c = conn();
         let r1 = insert_rule(&c, &input("hydration", "该喝水啦 💧", 30)).unwrap();
         let r2 = insert_rule(&c, &input("rest", "休息一下 ☕", 60)).unwrap();
@@ -2592,16 +2547,6 @@ mod tests {
         };
         assert_eq!(row(l1), ("bubble".to_string(), Some(rfc(1500))));
         assert_eq!(row(l3).0, "fireworks");
-
-        // stats：hydration total=2、rest total=1；today 与时间戳同日（测试时间戳即当下时区）
-        let mut s = stats(&c).unwrap();
-        s.sort_by(|a, b| b.total.cmp(&a.total));
-        assert_eq!(s.len(), 2);
-        assert_eq!(s[0].kind, "hydration");
-        assert_eq!(s[0].total, 2);
-        assert!(s[0].today <= 2);
-        assert_eq!(s[1].kind, "rest");
-        assert_eq!(s[1].total, 1);
     }
 
     #[test]

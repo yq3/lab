@@ -51,7 +51,7 @@
 
 - **A. 数据层**：`TokenRow` 扩展——`model_id`（`json_extract(model,'$.id')`；**仅按模型 id 归并**，variant/provider 折叠，如 glm-5.3 的 max/default 并为一项，对齐 GLM 平台心智；实测 session.model 为 JSON `{id, providerID, variant}`，近 30 天 15 种组合）、`project_name`（JOIN `project` 表哈希→路径取 basename 如 `lab`；`global`/无映射回退标签——修复现状展示哈希不可读的问题）、`title`（会话标题，opencode 自动摘要生成、质量良好，偶回退 `New session - 时间戳`）；`SESSION_REQUIRED_COLUMNS` 白名单同步补充；新命令 `token_stats_today` → `{input, output, cache_read, cost} | 错误码`（包 range 聚合求和，复用 no-database 等全套错误处理）。
 - **B. 今日 preset**：`RangePreset` 加 `"today"`（from = 本地今天 0 点）；**面板默认选中今日**（原默认 7d）。
-- **C. 三层快捷查看今日 token**（共享 `token_stats_today`）：① 被动层——会话结束气泡「本期用了 Xk…」末尾追加「今日累计 T」（零操作触达）；② 主动层——悬停宠物 ~500ms → 气泡显示今日汇总（总量 + in/out/cacheRead 三行），移开即消；③ 入口层——右键菜单「今日 token：X」信息项（数据未到 `…`、无库 `—`），点击 → 打开面板 Token tab（默认即今日，无缝衔接详情）。已知限制：穿透模式下悬停/右键不可达（仅被动层 + 面板可用）；左键单击行为不改（用户保留）；托盘 tooltip 不做。
+- **C. 三层快捷查看今日 token**（共享 `token_stats_today`）：① 被动层——会话结束气泡「本次会话消耗 token X」（§十二 F1 修订：单总量口径）末尾追加「今日累计 T」（零操作触达）；② 主动层——悬停宠物 ~500ms → 气泡显示今日汇总（总量 + in/out/cacheRead 三行），移开即消；③ 入口层——右键菜单「今日 token：X」信息项（数据未到 `…`、无库 `—`），点击 → 打开面板 Token tab（默认即今日，无缝衔接详情）。已知限制：穿透模式下悬停/右键不可达（仅被动层 + 面板可用）；左键单击行为不改（用户保留）；托盘 tooltip 不做。
 - **D. 堆叠柱状图**：柱内三段自底向上 **output → input → cache read**（DeepSeek/GLM 平台式）；自定义 HTML tooltip（悬浮显示日期 + 三项数值 + 占比 + 总量）+ 图例；`computeStackedBars` 纯函数 + 单测；KPI 加首卡「总量」= in + out + cacheRead；**reasoning 不计入任何汇总口径**（用户裁定，与 GLM 官方展示同口径；注：数据层 tokens_reasoning 独立存在且 82% 会话非零，v1 会话详情已露出，v2 不改）。
 - **E. 模型筛选**：柱状图上方罗列模型 ID 复选框列表（默认全勾），取消勾选即从柱图剔除（GLM 平台式）；**筛选作用域仅柱状图**——KPI 卡 / 会话列表不受勾选影响，口径各自独立。
 - **F. 砍项目饼图**（用户裁定）：删 `ProjectPie` 组件 + `token-columns` 双栏布局（依据：实际分布高度集中——近 30 天 lab 项目占 ~97%，饼图信息量趋零；cost 大多为 0），空间让给模型筛选区与更宽的柱图/会话列表；项目维度本身保留（经 A 的映射修复后在会话列表体现）。

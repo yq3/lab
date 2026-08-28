@@ -389,7 +389,7 @@
 - **前置**：Rust 单测（`make_idle_hook` 追加段拼接，注入时钟 / 注入今日聚合错误）+ opencode 会话有 ≥1 条 token 记录的实机场景。
 - **步骤**：单测断言追加段逻辑 → 实机结束会话（session idle）观察汇报气泡。
 - **预期**：
-  1. 气泡末尾追加「 · 今日 {format_tokens_k(total)}」；total = in + out + cache_read（reasoning 不计；mock 过滤）——单测注入固定时刻断言拼接文案逐字符合（zh 与既有汇报措辞钉住一致，i18n 模板键 `token_report_today`）；
+  1. 气泡末尾追加「 · 今日 {format_tokens_k(total)}」；total = in + out + cache_read（reasoning 不计；mock 过滤）——单测注入固定时刻断言拼接文案逐字符合（zh 与既有汇报措辞钉住一致，i18n 模板键 `token_report_today`；**§十二 F1 修订 2026-08-28**：本期段改「本次会话消耗 token {total}」单总量口径，断言已随改）；
   2. 本期数字逻辑不变（60s 新鲜度护栏沿用）；今日聚合与本期查询同连接一次完成；
   3. **失败省略分支（单测）**：注入今日聚合错误（如跨午夜边界竞态）→ 静默省略追加段、本期数字照常显示（实机不可稳定构造，以单测钉住——P2-6）；
   4. **仅 opencode**（M1 idle 分流内实现；CC 会话 idle 无追加——M5 前无 CC 数据）。
@@ -491,7 +491,7 @@
 
 - **预期**：
   1. 核心 tab「提醒」改名「例程」（2026-08-25 R1 后用户裁定修订：原「定时任务」再改「例程」，en 建议 Routines 实施定；`panel.tab.tasks` 键不变仅改 i18n 值），位置不变；`panel://tab` 兼容旧值 `reminders` 映射直达；「Todo」tab 中文显示名同步改「待办」（en 保持 Todo，同裁定）；
-  2. 一张列表：每行动作徽标（💧 notify / ⚡ exec，title 说明）+ 名称 + 调度摘要（「每 30 分钟 · 09:00-18:00」/「每天 09:00」/「周三、五 09:00」/「一次 · 08-25 21:00」）+ 启用开关 + 行操作（编辑 / 试一试 / 跳过本次 / 删除两步确认）；todo 派生行保持 M2 展示（可见惰性 + 徽标）；
+  2. 一张列表：每行动作徽标（🔔 notify / ⚡ exec，title 说明——§十二 F10 修订 💧→🔔）+ 类别列（§十二 F11：todo 派生行同渲染「📋 待办」）+ 名称 + 调度摘要（「每 30 分钟 · 09:00-18:00」/「每天 09:00」/「周三、五 09:00」/「一次 · 08-25 21:00」）+ 启用开关 + 行操作（编辑 / 试一试 / 跳过本次 / 删除两步确认）；todo 派生行保持 M2 展示（可见惰性 + 徽标；§十二 F12：行内烟花勾选项移除；§十二 F14：页底历史统计区移除）；
   3. 表单按 `action_type` 条件显隐字段（notify：kind / 文案 / 调度 / 烟花；exec：任务名 / opencode 模板块 / command / cwd / 超时 / 调度）；表单标题「新建例程」（原「新建提醒」，同裁定修订）；「新建」按钮**与表单最后一行字段同行右对齐**（2026-08-25 二次修订：不在单独动作行，随上一行字段内容对齐）且为非默认色；动作类型分段按钮无 emoji 图标（「提醒」不带 💧、「执行命令」不带 ⚡——列表行徽标保留）；Rust `validate` 为权威、前端同规则预检（v1 模式）；
   4. notify 新建（interval / daily / once 三种调度）触发行为与 v1 提醒等价（气泡 / 烟花 / 记账）。
 
@@ -698,7 +698,7 @@
 
 - **步骤**：真实 CC 会话干活后结束（Stop 事件）→ 观察气泡。
 - **预期**：
-  1. 气泡「本期用了 Xk input / Yk output · 今日 T」——**无 cost 段**（S4 口径）；今日段 = `token_stats_today` 双源合计（与 opencode 同模板）；经 `pulsepet://bubble` info 级 source="token-report"（与 opencode 汇报同源同级，M2 同源合并 10s 窗口自然防双发刷屏）；
+  1. 气泡「本次会话消耗 token Xk · 今日 T」（**§十二 F1 修订 2026-08-28**：单总量口径 in+out+cache_read，原「Xk input / Yk output」无 cost 双模板收敛，与 opencode 同模板）；今日段 = `token_stats_today` 双源合计；经 `pulsepet://bubble` info 级 source="token-report"（与 opencode 汇报同源同级，M2 同源合并 10s 窗口自然防双发刷屏）；
   2. 新鲜度护栏：**末条 assistant 行** timestamp（last_assistant_ts）距 idle 事件 <60s（对齐 opencode 口径；实测末条 system 行可晚于末条 assistant 3 分钟——护栏若用 time_updated 会误判）；文件缺席 / 无 assistant 行 / 全零 / 陈旧 → 静默跳过（TC-TK-12 口径）；
   3. 注入 success 状态：apply_event 复合键 `claude-code:{sessionId}` + notify；idle 分支 http 线程仅派发、解析在后台线程（不阻塞派发）；
   4. opencode 会话汇报无回归（双发时同源合并）；

@@ -265,7 +265,7 @@ cp -r <下载解压出的宠物目录> ~/.codex/pets/<宠物id>
 - 时间窗：近 7 天 / 近 30 天 / 自定义日期区间（含当天）；
 - 维度：按天 / 按周 / 整段汇总；会话列表按用量排序可展开明细（input/output/reasoning/cache/cost）；
 - 项目分布饼图 + KPI 卡（input / output / cache read / cost，USD）；
-- **会话汇报气泡**：一个会话结束（idle）且有用量的 60 秒内，宠物气泡显示「本期用了 Xk input / Yk output / $ Z」并短暂进入 success 姿态（无用量/数字陈旧不出气泡）。
+- **会话汇报气泡**：一个会话结束（idle）且有用量的 60 秒内，宠物气泡显示「本次会话消耗 token X」（单总量口径：input + output + cache read，§十二 F1 2026-08-28）并短暂进入 success 姿态（无用量/数字陈旧不出气泡）。
 
 ### 语言切换（面板「设置」页）
 

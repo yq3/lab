@@ -5,10 +5,10 @@ import {
   actionBadgeTitle,
   buildOpencodeCommand,
   deleteReminder,
+  execBadge,
   fetchActionLogs,
   fetchFireworksGlobal,
   fetchPaused,
-  fetchReminderStats,
   fetchReminders,
   formatInterval,
   formatLogTime,
@@ -30,7 +30,6 @@ import {
   type ReminderInput,
   type ReminderKind,
   type ReminderRule,
-  type ReminderStat,
   type ScheduleKind,
 } from "../lib/reminders";
 import { t, useLangStore } from "../lib/i18n";
@@ -38,10 +37,11 @@ import { pluginEnabled, usePluginStore } from "../lib/plugin-store";
 
 /**
  * 定时任务页（v2 M4，V2-DESIGN §4.7；原 Reminders.tsx 改名重构）：
- * - 一张列表：动作徽标（💧 notify / ⚡ exec，title 说明）+ 名称 + 调度摘要
+ * - 一张列表：动作徽标（🔔 notify / ⚡ exec，title 说明——§十二 F10 💧→🔔）
+ *   + 类别列（§十二 F11：todo 派生行同渲染「📋 待办」）+ 名称 + 调度摘要
  *   （每 30 分钟 · 09:00-18:00 / 每天 09:00 / 周三、五 09:00 / 一次 · 08-25 21:00）
  *   + 启用开关 + 行操作（编辑/试一试/跳过本次/删除两步确认）；todo 派生行
- *   保持 M2 展示（可见惰性 + 📋 徽标）；
+ *   保持 M2 展示（可见惰性 + 📋 徽标；§十二 F12 行内烟花勾选项已移除）；
  * - 表单按 action_type 条件显隐（完整重做）：notify = kind/文案/调度三分支/
  *   烟花；exec = 任务名/opencode 例程模板块/command 等宽多行/cwd/超时/调度；
  * - Rust validate 权威 + 前端同规则预检（v1 模式）；
@@ -157,7 +157,7 @@ function onceToLocalInput(at: string | null | undefined): string {
 
 export default function Tasks() {
   const [rules, setRules] = useState<ReminderRule[] | null>(null);
-  const [stats, setStats] = useState<ReminderStat[] | null>(null);
+  // §十二 F14（2026-08-28）：stats state 随「历史统计」区移除清退
   const [fireworksGlobal, setFwGlobal] = useState(false);
   const [paused, setPaused] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -186,14 +186,13 @@ export default function Tasks() {
       return;
     }
     try {
-      const [rs, st, fw, pa] = await Promise.all([
+      // §十二 F14：fetchReminderStats 随统计区移除退出并行拉取
+      const [rs, fw, pa] = await Promise.all([
         fetchReminders(),
-        fetchReminderStats(),
         fetchFireworksGlobal(),
         fetchPaused(),
       ]);
       setRules(rs);
-      setStats(st);
       setFwGlobal(fw);
       setPaused(pa);
       setError(null);
@@ -464,10 +463,10 @@ export default function Tasks() {
               <span className="task-badge" title={actionBadgeTitle(r)}>
                 {actionBadge(r)}
               </span>
-              {r.kind !== "todo" && (
-                <span className="reminder-kind">{kindEmoji(r.kind)} {kindLabel(r.kind)}</span>
-              )}
-              {/* v2 M2：禁用插件的 todo 派生行加「已停用」徽标（可见但惰性） */}
+              {/* 类别列：§十二 F11（2026-08-28）todo 派生行也渲染（「📋 待办」，
+                  与其他行格式一致）——原条件排除已删；todo 派生行另有
+                  「已停用（插件关闭）」徽标（M2，可见惰性） */}
+              <span className="reminder-kind">{kindEmoji(r.kind)} {kindLabel(r.kind)}</span>
               {r.kind === "todo" && todoPluginDisabled && (
                 <span className="reminder-plugin-off">{t("plugins.disabledBadge")}</span>
               )}
@@ -505,16 +504,9 @@ export default function Tasks() {
                 />
                 {t("reminders.enabled")}
               </label>
-              {r.kind === "todo" && (
-                <label className="reminder-check compact" title={t("reminders.fireworksOverride")}>
-                  <input
-                    type="checkbox"
-                    checked={r.use_fireworks}
-                    onChange={(e) => void quickToggle(r, { use_fireworks: e.target.checked })}
-                  />
-                  {t("reminders.fireworks")}
-                </label>
-              )}
+              {/* §十二 F12（2026-08-28）：todo 派生行的「烟花」勾选项移除（用户
+                  裁定）——烟花随全局总开关（OR 语义不变）；Todo 页无烟花字段、
+                  编辑表单全锁定，此入口原属会被 Todo 侧保存覆盖的半截入口 */}
               <span className="reminder-actions">
                 <button className="seg" onClick={() => void test(r)}>
                   {t("reminders.test")}
@@ -900,7 +892,9 @@ export default function Tasks() {
                     >
                       <span className={`task-status-dot status-${log.status}`} aria-label={log.status} />
                       <span className="task-history-time">{formatLogTime(log.started_at)}</span>
-                      <span className="task-badge">{log.action_type === "exec" ? "⚡" : "💧"}</span>
+                      {/* §十二 F10：notify 历史行徽标 💧 → 🔔（审查 P3-1：与列表
+                          actionBadge 共用 execBadge 助手；历史行无 kind 字段） */}
+                      <span className="task-badge">{execBadge(log.action_type)}</span>
                       <span className="task-history-summary">
                         {renderTaskSummary(log.summary, log.exit_code)}
                       </span>
@@ -927,24 +921,9 @@ export default function Tasks() {
         )}
       </section>
 
-      {/* 历史统计（TC-RM-13，notify 记账） */}
-      <section className="token-section">
-        <h3>{t("reminders.stats.title")}</h3>
-        {(!stats || stats.length === 0) && (
-          <p className="token-empty">{t("reminders.stats.empty")}</p>
-        )}
-        <ul className="reminder-stats">
-          {stats?.map((s) => (
-            <li key={s.kind}>
-              <span className="reminder-kind">
-                {kindEmoji(s.kind)} {kindLabel(s.kind)}
-              </span>
-              <span className="reminder-meta">{t("reminders.stats.today", { n: s.today })}</span>
-              <span className="reminder-meta">{t("reminders.stats.total", { n: s.total })}</span>
-            </li>
-          ))}
-        </ul>
-      </section>
+      {/* §十二 F14（2026-08-28）：「历史统计」区移除（用户裁定——无行动价值、
+          与行级信息冗余、v1 M4 记账遗留与 v2 例程页身份错位）；
+          reminder_logs 记账写路径保留（排障/未来功能燃料） */}
 
       {toast && <div className="reminder-toast">{toast}</div>}
     </div>

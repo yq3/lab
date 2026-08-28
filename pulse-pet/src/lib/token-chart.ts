@@ -47,6 +47,12 @@ export interface StackedBarOptions {
   /** 柱宽占每格宽度的比例（0-1，默认 0.6）。 */
   fill?: number;
   /**
+   * **§十二 F2（2026-08-28）**：day 维度查询窗口的日标签全列表——
+   * 提供（非空且 ≤7 枚）时按窗口**逐日补零柱**（今日=1 柱、7d 恒 7 柱，
+   * 零值日也出柱）；>7 枚忽略（维持"有数据才出柱"现状）。周维度不传。
+   */
+  expectedLabels?: readonly string[];
+  /**
    * **M5（V2-DESIGN §5.6，TC-M5-04）**：agent 筛选——作用域仅柱图（与模型
    * 筛选一致，M3 E 口径）；「不传 = 不过滤」（等价全量）由钉子单测守住。
    * 传入即按 `row.agent ∈ agentFilter` 过滤后聚合（勾选剔除）。
@@ -54,13 +60,17 @@ export interface StackedBarOptions {
   agentFilter?: ReadonlySet<string>;
 }
 
+/** §十二 F2：柱宽上限（px）——单柱/少柱时 barW=slot×0.6 会过宽（n=1 ≈362px）。 */
+const MAX_BAR_W = 56;
+
 /**
  * 堆叠柱计算：
  * 1. 行按 `row.model_id`（null 为「未知模型」桶）过滤——未勾选的模型剔除后聚合；
  *    M5：行再按 agentFilter 过滤（未勾选的 agent 剔除，作用域仅柱图）；
  * 2. 按行 day 标签分组 SUM（多模型行合并为一柱）；
+ *    §十二 F2：expectedLabels 有效时窗口缺日补零柱（≤7 天窗口恒满柱）；
  * 3. 柱按标签升序排列；柱高与最大 total 成比例，三段自底向上 output → input
- *    → cache read；全零/空输入不产生 NaN。
+ *    → cache read；柱宽 = min(slot×fill, 56px)；全零/空输入不产生 NaN。
  */
 export function computeStackedBars(
   rows: TokenRow[],
@@ -84,14 +94,29 @@ export function computeStackedBars(
     cur.cacheRead += r.tokens_cache_read;
     map.set(k, cur);
   }
-  const entries = [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  // §十二 F2：≤7 天窗口补零柱（expectedLabels 顺序为时间轴；防御性追加
+  // 窗口外数据日标签——正常查询不会出现）；无效（空/>7）时维持原有数据日
+  const windowLabels =
+    opts.expectedLabels && opts.expectedLabels.length >= 1 && opts.expectedLabels.length <= 7
+      ? opts.expectedLabels
+      : null;
+  const labels = windowLabels
+    ? [
+        ...windowLabels,
+        ...[...map.keys()].filter((k) => !windowLabels.includes(k)).sort((a, b) => a.localeCompare(b)),
+      ]
+    : [...map.keys()].sort((a, b) => a.localeCompare(b));
+  const entries = labels.map((label) => {
+    const v = map.get(label) ?? { output: 0, input: 0, cacheRead: 0 };
+    return [label, v] as const;
+  });
   const n = entries.length;
   if (n === 0) return [];
   const plotW = Math.max(width - 2 * pad, 0);
   const plotH = Math.max(height - 2 * pad, 0);
   const max = Math.max(...entries.map(([, v]) => v.output + v.input + v.cacheRead), 0);
   const slot = plotW / n;
-  const barW = slot * fill;
+  const barW = Math.min(slot * fill, MAX_BAR_W);
   const baseline = pad + plotH;
   return entries.map(([label, v], i) => {
     const total = v.output + v.input + v.cacheRead;

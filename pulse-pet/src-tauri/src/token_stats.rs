@@ -586,29 +586,25 @@ pub fn format_tokens_k(n: i64) -> String {
     }
 }
 
-/// cost 格式化：`0` → `$0`；`<0.01` 用 4 位小数（2 位会显示成 $0.00）；其余 2 位。
-pub fn format_cost_usd(c: f64) -> String {
-    if c <= 0.0 {
-        "$0".to_string()
-    } else if c < 0.01 {
-        format!("${c:.4}")
-    } else {
-        format!("${c:.2}")
-    }
-}
+// §十二 F1（2026-08-28）：format_cost_usd 随气泡 cost 段去除清退——
+// 气泡侧唯一生产消费方（format_session_report）已改单总量；面板 cost
+// 展示走前端自有 formatCost（token-stats.ts），Rust 侧不再需要。
 
 /// 气泡文案（白名单模板：仅由数字格式化生成，不含任何原始 prompt/路径/URL；
 /// 长度恒 <140、单行，前端 `sanitizeBubbleText` 再兜底一次）。
-/// M8 i18n：文案模板随全局语言位切换（zh 与 M3 定案逐字一致）。
+/// §十二 F1（2026-08-28）：**单总量口径**——total = in + out + cache_read
+/// （与今日段/面板 KPI sumRows 同口径，reasoning 不计）；原 input/output/cost
+/// 明细与 CC 无 cost 双模板收敛为统一总量模板（M8 i18n 随全局语言位）。
 pub fn format_session_report(row: &TokenRow) -> String {
-    crate::i18n::current().token_report(
-        &format_tokens_k(row.tokens_input),
-        &format_tokens_k(row.tokens_output),
-        &format_cost_usd(row.cost),
-    )
+    let total = row.tokens_input + row.tokens_output + row.tokens_cache_read;
+    crate::i18n::current().token_report(&format_tokens_k(total))
 }
 
 /// 是否出气泡：有真实用量（token 或 cost > 0）且 `time_updated` 新鲜（TC-TK-11/12）。
+/// 审查 P3-7 钉住口径差（有意为之，勿"统一"）：**判定口径宽于显示口径**——
+/// cost/reasoning/cache_write 任一非零即触发气泡，但 F1 后显示总量只含
+/// in+out+cache_read，故可能出现「气泡 token 0」（如纯 cache_write 会话）；
+/// 显示为 0 仍出气泡是为了让用户感知"这次会话有活动"（TC-TK-12 只静默全零）。
 pub fn should_report(row: &TokenRow, now_ms: i64, max_lag_ms: i64) -> bool {
     let has_usage = row.cost > 0.0
         || row.tokens_input > 0
@@ -893,8 +889,8 @@ pub fn today_stats_dual(
 /// - 新鲜度护栏：**last_assistant_ts** 距 now < max_lag（N-1 专用口径，对齐
 ///   opencode「最后 message 写入时间」语义）；
 /// - 五维有非零用量才出气泡（全零静默，TC-TK-12 口径）；
-/// - 文案无 cost 段（S4）；今日段 = today_stats_dual 双源合计（失败 → None
-///   静默省略，与 opencode 同模板）。
+/// - 文案 = 单总量模板（§十二 F1；原 S4「CC 无 cost 段」双模板已收敛）；
+///   今日段 = today_stats_dual 双源合计（失败 → None 静默省略，同 opencode）。
 pub fn build_cc_idle_report(
     cache: &Arc<Mutex<TranscriptCache>>,
     data_dir: &Path,
@@ -918,10 +914,10 @@ pub fn build_cc_idle_report(
     if !has_usage {
         return None;
     }
-    let text = crate::i18n::current().cc_token_report(
-        &format_tokens_k(row.tokens_input),
-        &format_tokens_k(row.tokens_output),
-    );
+    // §十二 F1：单总量口径（与 opencode 同模板；in + out + cache_read，
+    // reasoning 不计）——原 CC 无 cost 双模板（S4）随统一收敛退役
+    let total = row.tokens_input + row.tokens_output + row.tokens_cache_read;
+    let text = crate::i18n::current().token_report(&format_tokens_k(total));
     let today = today_stats_dual(data_dir, cc_dir, cache, now_ms)
         .ok()
         .map(|t| t.today.input + t.today.output + t.today.cache_read);
@@ -1348,11 +1344,8 @@ mod tests {
         assert_eq!(format_tokens_k(1000), "1.0k");
         assert_eq!(format_tokens_k(58263), "58.3k");
         assert_eq!(format_tokens_k(1234567), "1.2M");
-        assert_eq!(format_cost_usd(0.0), "$0");
-        assert_eq!(format_cost_usd(0.0103), "$0.01"); // ≥0.01 用 2 位小数
-        assert_eq!(format_cost_usd(0.0031), "$0.0031"); // <0.01 用 4 位（避免显示 $0.00）
-        assert_eq!(format_cost_usd(0.526), "$0.53");
-        assert_eq!(format_cost_usd(12.3), "$12.30");
+        assert_eq!(format_tokens_k(59_173), "59.2k"); // §十二 F1：会话总量钉子
+        // §十二 F1：format_cost_usd 断言随函数清退删除
     }
 
     #[test]
@@ -1375,7 +1368,9 @@ mod tests {
             agent: AGENT_OPENCODE.into(),
         };
         let text = format_session_report(&row);
-        assert_eq!(text, "本期用了 58.3k input / 910 output / $0.05");
+        // §十二 F1：单总量——total = 58263 + 910 + 0 = 59173 → "59.2k"
+        assert_eq!(text, "本次会话消耗 token 59.2k");
+        assert!(!text.contains('$'), "F1：cost 段去除");
         assert!(!text.contains('\n'));
         assert!(text.chars().count() <= 140);
     }
@@ -1432,7 +1427,7 @@ mod tests {
             now - ms(2),
         );
         let (text, today) = build_idle_report_with_today(&dir, "ses_live", now, 60_000).unwrap();
-        assert_eq!(text, "本期用了 58.3k input / 910 output / $0.05");
+        assert_eq!(text, "本次会话消耗 token 59.2k");
         assert_eq!(today, Some(58_263 + 910), "今日 = 本会话行（窗口内唯一）");
         // 数据库不存在 → None（静默，不崩）
         let nodir = temp_dir("report-nodb");
@@ -1689,7 +1684,7 @@ mod tests {
         insert_session_model(&dir, "ses_other", "p1", 0.1, (1_000_000, 40_000, 0, 2_000_000, 0),
             now - ms(7200), now - ms(3600), Some(&model_json("glm-5.3", "zhipuai")), None);
         let (text, today) = build_idle_report_with_today(&dir, "ses_live", now, 60_000).unwrap();
-        assert_eq!(text, "本期用了 58.3k input / 910 output / $0.05");
+        assert_eq!(text, "本次会话消耗 token 59.2k");
         // total = in + out + cache_read（reasoning 不计）：1058263 + 40910 + 2000000
         assert_eq!(today, Some(1_058_263 + 40_910 + 2_000_000));
     }
@@ -1876,17 +1871,18 @@ mod tests {
     }
 
     #[test]
-    fn m5_build_cc_idle_report_guardrail_and_no_cost_segment() {
+    fn m5_build_cc_idle_report_guardrail_and_single_total() {
+        // §十二 F1：CC 汇报改单总量口径（原无 cost 段双模板收敛）
         let cc_dir = temp_dir("m5-idle-cc");
         let nodb = temp_dir("m5-idle-nodb"); // opencode 无库 → 今日段降级 CC-only
         let now = chrono_local_midnight(2026, 8, 25) + 9 * 3600 * 1000;
         let cache = Arc::new(Mutex::new(TranscriptCache::default()));
-        // 新鲜 + 有用量 → 文案（无 cost 段）+ 今日段（双源合计）
+        // 新鲜 + 有用量 → 文案 + 今日段（双源合计）
         write_cc_session(&cc_dir, "cc-live", now - ms(2), (58_263, 910));
         let (text, today) =
             build_cc_idle_report(&cache, &nodb, &cc_dir, "cc-live", now, 60_000).unwrap();
-        assert_eq!(text, "本期用了 58.3k input / 910 output");
-        assert!(!text.contains('$'), "CC 汇报无 cost 段（S4 口径）");
+        assert_eq!(text, "本次会话消耗 token 59.2k");
+        assert!(!text.contains('$'), "F1：cost 段去除（S4 口径延续）");
         assert_eq!(today, Some(58_263 + 910), "今日段 = in+out+cache_read 双源合计");
         // 全零 → None（静默，TC-TK-12 口径）
         write_cc_session(&cc_dir, "cc-zero", now - ms(2), (0, 0));

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AGENT_CLAUDE_CODE,
   AGENT_OPENCODE,
+  dayLabelsBetween,
   fetchTokenRows,
   formatCost,
   formatTokens,
@@ -220,6 +221,21 @@ export default function TokenStats() {
     [selectedModels, chips],
   );
 
+  /**
+   * §十二 F2（2026-08-28）：day 维度补零柱的窗口日标签——day 粒度下 to 随
+   * 时刻漂移不影响标签集合，独立 memo（load 内仍每次重算查询窗口，M4 R3
+   * 语义不变）。周维度不传（1-2 根周柱不补）。
+   * 审查 P2-1：deps 含 rows——跨午夜驻留后 Refresh 时 load 产出新 rows 触发
+   * 重算，标签窗口跟随前进（否则 preset/deps 三项不变 → 陈旧窗口多出乱序
+   * 零柱：7d 8 柱 / 今日 2 柱，违背 §12.2 验收承诺；切 preset/重挂载自愈
+   * 不算兜底）。
+   */
+  const chartDayLabels = useMemo(() => {
+    if (dimension !== "day") return undefined;
+    const r = resolveQueryRange(preset, fromStr, toStr);
+    return dayLabelsBetween(r.fromMs, r.toMs);
+  }, [dimension, preset, fromStr, toStr, rows]);
+
   const bars = useMemo(
     () =>
       dimension === "range"
@@ -228,11 +244,14 @@ export default function TokenStats() {
             width: 640,
             height: 190,
             pad: 18,
+            // §十二 F2：≤7 天窗口逐日补零（今日=1 柱、7d 恒 7 柱；函数侧
+            // >7 枚自动忽略——30d/custom 维持"有数据才出柱"）
+            expectedLabels: chartDayLabels,
             // v2 M5 R2：agent 维度 tab 单选（作用域仅柱图，E 口径）——具体
             // agent = 单元素集 /「全部」= 不传（N12 钉子：不传 = 不过滤全量）
             agentFilter: agentTab === null ? undefined : new Set([agentTab]),
           }),
-    [rows, dimension, effectiveSelected, agentTab],
+    [rows, dimension, effectiveSelected, agentTab, chartDayLabels],
   );
 
   const sortedSessions = useMemo(() => {
@@ -341,9 +360,8 @@ export default function TokenStats() {
               <div className="kpi-label">output tokens</div>
             </div>
           </div>
-          {/* v2 M5（§5.6）：费用口径标注——CC 恒 0（S4 裁定）；M4 R1 用户
-              裁定移除 cost KPI 卡后，本标注以 KPI 区注释小字承载 */}
-          <p className="token-kpi-note">{t("token.costOpencodeOnly")}</p>
+          {/* §十二 F3（2026-08-28）：费用口径标注移除（用户裁定）——cost 数据
+              仍在会话列表/详情展示 */}
         </>
       )}
 
@@ -579,22 +597,36 @@ function StackedBarChart({ bars }: { bars: StackedBar[] }) {
             ))}
           </g>
         ))}
-        {/* 首尾标签 */}
-        {bars.length > 0 && (
-          <text className="chart-label" x={PAD} y={H - 4} fontSize="10">
-            {bars[0].label}
-          </text>
-        )}
-        {bars.length > 1 && (
-          <text
-            className="chart-label"
-            x={W - PAD}
-            y={H - 4}
-            fontSize="10"
-            textAnchor="end"
-          >
-            {bars[bars.length - 1].label}
-          </text>
+        {/* 横坐标标签（§十二 F2）：n≤7 每柱一枚、与柱中心线对齐
+            （textAnchor=middle，x=柱中心）；n>7 维持首尾两枚（原行为） */}
+        {bars.length > 7 ? (
+          <>
+            <text className="chart-label" x={PAD} y={H - 4} fontSize="10">
+              {bars[0].label}
+            </text>
+            <text
+              className="chart-label"
+              x={W - PAD}
+              y={H - 4}
+              fontSize="10"
+              textAnchor="end"
+            >
+              {bars[bars.length - 1].label}
+            </text>
+          </>
+        ) : (
+          bars.map((b) => (
+            <text
+              key={b.label}
+              className="chart-label"
+              x={b.x + b.w / 2}
+              y={H - 4}
+              fontSize="10"
+              textAnchor="middle"
+            >
+              {b.label}
+            </text>
+          ))
         )}
         {max > 0 && (
           <text className="chart-label faint" x={PAD} y={PAD - 4} fontSize="10">

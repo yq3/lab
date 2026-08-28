@@ -105,12 +105,16 @@ impl Lang {
         }
     }
 
-    // ---- token 会话汇报气泡（TC-TK-10/11/12；i/o/c 为已格式化数字串）----
+    // ---- token 会话汇报气泡（TC-TK-10/11/12；total 为 format_tokens_k 已格式化串）----
 
-    pub fn token_report(&self, input: &str, output: &str, cost: &str) -> String {
+    /// §十二 F1（2026-08-28）：**单总量口径**（= 面板 KPI total：in + out +
+    /// cache_read，reasoning 不计）——原 input/output/cost 明细模板与 CC 无
+    /// cost 双模板（M5 S4）统一收敛为一个总量模板；opencode 的 cost 段一并
+    /// 去除（用户裁定），cost 仍可在面板会话列表/详情查看。
+    pub fn token_report(&self, total: &str) -> String {
         match self {
-            Lang::Zh => format!("本期用了 {input} input / {output} output / {cost}"),
-            Lang::En => format!("This session: {input} input / {output} output / {cost}"),
+            Lang::Zh => format!("本次会话消耗 token {total}"),
+            Lang::En => format!("This session used {total} tokens"),
         }
     }
 
@@ -121,15 +125,6 @@ impl Lang {
         match self {
             Lang::Zh => format!(" · 今日 {total}"),
             Lang::En => format!(" · today {total}"),
-        }
-    }
-
-    /// M5（V2-DESIGN §5.4）：CC 会话汇报气泡——**无 cost 段**（S4 口径：CC
-    /// 无可靠单价表，诚实优于假精确）；今日段复用 token_report_today 拼接。
-    pub fn cc_token_report(&self, input: &str, output: &str) -> String {
-        match self {
-            Lang::Zh => format!("本期用了 {input} input / {output} output"),
-            Lang::En => format!("This session: {input} input / {output} output"),
         }
     }
 
@@ -403,15 +398,15 @@ mod tests {
 
     #[test]
     fn token_report_follows_current_lang() {
+        // §十二 F1：单总量口径（双模板收敛后重写断言）
         set(Lang::Zh);
-        assert_eq!(
-            current().token_report("58.3k", "910", "$0.05"),
-            "本期用了 58.3k input / 910 output / $0.05"
-        );
+        assert_eq!(current().token_report("59.2k"), "本次会话消耗 token 59.2k");
         set(Lang::En);
-        assert_eq!(
-            current().token_report("58.3k", "910", "$0.05"),
-            "This session: 58.3k input / 910 output / $0.05"
+        assert_eq!(current().token_report("59.2k"), "This session used 59.2k tokens");
+        assert_ne!(
+            Lang::Zh.token_report("1"),
+            Lang::En.token_report("1"),
+            "zh/en 互异（防粘贴错语言）"
         );
         set(Lang::Zh); // 恢复默认，避免影响其它测试
     }
@@ -424,10 +419,10 @@ mod tests {
         // 拼接语义：本期文案 + 追加段
         let full = format!(
             "{}{}",
-            current().token_report("58.3k", "910", "$0.05"),
+            current().token_report("59.2k"),
             current().token_report_today("42M")
         );
-        assert_eq!(full, "本期用了 58.3k input / 910 output / $0.05 · 今日 42M");
+        assert_eq!(full, "本次会话消耗 token 59.2k · 今日 42M");
         set(Lang::En);
         assert_eq!(current().token_report_today("1.2M"), " · today 1.2M");
         assert_ne!(
@@ -439,28 +434,11 @@ mod tests {
     }
 
     #[test]
-    fn cc_token_report_bilingual_without_cost_segment() {
-        // M5（TC-M5-05-6）：CC 汇报无 cost 段 + 双语互异
-        set(Lang::Zh);
-        assert_eq!(
-            current().cc_token_report("58.3k", "910"),
-            "本期用了 58.3k input / 910 output"
-        );
-        set(Lang::En);
-        assert_eq!(
-            current().cc_token_report("58.3k", "910"),
-            "This session: 58.3k input / 910 output"
-        );
-        assert_ne!(
-            Lang::Zh.cc_token_report("1", "1"),
-            Lang::En.cc_token_report("1", "1"),
-            "zh/en 互异（防粘贴错语言）"
-        );
-        // 无 cost 段（与 opencode 模板的区别钉住——S4 口径）
+    fn token_report_has_no_cost_segment_f1() {
+        // §十二 F1：cost 段去除钉子（原 cc_token_report 无 $ 断言的统一收敛版）
         for l in [Lang::Zh, Lang::En] {
-            assert!(!l.cc_token_report("1", "1").contains('$'));
+            assert!(!l.token_report("1").contains('$'));
         }
-        set(Lang::Zh); // 恢复默认
     }
 
     #[test]

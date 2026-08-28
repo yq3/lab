@@ -750,7 +750,7 @@ pub async fn token_stats_today() -> Result<TodayStats, String>
 
 三层快捷查看（§3.4）共享此命令，单一数据源。
 
-**idle 汇报追加今日累计**：`build_idle_report` 保持本期数字逻辑不变；`make_idle_hook`（lib.rs）在气泡文案末尾追加 ` · 今日 {format_tokens_k(total)}`——**total = in + out + cache_read**（reasoning 不计，对齐 SCOPE D 与 TodayStats 口径）；同连接顺带 SUM 当日聚合（一次查询，同连接复用）；新鲜度护栏 60s 口径不变；今日聚合失败（如跨午夜边界竞态）时静默省略追加段（本期数字照常显示）。**仅 `agent=="opencode"`**（M1 已分流的 idle hook 内实现）。追加段文案模板入 `i18n.rs`（`token_report_today` 后缀，zh/en 键集合一致，zh 与既有汇报措辞钉住逐字一致——M8 约定沿用）。
+**idle 汇报追加今日累计**：`build_idle_report` 保持本期数字逻辑不变；`make_idle_hook`（lib.rs）在气泡文案末尾追加 ` · 今日 {format_tokens_k(total)}`——**total = in + out + cache_read**（reasoning 不计，对齐 SCOPE D 与 TodayStats 口径）；同连接顺带 SUM 当日聚合（一次查询，同连接复用）；新鲜度护栏 60s 口径不变；今日聚合失败（如跨午夜边界竞态）时静默省略追加段（本期数字照常显示）。**仅 `agent=="opencode"`**（M1 已分流的 idle hook 内实现）。追加段文案模板入 `i18n.rs`（`token_report_today` 后缀，zh/en 键集合一致，zh 与既有汇报措辞钉住逐字一致——M8 约定沿用）。**§十二 F1 修订（2026-08-28）**：本期文案改单总量口径——「本次会话消耗 token {total}」（total = in+out+cache_read，与 KPI 同口径），input/output/cost 明细模板与 CC 无 cost 双模板（S4）收敛为统一 `token_report(total)`；cost 段去除、`format_cost_usd` 清退（见 V2-OPEN-ITEMS §十二 F1）。
 
 ### 3.3 今日 preset 与面板默认
 
@@ -1106,7 +1106,7 @@ tick 判定到期（daily/once，补跑窗内）
 - **tab 改名**：核心 tab「提醒」→「定时任务」（`panel.tab.tasks`；M2 注册表核心三之一，位置不变）；i18n 键沿用 `reminders.*` 存量 + 新增 `tasks.*`（合并表单/徽标/历史/模板）。
 - **（2026-08-25 R1 后用户裁定修订）**：① tab 中文显示名「定时任务」→「例程」（en 建议Routines，实施定）；「Todo」tab 中文显示名→「待办」（en 保持 Todo）——仅改 i18n 值，labelKey（`panel.tab.tasks` / `panel.tab.todo`）不变，页面内与 tab 名直接联动的标题文案同步「例程」；② 表单标题「新建提醒」→「新建例程」；③ 「新建」按钮从单独一行移至表单块**右下角**并换非默认色（与 M2 token 协调，实施定色）；④ 表单动作类型分段按钮去图标（「提醒」不带 💧、「执行命令」不带 ⚡；列表行徽标 💧/⚡ 保留不动）。
 - **（2026-08-25 二次修订）**：⑤ 状态芯片 `panel.agentTask` 文案「定时任务」→「例程」（en 建议 Routine，实施定）——与 tab 名统一；⑥ 「新建」按钮再上移：**不占单独动作行，与表单最后一行字段同行对齐**（右随字段行），③ 的"表单块右下角"精化为"最后一行字段行右端"。
-- **列表**（一张，现有提醒列表扩展）：每行动作徽标（💧 notify / ⚡ exec，title 属性说明）+ 名称 + 调度摘要（「每 30 分钟 · 09:00-18:00」/「每天 09:00」/「周三、五 09:00」/「一次 · 08-25 21:00」）+ 启用开关 + 行操作（编辑/试一试/跳过本次/删除两步确认——均既有交互模式扩展）；todo 派生行保持 M2 展示（可见惰性 + 徽标）。
+- **列表**（一张，现有提醒列表扩展）：每行动作徽标（🔔 notify / ⚡ exec，title 属性说明——§十二 F10 修订 2026-08-28：💧→🔔）+ 类别列（§十二 F11 修订：todo 派生行同渲染「📋 待办」，原条件排除已删）+ 名称 + 调度摘要（「每 30 分钟 · 09:00-18:00」/「每天 09:00」/「周三、五 09:00」/「一次 · 08-25 21:00」）+ 启用开关 + 行操作（编辑/试一试/跳过本次/删除两步确认——均既有交互模式扩展）；todo 派生行保持 M2 展示（可见惰性 + 徽标；§十二 F12 修订：行内烟花勾选项移除，烟花随全局总开关 OR 语义；§十二 F14 修订：页底「历史统计」区移除，reminder_logs 记账保留）。
 - **表单**（M2 只做了轻翻新，本里程碑完整重做，SCOPE 预告的归属）：动作类型分段（notify/exec）→ 条件显隐：
   - notify：kind（hydration/rest/custom）/ 文案 / 调度（interval 分钟 + 时间窗 ‖ daily HH:MM + 星期 ‖ once 日期时间）/ 烟花；
   - exec：任务名 / opencode 模板块（§4.6）/ command（等宽多行）/ cwd / 超时分钟 / 调度（同上三分支）/ `--auto` 随模板；
@@ -1333,7 +1333,8 @@ CC hook Stop 事件 → /state(idle, agent=claude-code)
   → 会话五维有非零用量 →
      ① 注入 success 状态：apply_event（**复合键 `claude-code:{sessionId}`**——M1 §1.5 键构造，
         同 v1 idle hook 伪路径 lib.rs make_idle_hook 先例，P2-5）+ notify
-     ② 气泡「本期用了 Xk input / Yk output」——无 cost 段（S4 口径）
+     ② 气泡「本次会话消耗 token Xk」（§十二 F1 修订：单总量口径 = in+out+
+        cache_read，原「Xk input / Yk output」无 cost 双模板已收敛，与 opencode 同模板）
         + 「 · 今日 T」追加段（token_stats_today 双源合计，与 opencode 同模板）
   → 无记录/全零/陈旧 → 静默跳过（对齐 TC-TK-12 口径）
 ```
@@ -1398,7 +1399,7 @@ M3 协议（`detail="tplId:param"`，§3.7.1）照抄到 `claude-code-hook.js`�
 
 1. 真实 CC 会话（本机 DataAgent 项目已有存量）→ Token 页今日/7d 出现 CC 会话行（首 prompt 标题 + `cc` 徽标 + cost `—`）；KPI 总量含 CC；费用区「仅 opencode」注释小字可见（M4 后形态）；**M3 三层交叉断言双源复验**（悬停卡 = 面板今日 KPI = 菜单，会话静止窗口内——P3-10；悬停/菜单在 degraded 态静默显示 CC-only 数值）；
 2. agent tab：切具体 agent → 柱图剔除其它 agent 数据、模型复选框收窄为该 agent 模型且重置全选，KPI/会话列表不变（E 口径）；双源同模型（deepseek）在模型 chip 自然归并（tooltip 跨源说明实施时对齐，P3-11）；agent 空集空态随单选交互不可达（`token.chart.noAgents` 已清退，原 P3-12 口径作废留注）；
-3. CC 会话结束 → 宠物气泡「本期用了 Xk input / Yk output · 今日 T」（无 $ 段）；opencode 会话结束气泡无回归（双发时同源合并）；
+3. CC 会话结束 → 宠物气泡「[cc] 本次会话消耗 token Xk · 今日 T」（§十二 F1 修订：单总量口径，原 input/output 双模板收敛）；opencode 会话结束气泡无回归（双发时同源合并）；
 4. CC 工具级气泡：CC 会话内编辑文件/跑命令 →「正在编辑 X」/「正在跑 npm」（与 opencode 同模板同 ambient 行为）；开关对双 agent 统一生效；
 5. 例程徽标：M4 定时任务跑一次 opencode run → Token 页新会话带 ⚡（前提 = M4 验收 4 回填，R8）；
 6. **CC 目录改名/删除（模拟未安装）**→ Token 页安静回退 opencode-only，无错误横幅（单源场景行为不变——N-4 兼容口径）；

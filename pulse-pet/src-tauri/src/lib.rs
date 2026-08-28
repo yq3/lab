@@ -474,7 +474,7 @@ pub fn run() {
             reminder_scheduler::reminders_get_fireworks_global,
             reminder_scheduler::reminders_set_fireworks_global,
             reminder_scheduler::reminders_get_paused,
-            reminder_scheduler::reminders_stats,
+            // §十二 F14（2026-08-28）：reminders_stats 注册随统计区移除清退
             reminder_scheduler::reminders_trigger_now,
             reminder_scheduler::reminders_ack,
             reminder_scheduler::reminders_dismiss,
@@ -580,7 +580,7 @@ mod tests {
             },
             &|_sid, _now| {
                 queries.fetch_add(1, Ordering::SeqCst);
-                Some(("本期用了 1k input / 0 output / $0".to_string(), None))
+                Some(("本次会话消耗 token 1k".to_string(), None))
             },
             &|_sid| {
                 dispatched.fetch_add(1, Ordering::SeqCst);
@@ -633,7 +633,7 @@ mod tests {
                 queries.fetch_add(1, Ordering::SeqCst);
                 assert_eq!(sid, "ses_a");
                 Some((
-                    "本期用了 58.3k input / 910 output / $0.05".to_string(),
+                    "本次会话消耗 token 59.2k".to_string(),
                     Some(42_000_000),
                 ))
             },
@@ -649,7 +649,7 @@ mod tests {
             bubbles.lock().unwrap().as_slice(),
             [(
                 "opencode".to_string(),
-                "本期用了 58.3k input / 910 output / $0.05 · 今日 42.0M".to_string()
+                "本次会话消耗 token 59.2k · 今日 42.0M".to_string()
             )],
             "M3：气泡末尾追加「 · 今日 42.0M」（TC-M3-09-1 逐字）；M6：携带 agent=opencode"
         );
@@ -690,7 +690,7 @@ mod tests {
             &state,
             &|_agent, text| bubbles.lock().unwrap().push((text.to_string(), _agent.to_string())),
             &|_sid, _now| {
-                Some(("本期用了 58.3k input / 910 output / $0.05".to_string(), None))
+                Some(("本次会话消耗 token 59.2k".to_string(), None))
             },
             &|_sid| {},
             "opencode",
@@ -698,7 +698,7 @@ mod tests {
         );
         assert_eq!(
             bubbles.lock().unwrap().as_slice(),
-            [("本期用了 58.3k input / 910 output / $0.05".to_string(), "opencode".to_string())],
+            [("本次会话消耗 token 59.2k".to_string(), "opencode".to_string())],
             "失败省略追加段——本期文案原样，无多余分隔符"
         );
     }
@@ -712,7 +712,7 @@ mod tests {
         idle_hook_body(
             &state,
             &|_agent, text| bubbles.lock().unwrap().push(text.to_string()),
-            &|_sid, _now| Some(("本期用了 1 input / 0 output / $0".to_string(), Some(999_999_999 + 1))),
+            &|_sid, _now| Some(("本次会话消耗 token 1".to_string(), Some(999_999_999 + 1))),
             &|_sid| {},
             "opencode",
             "ses_a",

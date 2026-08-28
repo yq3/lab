@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   AGENT_OPENCODE,
+  dayLabelsBetween,
   formatCost,
   formatTokens,
   localDayEndMs,
@@ -102,6 +103,41 @@ describe("rangeForPreset：时间跨度（含当天，TC-TK-08）", () => {
     const fromNext = new Date(rangeForPreset("today", next).fromMs);
     expect(fromNext.getDate()).toBe(17);
     expect(fromNext.getHours()).toBe(0);
+  });
+});
+
+// ---- §十二 F2 审查 P3-5：dayLabelsBetween 直测（标签生成函数自身） ----
+
+describe("dayLabelsBetween：窗口日标签全列表（F2 补零柱数据源）", () => {
+  it("两端含、顺序升序（单日=1 枚；3 天=3 枚）", () => {
+    const one = dayLabelsBetween(
+      new Date(2026, 7, 28, 9, 0).getTime(),
+      new Date(2026, 7, 28, 18, 0).getTime(),
+    );
+    expect(one).toEqual(["2026-08-28"]);
+    const three = dayLabelsBetween(
+      new Date(2026, 7, 26, 23, 0).getTime(),
+      new Date(2026, 7, 28, 0, 30).getTime(),
+    );
+    expect(three).toEqual(["2026-08-26", "2026-08-27", "2026-08-28"]);
+  });
+
+  it("跨月步进正确（7 天窗口含月末月初）", () => {
+    const labels = dayLabelsBetween(
+      new Date(2026, 6, 29).getTime(), // 2026-07-29
+      new Date(2026, 7, 4, 12, 0).getTime(), // 2026-08-04
+    );
+    expect(labels[0]).toBe("2026-07-29");
+    expect(labels[6]).toBe("2026-08-04");
+    expect(labels).toHaveLength(7);
+  });
+
+  it("from > to（倒置区间）→ 空列表（防御，不产生负步进死循环）", () => {
+    const labels = dayLabelsBetween(
+      new Date(2026, 7, 28).getTime(),
+      new Date(2026, 7, 26).getTime(),
+    );
+    expect(labels).toEqual([]);
   });
 });
 
