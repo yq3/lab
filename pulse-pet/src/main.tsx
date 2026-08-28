@@ -5,6 +5,7 @@ import { initHttpBridge } from "./lib/http-bridge";
 import { initReminderBridge } from "./lib/reminder-bridge";
 import { initAtlasBridge } from "./lib/atlas-bridge";
 import { initInteractionBridge } from "./lib/interaction";
+import { initSizeBridge } from "./lib/size-bridge";
 import { initTodoBridge } from "./lib/todo-bridge";
 import { initToolBubbleBridge } from "./lib/tool-bubble-bridge";
 import { initI18n } from "./lib/i18n";
@@ -22,6 +23,9 @@ void initAtlasBridge();
 // M6：交互模式链路（查询穿透状态 + 监听 pulsepet://pass-through → petStore；
 // pet 的拖拽/右键守卫与 panel 设置页开关都依赖该状态位）。
 void initInteractionBridge();
+// §十一（V2-OPEN-ITEMS）：宠物大小档位链路（查询 pet.size + 监听 pet://size
+// → petStore；pet 的 canvas/CSS 尺寸与 panel 设置页分段控件都依赖该状态位）。
+void initSizeBridge();
 // M7：todo 完成联动（监听 todo://completed → waving + 气泡；仅 pet 路由生效）。
 void initTodoBridge();
 // v2 M3：工具级气泡链路（pet：get 初始化开关 store + 监听 pulsepet://tool-bubble

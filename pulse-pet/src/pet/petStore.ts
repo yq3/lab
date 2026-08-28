@@ -18,6 +18,7 @@ import {
   type BubbleState,
 } from "../lib/bubble-queue";
 import type { AtlasMeta, AtlasPixels } from "../lib/atlas";
+import type { PetSize } from "../lib/size-bridge";
 
 /**
  * v2 M2：气泡从单槽位（`BubbleState | null` + 恒定 8s）升级为**排队模型**
@@ -76,6 +77,12 @@ interface PetState {
   contextMenu: { x: number; y: number } | null;
   /** M7：完成庆祝（waving 挥手覆盖期；null = 无）。 */
   celebration: CelebrationState | null;
+  /**
+   * 宠物大小档位（V2-OPEN-ITEMS §十一；Rust app_state `pet.size` 为唯一
+   * 权威，本位由 size-bridge 查询/订阅填充；默认 medium=220，占位 PNG 与
+   * 非 Tauri 环境同样有效——档位只改画布尺寸，与素材来源正交）。
+   */
+  size: PetSize;
   setRaw: (raw: NormalizedState) => void;
   /** v2 M1：更新显示状态归属 agent（http-bridge 解析 payload.agent 后调用）。 */
   setDisplayAgent: (agent: string) => void;
@@ -88,6 +95,8 @@ interface PetState {
   openContextMenu: (x: number, y: number) => void;
   /** M6：关闭右键菜单（菜单项动作 / 点击外部 / 窗口失焦）。 */
   closeContextMenu: () => void;
+  /** §十一：更新大小档位（size-bridge 订阅 Rust 广播 / 设置页乐观更新时调用）。 */
+  setSize: (size: PetSize) => void;
   /** M7：开始完成庆祝（todo 完成 → waving + 气泡，TC-TD-04/05）。 */
   startCelebration: (durationMs?: number) => void;
   /**
@@ -178,7 +187,9 @@ export const usePetStore = create<PetState>((set, get) => ({
   passThrough: false,
   contextMenu: null,
   celebration: null,
+  size: "medium",
   setAtlas: (meta, pixels) => set({ atlasMeta: meta, atlas: pixels }),
+  setSize: (size) => set({ size }),
   setPassThrough: (enabled) =>
     // 切到穿透时已打开的右键菜单一并关闭（穿透态菜单不可达，TC-WIN-04）
     set((s) => ({

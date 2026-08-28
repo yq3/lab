@@ -123,18 +123,19 @@ select {
   background: var(--ink-faint);
 }
 
-/* pet 窗口：220×220 透明画布 */
+/* pet 窗口：透明画布（§十一档位化：尺寸 = --pet-size 变量，Pet.tsx 按档位注入；
+   兜底 220px = medium，防变量缺失） */
 .pet-root {
   position: relative;
-  width: 220px;
-  height: 220px;
+  width: var(--pet-size, 220px);
+  height: var(--pet-size, 220px);
   background: transparent;
 }
 
 .pet-canvas {
   display: block;
-  width: 220px;
-  height: 220px;
+  width: var(--pet-size, 220px);
+  height: var(--pet-size, 220px);
 }
 
 /* ---- 宠物气泡（v2 M2：宠物世界固定色，不随主题，§2.6.3） ---- */
@@ -157,7 +158,7 @@ select {
   left: 50%;
   transform: translateX(-50%);
   width: max-content;
-  max-width: 208px;
+  max-width: calc(100% - 12px); /* §十一：随档位（中档 208 / 小档 172；长文案折行，至多三行） */
   max-height: 70px; /* 3×行高 18.2 + padding 14 ≈ 68.6，余 1.4 容字体涨落 */
   padding: 7px 12px;
   background: var(--pet-world-surface);
@@ -245,6 +246,9 @@ select {
   position: absolute;
   z-index: 3;
   min-width: 168px;
+  /* §11.5 保险丝：菜单是窗口内 DOM 浮层，任何语言/文案/档位组合下最坏只
+     省略文案（见下 .pet-menu-item），不裁布局（en 长文案曾实测外宽 266px） */
+  max-width: calc(100% - 4px);
   padding: 4px;
   background: var(--pet-world-surface);
   border: 2px solid var(--pet-world-line);
@@ -264,6 +268,8 @@ select {
   border-radius: 0; /* 直角项 */
   cursor: pointer;
   white-space: nowrap;
+  overflow: hidden; /* §11.5：配合 max-width 超长文案省略号降级，不裁布局 */
+  text-overflow: ellipsis;
 }
 
 .pet-menu-item:hover {

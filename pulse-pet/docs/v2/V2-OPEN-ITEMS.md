@@ -5,7 +5,7 @@
 > 性质：两项 **Windows 特有缺陷**，根因已定位、修复方案已裁定（R1-R5，见 [§三](#三修复任务清单r1r5统一实施)）。
 > **状态（2026-08-27 闭环）**：R1-R5 **已修复并随 `pulse-pet-v0.2.1` 发布**——实施 commit `6f9e0be`（R1-R4）/ `9e609d6`（R5）/ `acc12b3`（本文件）/ `f2cf13e`（版本 bump 四件套），tag `pulse-pet-v0.2.1`（CI run 33071206433 双矩阵 success，安装包挂 draft Release）。测试基线全绿（`cargo test` 320+3 钉子 / `npm test` 409 / `tsc --noEmit`），committer 评审 APPROVED（P0/P1=0，三条 P3 加固已落地）。**Windows release 实机三场景验证通过（2026-08-27，v0.2.1，§四）**，#19 / #20 可闭环。
 > 共同背景：与 v1 issue #9 同源——Windows 上 WebView2 环境创建异步、主线程泵消息期间页面已加载执行（GUI 子系统 + 控制台子进程交互）的时序盲区；v1 里程碑"Windows 实机验证后移"的欠账在 v2 实机使用中集中显性化。macOS 开发机均无法复现。
-> 构成说明（2026-08-27 补充）：§一~§四为 issue #19/#20 专项记录（**已闭环**）；§五起为 **v2 六里程碑（M1~M6）工作流检查点遗留事项汇总**（supervised-coding 2026-08-27 归档，来源 `.opencode/workflows/task-pulsepet-v2-m1~m6.md`），清偿后回写勾选并注来源任务 ID 与日期。
+> 构成说明（2026-08-27 补充）：§一~§四为 issue #19/#20 专项记录（**已闭环**）；§五起为 **v2 六里程碑（M1~M6）工作流检查点遗留事项汇总**（supervised-coding 2026-08-27 归档，来源 `.opencode/workflows/task-pulsepet-v2-m1~m6.md`），清偿后回写勾选并注来源任务 ID 与日期；**§十一为 2026-08-28 新增**：宠物大小三档 + 视觉归一化特性（设计 + 实施同日完成，含 en 右键菜单裁剪与 atlas 短缓冲两处存量缺陷清偿，见 §11.5 与 `docs/v2/pet-size.md`）。
 
 ---
 
@@ -218,8 +218,108 @@ Rust 命令错误串未 i18n（与代码库既有模式一致）——待 i18n �
 
 ---
 
+## 十一、宠物大小三档 + 视觉归一化（2026-08-28 设计定稿，**已实施**）
+
+> 来源：用户需求"允许用户设置宠物大小（大/中/小三档）"+ 实测发现 petdex 导入素材与内置宠物视觉大小悬殊（idle 高度比 1.8×，根因是素材"填帧率"差异而非渲染缺陷）。
+> 状态：**✅ 已实施（2026-08-28 同日完成）**——完整设计与实施偏差记录见 `docs/v2/pet-size.md`（防裁剪上限从"全表 content 包围盒"修正为"帧尺寸"、idle 度量从"行条带"修正为"逐帧原点并集"，锚定比率与残差结论不变；附带清偿 en 菜单裁剪 §11.5 与 atlas 短缓冲越界隐患两处存量缺陷）。测试基线：`cargo test` 346 passed+3 ignored / `npm test` 433 / `tsc` 0 错 / build 通过；dev 冒烟（large 档窗口实测 280×280、时序日志正确）+ tester 复核 PASS（db 档位 4 场景 + 静态核验）+ committer 审查 **APPROVED**（P2-1/P3-1/2/3/5/6 六项当日修复；复核再 APPROVED + 复核新提 A/B 两条 P3 亦落地——兜底测试改跑真实短缓冲形态、pet-size.md 占位路径措辞对齐，2026-08-28；P3-4/7~11 记录备查）。用户目验项 = pet-size.md §6 TC-SZ-01~09（日常使用顺带）。
+
+### 11.1 起因：素材"填帧率"差异实测（2026-08-28）
+
+四素材 sheet 均为标准 1536×1872（单帧 192×208）、同一缩放路径渲染，差异全在画师对帧面积的占用（PIL alpha 包围盒实测；192×208 是"舞台"，用多少是画师的事——codex/petdex 生态普遍满帧，内置素材刻意留白）：
+
+| 素材 | idle 帧内容占比 | 220 画布 idle 视觉高（现状） |
+|---|---|---|
+| blinking-kitty（内置） | 宽 46% × 高 52% | ~114 px |
+| wagging-doggy（内置） | 宽 50% × 高 54% | ~118 px |
+| kun-like（petdex） | 宽 62% × 高 95% | ~210 px |
+| line-puppy（petdex） | 宽 81% × 高 95% | ~210 px |
+
+调研佐证：v1 调研报告（`docs/v1/desktop-pet-research.md`）覆盖的 7 个开源同类产品均无"用户可调宠物大小"设置，本特性为差异化功能，无生态行为冲突。
+
+### 11.2 决策记录（用户拍板 2026-08-28）
+
+| 项 | 决定 |
+|---|---|
+| 档位 | **184 / 220 / 280 逻辑像素**（小/中/大）；默认 medium=220（老用户无感）；持久化 `app_state` 新键 `pet.size`（"small"/"medium"/"large"，缺省 medium） |
+| 归一化 | **常开无开关**。锚定**内置猫现状**：目标 idle 高 = `canvas × 108/208`（≈52%），全帧最大内容包围盒做防裁剪上限（安全网，实测四素材均不触发）。决策演进：初始方案 A（idle 目标 0.73×canvas）会把内置猫放大 1.2× 且留 1.2× 残差，用户裁定改为"内置现状就是中档、petdex 靠过来"——内置零变化、残差归零 |
+| 入口 | 仅 panel 设置页「宠物」区三档分段控件（复用 `theme-seg` 样式结构）；宠物右键菜单**不加**项（避免与 §七-12 已修的菜单贴边风险再叠加）。切换即时生效（Rust `set_size` + `pet://size` 广播），无需重启，与主题/穿透体验一致 |
+| 插值 | atlas 模式 `ctx.imageSmoothingEnabled = false`（nearest 像素锐化；归一化后内置猫大档放大 ~1.35×，平滑插值会糊）；占位 PNG 路径零改动 |
+| 行为变化 | **内置宠物视觉不变**；仅 petdex/codex 导入素材缩小到与内置一致（中档 idle 210→114）。发布说明需注明 |
+
+归一化公式（**实施修订版**，详见 pet-size.md §3.4 两处修正：防裁剪上限弃用全表 content 包围盒——奔跑行动画使其 ≈ 整张 sheet 无区分度；改用帧尺寸本身，数学上等价"每帧不裁"且不依赖度量）：
+
+```
+s = min(canvas × (108/208) / idle.h, canvas / frameW, canvas / frameH)
+```
+
+- `idle` = idle 行**逐帧原点并集**（Rust `frame_union_at_origin(row 0)`，帧内局部坐标）；
+- 绘制 = 帧居中（帧内相对位置保持 → 帧间无抖动、奔跑帧帧内位移不破坏）；
+- `idle` 缺失（全透明 sheet / 占位 PNG 路径）→ 回退现行 `computeFrameRect`（min 适配，行为同今天）。
+
+数值验算（idle 视觉高度 px；三档等比，无任何素材触上限 → 零裁剪风险）：
+
+| 素材 | s（中档） | 小 184 | 中 220 | 大 280 |
+|---|---|---|---|---|
+| blinking-kitty | 1.0577（= 现状缩放比，视觉零变化） | 95.5 | **114.2（与今天一致）** | 145.4 |
+| wagging-doggy | 1.0203 | 95.5 | 114.2（较 today −3.6%，无感） | 145.4 |
+| kun-like / line-puppy | 0.5769 | 95.5 | 114.2（自 210 靠拢） | 145.4 |
+| **idle 残差** | — | **0** | **0** | **0** |
+
+### 11.3 改动面摘要（Rust ~300 行 / 前端 ~350 行 / 文档 ~150 行）
+
+Rust：
+
+| # | 文件 | 改动 |
+|---|---|---|
+| 1 | `pet_size.rs`（新，照 `theme.rs` 同构） | `KEY_SIZE="pet.size"` / `SIZE_EVENT="pet://size"` / `SIZES={184,220,280}`；parse-read-write + `pet_get_size`/`pet_set_size` 命令（写库 → 应用窗口 → 广播 `{size, logical}`）+ mock runtime 测试（**窗口应用分支容忍无 pet 窗**） |
+| 2 | `windows.rs` | `apply_pet_size(app, logical)`：`set_size(LogicalSize)` + **内容中心锚定**（位置补偿 ±Δ/2 × dpr 物理像素，切档不"右下生长"）+ 按所在显示器复用 `clamp_position` 防越屏 |
+| 3 | `lib.rs` setup | 窗口创建循环（:397）之后、`restore_pet_position`（:412）**之前**应用档位——时序铁律 **set_size → restore → show**（restore 读 outer_size 做 clamp，#9/#20 语义不变）；`invoke_handler` 注册两命令 |
+| 4 | `atlas.rs` | 加载 RGBA 时计算 idle 行（row 0）**逐帧原点并集**（alpha>0，防御式访问）；`AtlasMetaDto` 增 `idle` 嵌套字段 `{x,y,w,h}`（全透明 null）+ 纯函数单测；resolve 兜底短缓冲保持不补全（committer P2-1：补全会劣化降级路径，见 pet-size.md §5） |
+
+前端：
+
+| # | 文件 | 改动 |
+|---|---|---|
+| 5 | `lib/pet-scale.ts`（新） | 归一化纯函数（帧上限公式，§11.2 修订版）+ 四素材实测 bbox 钉子单测（idle 收敛一致、帧上限生效、缺省回退路径） |
+| 6 | `lib/size-bridge.ts`（新，照 `interaction.ts` 同构） | fetch/set invoke 封装 + payload 解析 + `initSizeBridge`（查询 + 订阅 → store；pet/panel 双路由初始化）；`PET_SIZES` 常量与 Rust `SIZES` 注释互钉双端一致 |
+| 7 | `petStore.ts` | `size: PetSize`（默认 medium）+ `setSize` |
+| 8 | `PetCanvas.tsx` | `CSS_SIZE` 常量（:9）→ 档位驱动（渲染 effect deps `[size]`，重建即重设 canvas/监听器——实施改此方案，替代原"sizeRef + 主动 resize"设计，rAF 依赖读取模式不变）；`drawAtlas` 改归一化缩放 + 每帧设 `imageSmoothingEnabled=false`（仅 atlas 路径，占位路径显式保持平滑） |
+| 9 | `global.css` | `.pet-root`/`.pet-canvas`（:121-129）220px → `--pet-size` CSS 变量（Pet.tsx 从 store 注入）；`.pet-bubble`（:138）`max-width: 208px` → `calc(100% − 12px)` |
+| 10 | `PetMenu.tsx` | clamp 的 windowSize（:37-47）写死 220 → `PET_SIZES[size]` |
+| 11 | `Settings.tsx` | 「宠物」区下拉后加三档分段控件（`theme-seg` 结构复刻）；onSize 乐观更新 + 失败回滚（照 `onLanguage` 模式） |
+| 12 | `i18n.ts` | 新键 `settings.size` / `settings.sizeSmall` / `settings.sizeMedium` / `settings.sizeLarge`（zh/en 成对，字典完备性测试自动兜底）；Rust 侧无新文案 |
+
+联动确认**无需改动**：位置记忆（存左上角 + clamp 兜底）、fireworks（动态读 pet bounds）、MiniCat、拖拽阈值（4px 常量）、跨 dpr（LogicalSize + TC-SP-03 链路）、TC-01「不可 resize」语义（`resizable:false` 不变，档位是显式设置非自由缩放）、热键/托盘。
+
+### 11.4 小档（184）适配核验（2026-08-28，SF 系统字体 @12px 实测）
+
+| 项 | 结论 |
+|---|---|
+| panel 设置页 | 独立 900×640 窗口，与宠物档位无关，永远完整 |
+| 气泡 | 改 `calc(100% − 12px)` 后小档 max 172px：zh 提醒样例 170px **完整**；token 汇报 224px 在中档 208 上限下本就省略，小档多省 2~4 字符——优雅降级，气泡框/尖角/snooze 按钮不受影响 |
+| 右键菜单（zh） | 实测外宽 176px（min-width 168 + padding/border 12），184 − 176 − 2×2 = **4px 余量，完整显示**（184 取值依据即在此） |
+| 右键菜单高度 | 双 agent 子行最高 ~146px，184 余 34px ✓（§七-12 ResizeObserver 已修，风险不叠加） |
+
+### 11.5 附带存量缺陷：en 右键菜单今日已裁剪（随本特性一并修复）
+
+实测（SF@12px 逐项量宽）：`menu.togglePass` en 文案 "Toggle interaction mode (pass-through: on)" 菜单项 258px、外宽 **266px** > 中档 220 窗口——**en 语言下右键菜单今天已被右裁 ~46px**（M8 i18n 漏检），184 小档将裁 82px。修复两件（并入实施清单）：
+
+1. **en 文案缩短**（主修复）：`"Pass-through: {state}"`（外宽 ~120px，任何档位完整）；zh 文案不动（实测 176px 安全）；
+2. **防御 CSS**（保险丝）：`.pet-menu` 加 `max-width: calc(100% − 4px)`、菜单项加 `overflow: hidden + text-overflow: ellipsis`——未来任何语言/文案/档位组合最坏只省略文案，不再裁布局。
+
+### 11.6 实施顺序与验收要点
+
+顺序（每步独立可验证）：① Rust `pet_size.rs` + lib.rs 接线（`cargo test`）→ ② 前端档位化（bridge/store/CSS/菜单/气泡，`npm test`）→ ③ Settings 分段控件 + i18n（`npm run build`）→ ④ atlas 度量 + DTO（`cargo test`）→ ⑤ 归一化 + nearest（`npm test`）→ ⑥ 文档（`docs/v2/pet-size.md` + AGENTS.md）+ `npm run tauri dev` 全链路手验。
+
+验收要点：档位切换即时生效 + 重启恢复 + 默认 medium；四素材同档 idle 高度一致（残差 0）；奔跑/挥手帧无裁剪；184 档 zh/en 菜单与气泡完整（en 修复后）；非法 `pet.size` 值拒绝且不破坏已存值；贴屏边缘切档 clamp 不越界；set_size → restore → show 时序钉子（order_nails 风格）；发布说明注明"导入素材视觉缩小到与内置一致"。
+
+工作量：~800 行，1~1.5 天。
+
+---
+
 ## 附：清偿记录
 
 （清偿后回写：日期 + 来源任务 ID + 去向。已有示例：§6.2-5 TC-M4-18 核心面 2026-08-27 随 v0.2.1 §四场景 2 验证；§7-7 或已随 v0.2.1 R2 顺手消化，打磨轮核对）
 
 - [x] **§8-1 文档滞后（v2-m6 P3-②）**：✅ 已清偿 2026-08-27（文档维护轮，supervised-coding 执行）——V2-DESIGN §6.0/§6.2/§6.3/§6.4 共 7 处 + V2-TEST-CASES TC-M6-04/TC-M6-06-4 共 4 处对齐"右键菜单子行"口径，修订注记引用 §3.4 后裁定；改动在工作区待入库（与 V2-OPEN-ITEMS 本文件 §五~§十 一并提交）
+- [x] **§十一 宠物大小三档 + 视觉归一化**：✅ 已实施 2026-08-28（同日设计 + 实施）——Rust `pet_size.rs`/`windows.rs::apply_pet_size`/`atlas.rs` idle 度量 + 前端 `pet-scale.ts`/`size-bridge.ts`/档位化渲染/设置页分段控件；公式两处实施修订（帧上限替代全表 bbox，见 pet-size.md §3.4）；附带清偿 §11.5 en 菜单裁剪（文案缩短 + 防御 CSS）与 atlas 兜底短缓冲越界隐患（防御式访问，保持短以维持占位猫降级——committer P2-1 裁定）；基线 cargo 346 passed+3 ignored / npm 433 / tsc 0 错；dev 冒烟通过（large 档窗口 280×280 实测）+ committer 审查 APPROVED（六项审查意见当日落地）。完整留痕：`docs/v2/pet-size.md`；用户目验 TC-SZ-01~09 日常顺带

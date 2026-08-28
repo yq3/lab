@@ -12,6 +12,7 @@ describe("petStore M5 atlas 状态（热替换基础，TC-SP-11②）", () => {
     frameW: 192,
     frameH: 208,
     notice: null,
+    idle: null, // §十一归一化度量（缺省 = 全帧适配）
   });
   const pixels = (tag: number): AtlasPixels => ({
     cols: 8,

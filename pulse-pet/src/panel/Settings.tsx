@@ -25,6 +25,7 @@ import {
 } from "../lib/theme";
 import { setPluginEnabled, usePluginStore } from "../lib/plugin-store";
 import { usePetStore } from "../pet/petStore";
+import { setPetSize, type PetSize } from "../lib/size-bridge";
 import { fetchToolBroadcast, setToolBroadcast } from "../lib/tool-bubble-bridge";
 import { changeLanguage, t, useLangStore, type Lang } from "../lib/i18n";
 
@@ -83,6 +84,8 @@ export default function Settings() {
    * 重拉不受限，见 focusRefreshAllowed）。 */
   const lastDoctorAtRef = useRef<number | null>(null);
   const passThrough = usePetStore((s) => s.passThrough);
+  const petSize = usePetStore((s) => s.size); // §十一：档位（同一 store 位驱动 pet 窗与设置页）
+  const setPetSizeState = usePetStore((s) => s.setSize);
   const lang = useLangStore((s) => s.lang); // M8 i18n：语言变化时本页文案重渲染
   const themePref = useThemeStore((s) => s.preference); // v2 M2 外观
   const plugins = usePluginStore((s) => s.plugins); // v2 M2 功能管理
@@ -92,6 +95,9 @@ export default function Settings() {
   const [toolBroadcast, setToolBroadcastState] = useState<boolean>(true);
   const [toolBroadcastBusy, setToolBroadcastBusy] = useState(false);
   const [toolBroadcastError, setToolBroadcastError] = useState<string | null>(null);
+  /** §十一：档位切换 busy / 行级错误（与语言切换同款乐观更新 + 回滚模式）。 */
+  const [sizeBusy, setSizeBusy] = useState(false);
+  const [sizeError, setSizeError] = useState<string | null>(null);
 
   // L2：语言切换 → 旧语言的 notice（Rust message 无法前端重算）整组清除
   useEffect(() => {
@@ -242,6 +248,27 @@ export default function Settings() {
     }
   };
 
+  /**
+   * §十一：大小三档切换——本地乐观更新（pet 窗经 Rust `pet://size` 广播同步
+   * 同一值），invoke 失败回滚（Rust 侧未持久化/未广播，panel 若保持新档位
+   * 会与 pet 窗及重启后的旧档位不一致——照 onLanguage 回滚口径）。
+   */
+  const onSize = async (next: PetSize) => {
+    if (next === petSize || sizeBusy) return;
+    setSizeBusy(true);
+    setSizeError(null);
+    const prev = petSize;
+    setPetSizeState(next);
+    try {
+      await setPetSize(next);
+    } catch (e) {
+      setPetSizeState(prev); // 回滚
+      setSizeError(t("settings.sizeFail", { msg: e instanceof Error ? e.message : String(e) }));
+    } finally {
+      setSizeBusy(false);
+    }
+  };
+
   /** v2 M1 接入管理动作（安装/重装/卸载）：完成后刷新 doctor；结果双向可见——
    * 失败行级错误条（intgErrors）；成功行级提示条（intgNotices，存 status
    * 对象、渲染时以当前语言现拼——L2 修复，TC-INT-07-5 / tester P2-1）。 */
@@ -385,6 +412,30 @@ export default function Settings() {
             ))}
         </ul>
       )}
+
+      {/* §十一（V2-OPEN-ITEMS）：大小三档分段控件（复用主题 theme-seg 形态；
+          切换即时生效 + 重启保留；184/220/280 逻辑像素，内置猫锚定中档） */}
+      {sizeError && <p className="settings-error">⚠️ {sizeError}</p>}
+      <div className="theme-seg" role="radiogroup" aria-label={t("settings.size")}>
+        {(["small", "medium", "large"] as PetSize[]).map((v) => (
+          <button
+            key={v}
+            role="radio"
+            aria-checked={petSize === v}
+            disabled={sizeBusy || !isTauriRuntime()}
+            className={petSize === v ? "seg active" : "seg"}
+            onClick={() => void onSize(v)}
+          >
+            {t(
+              v === "small"
+                ? "settings.sizeSmall"
+                : v === "medium"
+                  ? "settings.sizeMedium"
+                  : "settings.sizeLarge",
+            )}
+          </button>
+        ))}
+      </div>
 
       <h2>{t("settings.interaction")}</h2>
       {/* M6 P2 ②：穿透错误独立展示（不再借用全局 error 位，避免连带清 atlas 横幅） */}

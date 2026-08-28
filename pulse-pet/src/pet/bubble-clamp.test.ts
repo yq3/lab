@@ -6,8 +6,10 @@
  * 不可见。定案（playwright 实测三轮后的最终口径，见 global.css 注释）：
  * - 弃 nowrap/ellipsis 与 -webkit-line-clamp（box 布局下 absolute 盒
  *   left:50% 居中法的 shrink-to-fit 塌成 110px 窄柱）；
- * - `width: max-content` + `max-width: 208px`：短文案收窄单行、长文案
- *   208px 折行（idle 汇报 ~476px 需三行，「· 今日 X」落第三行完整可见）；
+ * - `width: max-content` + `max-width: calc(100% - 12px)`（§十一档位化：
+ *   原定值 208px → 随 --pet-size，中档等效 208 / 小档 172）：短文案收窄
+ *   单行、长文案按档位宽折行（idle 汇报 ~476px 需三行，「· 今日 X」落
+ *   第三行完整可见）；
  * - `max-height: 70px` 三行截断（文案措辞钉字不可精简，三行是尾段可见
  *   的最小行数）；超三行直接裁掉无省略号（极端 140 字符文案，可接受）。
  *
@@ -52,9 +54,10 @@ describe("pet-bubble 多行显示（v2 打磨轮 #4）", () => {
     expect(bubble).toContain("white-space: normal");
   });
 
-  it("测宽修复：width max-content + max-width 208（防 left:50% 下 shrink-to-fit 塌窄柱）", () => {
+  it("测宽修复：width max-content + max-width 随档位（防 left:50% 下 shrink-to-fit 塌窄柱）", () => {
     expect(bubble).toContain("width: max-content");
-    expect(bubble).toContain("max-width: 208px");
+    // §十一档位化：208px 定值 → 相对档位（中档等效 208 / 小档 172）
+    expect(bubble).toContain("max-width: calc(100% - 12px)");
   });
 
   it("至多三行截断：max-height: 70px（「· 今日 X」第三行完整可见的最小行数）", () => {

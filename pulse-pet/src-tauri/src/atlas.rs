@@ -218,6 +218,48 @@ pub fn sheet_dimensions(bytes: &[u8]) -> Result<(u32, u32), AtlasError> {
         .map_err(|e| AtlasError::BrokenSheet(format!("读头部尺寸失败: {e}")))
 }
 
+// ---- §十一内容包围盒度量（V2-OPEN-ITEMS §11.3-4，归一化数据源）----
+
+/// 包围盒（帧内局部像素坐标）：(x, y, w, h)。
+pub type BBox = (u32, u32, u32, u32);
+
+/// 指定帧行的**逐帧原点并集**：该行每个帧内 alpha > 0 像素的局部包围盒，
+/// 不加帧偏移直接并集——即"典型单帧的内容框"（idle 行静止素材各帧内容
+/// 几乎同位，并集 ≈ 单帧内容框；若有呼吸位移取保守并集）。
+/// 全行透明 → None（前端回退全帧适配）。
+///
+/// 注意**不是**行条带（strip）的整体 bbox：奔跑行动画会让内容遍布整帧
+/// 宽度，strip bbox ≈ 整行宽度，作为归一化基准毫无区分度（实测 kitty
+/// idle strip 宽 1432 vs 帧内并集 88）。~1M 像素一次遍历，仅在
+/// atlas_meta / atlas_select 组装 DTO 时调用（非每帧路径）。
+pub fn frame_union_at_origin(rgba: &[u8], frame_w: u32, frame_h: u32, cols: u32, row: u32) -> Option<BBox> {
+    let (mut x0, mut y0, mut x1, mut y1) = (u32::MAX, u32::MAX, 0u32, 0u32);
+    let sheet_w = frame_w * cols;
+    for c in 0..cols {
+        let fx = c * frame_w;
+        for y in 0..frame_h {
+            for x in 0..frame_w {
+                // 防御式访问：缓冲短于声明尺寸时按透明跳过（不 panic）
+                if rgba.get(((row * frame_h + y) * sheet_w + fx + x) as usize * 4 + 3)
+                    .copied()
+                    .unwrap_or(0)
+                    > 0
+                {
+                    x0 = x0.min(x);
+                    y0 = y0.min(y);
+                    x1 = x1.max(x);
+                    y1 = y1.max(y);
+                }
+            }
+        }
+    }
+    if x0 == u32::MAX {
+        return None;
+    }
+    Some((x0, y0, x1 - x0 + 1, y1 - y0 + 1))
+}
+
+
 /// pet.json + spritesheet 字节 → 校验后的 AtlasData。
 pub fn load_from_pair(
     meta_bytes: &[u8],
@@ -539,6 +581,11 @@ pub fn resolve_requested(requested: Option<&str>, home: &Path) -> Selection {
                 rows: 9,
                 frame_w: FRAME_W,
                 frame_h: FRAME_H,
+                // 兜底缓冲刻意保持"短"（缺 cols 倍）：前端 makeAtlasPixels
+                // 长度校验失败 → 回退占位猫可见（committer P2-1：补全成
+                // 全尺寸会让全透明 sheet 通过校验 → 宠物窗口全透明不可见，
+                // 降级劣于占位猫）。§十一度量对此防御式访问（短缓冲 → idle
+                // None → 前端全帧适配），无越界风险。
                 rgba: vec![0; (FRAME_W * FRAME_H * 9 * 4) as usize],
             },
             notice,
@@ -617,6 +664,25 @@ pub struct AtlasMetaDto {
     pub frame_w: u32,
     pub frame_h: u32,
     pub notice: Option<String>,
+    /// §十一归一化：idle 行（row 0）逐帧原点并集（"内置猫现状"锚定的对端
+    /// 数据，前端 `pet-scale.ts` 消费；全透明 → null → 前端回退全帧适配）。
+    pub idle: Option<RectDto>,
+}
+
+/// §十一：包围盒 DTO（帧内局部像素坐标）。
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RectDto {
+    pub x: u32,
+    pub y: u32,
+    pub w: u32,
+    pub h: u32,
+}
+
+impl From<BBox> for RectDto {
+    fn from(b: BBox) -> Self {
+        RectDto { x: b.0, y: b.1, w: b.2, h: b.3 }
+    }
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -644,15 +710,18 @@ impl AtlasState {
 }
 
 fn selection_dto(s: &Selection) -> AtlasMetaDto {
+    let d = &s.data;
     AtlasMetaDto {
         requested: s.requested.clone(),
         current_id: s.current_id.clone(),
         current_source: s.current_source.to_string(),
-        cols: s.data.cols,
-        rows: s.data.rows,
-        frame_w: s.data.frame_w,
-        frame_h: s.data.frame_h,
+        cols: d.cols,
+        rows: d.rows,
+        frame_w: d.frame_w,
+        frame_h: d.frame_h,
         notice: s.notice.clone(),
+        // §十一：归一化基准（idle 行逐帧并集；加载频率低——启动/热替换各一次）
+        idle: frame_union_at_origin(&d.rgba, d.frame_w, d.frame_h, d.cols, 0).map(RectDto::from),
     }
 }
 
@@ -784,6 +853,95 @@ mod tests {
     }
 
     const OK_META: &str = r#"{"id":"testpet","displayName":"测试宠物"}"#;
+
+    // ---- §十一：内容包围盒度量（归一化数据源，纯函数）----
+
+    /// 透明画布上点亮指定像素（alpha=255）。
+    fn rgba_grid(w: u32, h: u32, opaque: &[(u32, u32)]) -> Vec<u8> {
+        let mut v = vec![0u8; (w * h * 4) as usize];
+        for &(x, y) in opaque {
+            let i = (y * w + x) as usize * 4;
+            v[i] = 255;
+            v[i + 1] = 255;
+            v[i + 2] = 255;
+            v[i + 3] = 255;
+        }
+        v
+    }
+
+    #[test]
+    fn frame_union_all_transparent_is_none() {
+        let rgba = vec![0u8; 8 * 6 * 4];
+        assert_eq!(
+            frame_union_at_origin(&rgba, 4, 3, 2, 0),
+            None,
+            "全透明 → 前端回退全帧适配"
+        );
+    }
+
+    #[test]
+    fn frame_union_unions_frames_at_origin_not_strip() {
+        // frame 4×3 × cols 2（sheet 8×3）：帧0 点 (1,1)、帧1 点 (6,2)
+        // → 原点并集 = 局部 (1,1)-(2,2) 的并集框 (1,1,2,2)——
+        // 而非 strip bbox（那会是 (1,1,6,2)，含帧偏移无区分度）
+        let rgba = rgba_grid(8, 3, &[(1, 1), (6, 2)]);
+        assert_eq!(frame_union_at_origin(&rgba, 4, 3, 2, 0), Some((1, 1, 2, 2)));
+    }
+
+    #[test]
+    fn frame_union_only_scans_given_row() {
+        // sheet 8×6（2 行 × 3 高）：row0 点 (1,1)，row1 点 (7,5)
+        let rgba = rgba_grid(8, 6, &[(1, 1), (7, 5)]);
+        assert_eq!(frame_union_at_origin(&rgba, 4, 3, 2, 0), Some((1, 1, 1, 1)));
+        assert_eq!(frame_union_at_origin(&rgba, 4, 3, 2, 1), Some((3, 2, 1, 1)));
+    }
+
+    #[test]
+    fn selection_dto_carries_idle_union_rect() {
+        // 2 行 × 2 列 × 4×4 帧（sheet 8×8）：idle 行(row0) 帧内内容
+        // 帧0 (1,1)-(2,2) + 帧1 (2,2) → 并集 (1,1,2,2)；row1 的 (7,6)
+        // 在另一帧局部 (3,2)，不入 idle 并集
+        let rgba = rgba_grid(8, 8, &[(1, 1), (2, 2), (6, 2), (7, 6)]);
+        let sel = Selection {
+            requested: None,
+            current_id: "t".into(),
+            current_source: SOURCE_BUILTIN,
+            data: AtlasData { cols: 2, rows: 2, frame_w: 4, frame_h: 4, rgba },
+            notice: None,
+        };
+        let dto = selection_dto(&sel);
+        let r = dto.idle.as_ref().map(|r| (r.x, r.y, r.w, r.h));
+        assert_eq!(r, Some((1, 1, 2, 2)), "idle = row0 逐帧原点并集，不含 row1");
+    }
+
+    #[test]
+    fn selection_dto_empty_fallback_data_yields_none_rects() {
+        // resolve 兜底路径的实际形态：**短缓冲**（缺 cols 倍，committer
+        // P2-1 裁定保持短以维持占位猫降级）——防御式访问 → idle null，
+        // 让 selection_dto 直接跑在真实兜底形态上（集成级覆盖）
+        let sel = Selection {
+            requested: None,
+            current_id: "t".into(),
+            current_source: SOURCE_BUILTIN,
+            data: AtlasData {
+                cols: 8,
+                rows: 9,
+                frame_w: 192,
+                frame_h: 208,
+                rgba: vec![0; 192 * 208 * 9 * 4],
+            },
+            notice: None,
+        };
+        let dto = selection_dto(&sel);
+        assert!(dto.idle.is_none());
+    }
+
+    #[test]
+    fn bbox_scan_tolerates_undersized_buffer() {
+        // 防御钉子：缓冲短于声明尺寸（历史兜底路径形态）→ 按透明跳过，不 panic
+        let rgba = vec![0u8; 16]; // 声明 8×8 却只有 4px 容量
+        assert_eq!(frame_union_at_origin(&rgba, 4, 4, 2, 0), None);
+    }
 
     // ---- pet.json 解析 ----
 

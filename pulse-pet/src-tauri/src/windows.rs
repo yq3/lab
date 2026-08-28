@@ -111,6 +111,64 @@ pub fn panel_open(app: tauri::AppHandle, tab: Option<String>) -> Result<(), Stri
     Ok(())
 }
 
+/// 宠物大小档位应用（V2-OPEN-ITEMS §11.3-2）：`set_size(LogicalSize)` +
+/// 内容中心锚定（左上角补偿 ±Δ/2 物理像素，切档原地缩放不"右下生长"）+
+/// 按所在显示器 `clamp_position` 防越屏。pet 窗口不存在（mock runtime /
+/// 未创建）时静默跳过。启动路径在 `restore_pet_position` **之前**调用
+///（时序链 set_size → restore → show，§11.3-3 钉子）。
+pub fn apply_pet_size<R: tauri::Runtime>(app: &tauri::AppHandle<R>, logical: u32) {
+    let Some(win) = app.get_webview_window("pet") else {
+        return;
+    };
+    let scale = win.scale_factor().unwrap_or(1.0);
+    let (old_w, old_h) = win
+        .outer_size()
+        .map(|s| (s.width as i32, s.height as i32))
+        .unwrap_or((0, 0));
+    if let Err(e) = win.set_size(tauri::LogicalSize::new(logical, logical)) {
+        plog!("[pulsepet] apply pet size failed: {e}");
+        return;
+    }
+    let new_w = (logical as f64 * scale).round() as i32;
+    let new_h = new_w; // 档位为正方形窗口
+    if let Ok(pos) = win.outer_position() {
+        let (ax, ay) = anchored_position(pos.x, pos.y, old_w, old_h, new_w, new_h);
+        let (cx, cy) = match win.current_monitor().ok().flatten() {
+            Some(m) => {
+                let mp = m.position();
+                let ms = m.size();
+                clamp_position(
+                    ax,
+                    ay,
+                    new_w,
+                    new_h,
+                    mp.x,
+                    mp.y,
+                    ms.width as i32,
+                    ms.height as i32,
+                )
+            }
+            // 取不到显示器信息 → 不 clamp（M1 语义：不崩溃）
+            None => (ax, ay),
+        };
+        let _ = win.set_position(PhysicalPosition::new(cx, cy));
+    }
+    plog!("[pulsepet] pet window size applied: {logical}px logical (was {old_w}×{old_h} phys)");
+}
+
+/// 内容中心锚定（纯函数）：窗口尺寸 (old_w,old_h)→(new_w,new_h)（物理 px）
+/// 时左上角位移 = (new−old)/2，保持窗口中心不动（切档视觉上原地缩放）。
+pub fn anchored_position(
+    x: i32,
+    y: i32,
+    old_w: i32,
+    old_h: i32,
+    new_w: i32,
+    new_h: i32,
+) -> (i32, i32) {
+    (x + (new_w - old_w) / 2, y + (new_h - old_h) / 2)
+}
+
 /// 纯函数：把窗口左上角 clamp 到给定显示器可视范围（P2-6，可单测）。
 ///
 /// `(mon_x, mon_y, mon_w, mon_h)` 为显示器物理坐标与尺寸，`(win_w, win_h)` 为窗口
@@ -342,6 +400,31 @@ mod tests {
     fn clamp_window_larger_than_monitor_degrades_to_top_left() {
         // 窗口比显示器还大 → 退化贴左上角，不 panic
         assert_eq!(clamp_position(500, 500, 4000, 4000, 0, 0, 1920, 1080), (0, 0));
+    }
+
+    // ---- 宠物大小档位（V2-OPEN-ITEMS §11.3-2：内容中心锚定）----
+
+    #[test]
+    fn anchored_position_keeps_window_center_on_shrink() {
+        // 220→184（物理 1:1）：左上角向右下各移 (184−220)/2 = −18（负数取整向零）
+        assert_eq!(anchored_position(100, 200, 220, 220, 184, 184), (82, 182));
+    }
+
+    #[test]
+    fn anchored_position_keeps_window_center_on_grow() {
+        // 220→280：左上角左上各移 30
+        assert_eq!(anchored_position(100, 200, 220, 220, 280, 280), (130, 230));
+    }
+
+    #[test]
+    fn anchored_position_same_size_is_identity() {
+        assert_eq!(anchored_position(50, 60, 220, 220, 220, 220), (50, 60));
+    }
+
+    #[test]
+    fn anchored_position_odd_delta_tolerates_rounding() {
+        // 奇数差（如 dpr 2 下 440→368：Δ=−72 偶；此处验奇数 Δ 取整向零，误差 <1px）
+        assert_eq!(anchored_position(0, 0, 100, 100, 101, 101), (0, 0));
     }
 
     // ---- M6 restore 决策（TC-APP-09/10）----

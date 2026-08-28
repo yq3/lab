@@ -24,6 +24,33 @@ export interface AtlasMeta {
   frameH: number;
   /** 回退提示（TC-SP-05/09：损坏 / 非标准网格 / 未找到）。 */
   notice: string | null;
+  /**
+   * §十一归一化：idle 行逐帧内容并集（帧内局部像素坐标，Rust
+   * `frame_union_at_origin(row 0)` 实测值；null = 缺失/非法/全透明 →
+   * 渲染层回退全帧适配，见 lib/pet-scale.ts）。
+   */
+  idle: IdleRect | null;
+}
+
+/** §十一：idle 内容框（帧内局部坐标）。 */
+export interface IdleRect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** 解析 idle 内容框 DTO；非法（缺字段/负值/零尺寸）→ null（回退全帧适配）。 */
+function parseIdleRect(v: unknown): IdleRect | null {
+  if (typeof v !== "object" || v === null) return null;
+  const o = v as Record<string, unknown>;
+  const { x, y, w, h } = o;
+  const nums = [x, y, w, h];
+  for (const n of nums) {
+    if (typeof n !== "number" || !Number.isInteger(n) || n < 0) return null;
+  }
+  if ((w as number) < 1 || (h as number) < 1) return null;
+  return { x: x as number, y: y as number, w: w as number, h: h as number };
 }
 
 export interface AtlasPixels {
@@ -50,7 +77,7 @@ function isAtlasSource(v: unknown): v is AtlasSource {
 export function parseAtlasMeta(p: unknown): AtlasMeta | null {
   if (typeof p !== "object" || p === null) return null;
   const o = p as Record<string, unknown>;
-  const { requested, currentId, currentSource, cols, rows, frameW, frameH, notice } = o;
+  const { requested, currentId, currentSource, cols, rows, frameW, frameH, notice, idle } = o;
   if (typeof currentId !== "string" || !isAtlasSource(currentSource)) return null;
   const nums = [cols, rows, frameW, frameH];
   for (const n of nums) {
@@ -67,6 +94,8 @@ export function parseAtlasMeta(p: unknown): AtlasMeta | null {
     frameW: frameW as number,
     frameH: frameH as number,
     notice: (notice as string | null) ?? null,
+    // §十一：null / undefined / 非法对象 → null（渲染层回退全帧适配）
+    idle: idle == null ? null : parseIdleRect(idle),
   };
 }
 

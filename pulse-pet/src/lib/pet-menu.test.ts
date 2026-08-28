@@ -106,12 +106,14 @@ describe("M8 i18n：右键菜单文案随语言", () => {
     const labels = items.map((i) => i.label).join("\n");
     expect(labels).toContain("Settings…");
     expect(labels).toContain("Hide pet");
-    expect(labels).toContain("pass-through: off");
+    // §11.5：en 文案缩短为 "Pass-through: {state}"（原 "Toggle interaction
+    // mode (pass-through: {state})" 实测外宽 266px，中档 220 窗口已右裁）
+    expect(labels).toContain("Pass-through: off");
     expect(labels).toContain("Today's tokens: 42M");
     const on = buildPetMenuItems(true, { status: "error" }, "en").find(
       (i) => i.id === "toggle-pass-through",
     );
-    expect(on?.label).toContain("pass-through: on");
+    expect(on?.label).toContain("Pass-through: on");
   });
 });
 

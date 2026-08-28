@@ -7,6 +7,7 @@ mod i18n;
 mod integrations;
 mod interaction;
 mod logging;
+mod pet_size;
 mod plugins;
 mod reminder_scheduler;
 mod runtime;
@@ -409,6 +410,24 @@ pub fn run() {
                 interaction::apply_pass_through(app.handle(), true);
             }
 
+            // ---- 宠物大小档位（V2-OPEN-ITEMS §11.3-3）：restore 之前应用——
+            //      restore 读 outer_size 做显示器 clamp，尺寸先定位置才能按
+            //      新尺寸钳制；时序链 set_size → restore → show（#9/#20 语义
+            //      不变，order_nails 有钉子）。medium = conf 默认 220，跳过省
+            //      一次窗口调用（老用户零额外路径）。----
+            {
+                let size = {
+                    let db = app.state::<Mutex<Connection>>();
+                    let conn = db.lock().map_err(|e| format!("db lock: {e}"))?;
+                    pet_size::read_size(&conn)
+                };
+                if let Some(s) = size.as_deref().filter(|s| *s != "medium") {
+                    if let Some(px) = pet_size::logical_of(s) {
+                        windows::apply_pet_size(app.handle(), px);
+                    }
+                }
+            }
+
             windows::restore_pet_position(app.handle());
             // issue #20：pet 窗口隐藏创建（conf visible:false），位置恢复后才
             // 显式 show——消除 Windows 上左上角默认位置闪现（WebView2 异步创建
@@ -471,6 +490,8 @@ pub fn run() {
             i18n::ui_set_language,
             theme::ui_get_theme,
             theme::ui_set_theme,
+            pet_size::pet_get_size,
+            pet_size::pet_set_size,
             integrations::integrations_status,
             integrations::integrations_install,
             integrations::integrations_uninstall,
@@ -782,6 +803,25 @@ mod order_nails {
         assert!(
             pet_block.contains("\"visible\": false"),
             "pet 窗口须 visible:false 隐藏创建（issue #20）"
+        );
+    }
+
+    /// V2-OPEN-ITEMS §11.3-3：宠物档位 set_size 必须先于 restore_pet_position
+    /// （restore 读 outer_size 做显示器 clamp——尺寸先定，位置才能按新尺寸
+    /// 钳制；与 #20「restore 先于 show」共同构成 set_size → restore → show
+    /// 时序链）。
+    #[test]
+    fn pet_size_applied_before_position_restore() {
+        let src = include_str!("lib.rs");
+        let size_at = src
+            .find("windows::apply_pet_size")
+            .expect("lib.rs 须含 apply_pet_size 调用（§十一档位）");
+        let restore_at = src
+            .find("windows::restore_pet_position(app.handle())")
+            .expect("lib.rs 须含 restore_pet_position 调用");
+        assert!(
+            size_at < restore_at,
+            "apply_pet_size 必须在 restore_pet_position 之前（set_size → restore → show）"
         );
     }
 }
