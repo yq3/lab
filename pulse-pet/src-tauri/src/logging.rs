@@ -78,11 +78,13 @@ pub fn init_at(path: &Path) -> std::io::Result<()> {
 }
 
 /// 测试专用（task-pulsepet-v2-polish #6）：持全局 slot 锁完成「预写 oversize
-/// 内容 → 轮转 → 重开 → 换句柄」。预写/轮转/换柄全窗口期内其它线程的
-/// plog! 阻塞在锁上（而非拿着旧句柄把行追加进已被 rename 的 `.old`），
-/// `ends_with(x×64)` 断言从「容忍概率污染」变为确定成立。banner 在锁外
-/// 补写：此时句柄已指向新文件，并行追加只落新文件尾部（首行横幅断言
-/// 不受影响）。
+/// 内容 → 轮转 → 重开 → 换句柄 → 写横幅」。预写/轮转/换柄/横幅全窗口期内
+/// 其它线程的 plog! 阻塞在锁上（而非拿着旧句柄把行追加进已被 rename 的
+/// `.old`，或抢在横幅前写入新文件首行），`ends_with(x×64)` 与
+/// 「新文件以横幅开头」断言均确定成立（P3-3 加固：横幅原在锁外经
+/// banner()→write_line 二次拿锁，换柄→横幅间存在被并行 plog! 抢先写首行
+/// 的微秒级插队窗口）。横幅行经 `banner_line_full()` 组装后直接写句柄
+///（stderr 双写语义保持），不再二次拿锁。
 #[cfg(test)]
 pub(crate) fn init_at_exclusive(path: &Path, oversize_prewrite: &str) -> std::io::Result<()> {
     if let Some(dir) = path.parent() {
@@ -95,6 +97,12 @@ pub(crate) fn init_at_exclusive(path: &Path, oversize_prewrite: &str) -> std::io
             rotate_if_oversize(path)?;
             let file = OpenOptions::new().create(true).append(true).open(path)?;
             *guard = Some(file);
+            // 横幅在本次持锁内写入（首行确定，见类型注释）
+            let line = banner_line_full();
+            eprint!("{line}");
+            if let Some(f) = guard.as_mut() {
+                let _ = f.write_all(line.as_bytes());
+            }
         }
         None => {
             // slot 未建（首次 init，无并发旧句柄可污染 .old）：与 init_at 等价
@@ -102,10 +110,10 @@ pub(crate) fn init_at_exclusive(path: &Path, oversize_prewrite: &str) -> std::io
             rotate_if_oversize(path)?;
             let file = OpenOptions::new().create(true).append(true).open(path)?;
             let _ = LOG_FILE.set(Mutex::new(Some(file)));
+            banner();
         }
     }
     install_panic_hook();
-    banner();
     Ok(())
 }
 
@@ -198,13 +206,24 @@ fn banner_line(version: &str, os: &str, build: &str, webview: &str) -> String {
 
 /// 写启动横幅：App 版本 / OS / debug-release / WebView 版本。
 fn banner() {
+    let line = banner_line_full();
+    eprint!("{line}");
+    write_line(&line);
+}
+
+/// 横幅整行（时间戳 + 内容；`banner()` 与测试持锁路径共用——P3-3：后者在
+/// slot 锁内直接写文件，不能经 `banner()`→`write_line` 二次拿锁）。
+fn banner_line_full() -> String {
     let build = if cfg!(debug_assertions) { "debug" } else { "release" };
-    log_line(&banner_line(
-        env!("CARGO_PKG_VERSION"),
-        std::env::consts::OS,
-        build,
-        &webview_version_desc(),
-    ));
+    format_line(
+        &timestamp(),
+        &banner_line(
+            env!("CARGO_PKG_VERSION"),
+            std::env::consts::OS,
+            build,
+            &webview_version_desc(),
+        ),
+    )
 }
 
 #[cfg(test)]

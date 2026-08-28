@@ -408,10 +408,14 @@ enum ParseTask {
     /// 全量（新文件 / 变小 / mtime 变而 size 未变 / 身份变了）。
     Full { path: PathBuf },
     /// 增量：从 offset 续算（append-only 增长）。
+    /// `expect_file_id` = plan 时该文件的 inode/creation_time——execute 读尾
+    /// 后复核，不符（plan→execute 窗口内被 tmp+rename 重写）则放弃增量回退
+    /// 全量，防新文件尾部拼进旧状态（tester P3-2）。
     Incr {
         path: PathBuf,
         offset: u64,
         state: SessionState,
+        expect_file_id: u64,
     },
 }
 
@@ -435,16 +439,20 @@ impl RefreshPlan {
 
 /// 单任务执行：读文件 → 完整行口径解析 → 解析后实测 (mtime,size) 入条目。
 /// 全量失败（读不了/非 UTF-8）→ 负缓存条目（mtime/size 用实测值，state 空）。
-/// 增量执行中文件被截断（读后实测 size < 起始 offset）→ 就地回退全量。
+/// 增量执行中文件被截断（读后实测 size < 起始 offset）或 file_id 与 plan 时
+/// 不符（窗口内被重写）→ 就地回退全量。
 fn run_task(task: ParseTask) -> ParsedFile {
     match task {
         ParseTask::Full { path } => parse_file_full(&path),
-        ParseTask::Incr { path, offset, state } => {
-            match parse_file_incr(&path, offset, state) {
-                Some(entry) => ParsedFile { path, entry },
-                None => parse_file_full(&path),
-            }
-        }
+        ParseTask::Incr {
+            path,
+            offset,
+            state,
+            expect_file_id,
+        } => match parse_file_incr(&path, offset, state, expect_file_id) {
+            Some(entry) => ParsedFile { path, entry },
+            None => parse_file_full(&path),
+        },
     }
 }
 
@@ -470,8 +478,16 @@ fn parse_file_full(path: &Path) -> ParsedFile {
 }
 
 /// 增量解析：seek 到 offset 只读尾部新增字节（旧字节不再读），喂完整行。
-/// 返回 None 表示应回退全量（读失败 / 非 UTF-8 / 读后实测文件已缩到 offset 之下）。
-fn parse_file_incr(path: &Path, offset: u64, mut state: SessionState) -> Option<CacheEntry> {
+/// 返回 None 表示应回退全量，触发条件（tester P3-2）：
+/// 读失败 / 非 UTF-8 / 读后实测文件已缩到 offset 之下（窗口内截断）/
+/// 实测 file_id 与 plan 时的期望不符（窗口内 tmp+rename 重写——只查 size
+/// 挡不住"重写且更长"，尾部会拼进旧状态）。
+fn parse_file_incr(
+    path: &Path,
+    offset: u64,
+    mut state: SessionState,
+    expect_file_id: u64,
+) -> Option<CacheEntry> {
     use std::io::{Read, Seek, SeekFrom};
     let mut f = std::fs::File::open(path).ok()?;
     f.seek(SeekFrom::Start(offset)).ok()?;
@@ -483,6 +499,11 @@ fn parse_file_incr(path: &Path, offset: u64, mut state: SessionState) -> Option<
     let (mtime, size, file_id) = stat3(path);
     if size < new_offset {
         // 锁外期间文件被截断/重写 → 本次结果作废，交回全量
+        return None;
+    }
+    if file_id != expect_file_id {
+        // plan→execute 窗口内文件对象已被替换（tmp+rename 重写）→ 增量状态
+        // 与新内容前缀无继承关系，作废交回全量（entry 由全量路径记新 file_id）
         return None;
     }
     let row = finalize_state(&state, &session_id_of(path));
@@ -548,11 +569,13 @@ impl TranscriptCache {
                 }
                 let grew = size > e.offset && file_id == e.file_id;
                 if grew {
-                    // append-only 增长 → 增量（只读尾部）
+                    // append-only 增长 → 增量（只读尾部；携带 plan 时 file_id，
+                    // execute 端复核防窗口内重写拼接）
                     tasks.push(ParseTask::Incr {
                         path: f.clone(),
                         offset: e.offset,
                         state: e.state.clone(),
+                        expect_file_id: e.file_id,
                     });
                 } else {
                     // 变小（截断/重写）、原地改写（mtime 变 size 未变）、
@@ -686,6 +709,7 @@ pub fn find_session_unlocked(
                         path,
                         offset: e.offset,
                         state: e.state.clone(),
+                        expect_file_id: e.file_id,
                     }),
                     _ => Step::Task(ParseTask::Full { path }),
                 }
@@ -1370,8 +1394,12 @@ mod tests {
         assert_eq!(cache.entries[&f].offset, std::fs::metadata(&f).unwrap().len());
     }
 
-    /// 钉子⑤：锁外解析不阻塞并发查询——大文件增量解析进行中，第二个查询
-    /// 拿旧数据快照快速返回（in-flight 让路），不被 Mutex 长时间挡住。
+    /// 钉子⑤：锁外解析不阻塞并发查询（P3-3 加固为确定性构造）——手动拆分
+    /// plan/execute/commit：B 的让路查询被钉死在「plan 已置 in-flight、execute
+    /// 未开始」的确定窗口，消除原 sleep(150ms) 依赖 A 未完成的竞速面
+    ///（A 若先完成则 B 拿新快照，b==20_000 断言翻车——tester P3-3）。
+    /// B 语义达标 = in-flight 让路拿旧快照 + 未被长时间阻塞；execute 锁外
+    /// 由 plan 返回时锁 guard 已 drop 的结构保证（B 能在任意非持锁时刻拿锁）。
     #[test]
     fn alpha_unlocked_refresh_does_not_block_concurrent_query() {
         let dir = temp_dir("alpha-conc");
@@ -1390,31 +1418,37 @@ mod tests {
         let warm = refresh_unlocked(&dir, &cache);
         assert_eq!(warm.len(), 1);
         assert_eq!(warm[0].tokens_input, 20_000);
-        // 增量解析量拉大（10 万行，~20MB）：确保线程 A 的锁外解析耗时远超 B 的等待窗口
+        // 增量解析量拉大（10 万行，~20MB）：execute 真实耗时顺带覆盖
         {
             let mut w = std::fs::OpenOptions::new().append(true).open(&f).unwrap();
             for _ in 0..100_000 {
                 writeln!(w, "{line_text}").unwrap();
             }
         }
-        let cache_a = cache.clone();
-        let dir_a = dir.clone();
-        let a = std::thread::spawn(move || refresh_unlocked(&dir_a, &cache_a));
-        std::thread::sleep(std::time::Duration::from_millis(150));
+        // A①：plan（锁内轻量判定 + in-flight 置位后即释放锁）
+        let plan = {
+            let mut c = lock_cache(&cache);
+            c.plan_refresh(&dir)
+                .expect("无并发刷新在途，plan 必成功")
+        };
+        // B：in-flight 期间并发查询 → 确定性让路（旧快照 20_000）+ 不阻塞
         let t0 = std::time::Instant::now();
         let b_rows = refresh_unlocked(&dir, &cache);
         let b_elapsed = t0.elapsed();
-        let a_rows = a.join().unwrap();
-        // A 完成后拿到全量增量结果
-        assert_eq!(a_rows.len(), 1);
-        assert_eq!(a_rows[0].tokens_input, 120_000, "A 增量入账");
-        // B：旧数据快照（A 解析未完成不入账）且未被长时间阻塞
         assert_eq!(b_rows.len(), 1);
-        assert_eq!(b_rows[0].tokens_input, 20_000, "B 用旧快照");
+        assert_eq!(b_rows[0].tokens_input, 20_000, "in-flight 让路 → 旧快照（确定性）");
         assert!(
             b_elapsed < std::time::Duration::from_millis(300),
             "并发查询不应被长时间阻塞: {b_elapsed:?}"
         );
+        // A②：execute（锁外，不持 Mutex）→ A③：commit（锁内写回）
+        let parsed = plan.execute();
+        let a_rows = {
+            let mut c = lock_cache(&cache);
+            c.commit_refresh(parsed)
+        };
+        assert_eq!(a_rows.len(), 1);
+        assert_eq!(a_rows[0].tokens_input, 120_000, "A 增量入账");
     }
 
     /// 补充：rename 落位「更长但前缀完全不同」的文件（tmp+rename 重写）——
@@ -1460,5 +1494,54 @@ mod tests {
         let row2 = find_session_unlocked(&dir, &cache, "ffffffff-3333-2222-3333-444444444444")
             .expect("命中且增量更新");
         assert_eq!(row2.tokens_input, 133);
+    }
+
+    /// P3-2 补钉（task-pulsepet-v2-polish R1 追加，tester 白盒建议）：plan→execute
+    /// 毫秒窗口内文件被 tmp+rename 重写且更长——Incr 任务携带的期望 file_id
+    /// 与实际不符 → 放弃增量、回退全量（不把新文件尾部拼进旧状态），
+    /// entry 记新 file_id（此后 unchanged 判定用新身份，不持久化错数据）。
+    /// 与钉子⑥（alpha_rewritten_longer_file_full_reparse）的区分：⑥测 plan
+    /// 时已见新文件（锁内判定直接走 Full）；本钉子白盒模拟 plan 已拿旧
+    /// (offset, state, file_id) 之后文件才被重写的窗口。
+    #[test]
+    fn alpha_incr_file_id_mismatch_in_window_falls_back_to_full() {
+        let dir = temp_dir("alpha-fid");
+        let f = dir.join("aaaaaaaa-4444-2222-3333-444444444444.jsonl");
+        let ts = "2026-08-24T07:03:35.156Z";
+        // 旧文件（一行 m1=100）→ refresh 建立带旧 file_id 的缓存条目
+        write_lines(&f, &[assistant_line(Some("m1"), None, ts, usage5(100, 0, 0, 0, 0))]);
+        let mut cache = TranscriptCache::default();
+        cache.refresh(&dir);
+        let entry = cache.entries[&f].clone();
+
+        // 窗口模拟：plan 已持有旧 (offset, state, file_id)；此后重写且更长
+        let tmp = dir.join(".tmp-session");
+        write_lines(
+            &tmp,
+            &[
+                assistant_line(Some("n1"), None, ts, usage5(900, 0, 0, 0, 0)),
+                assistant_line(Some("n2"), None, ts, usage5(50, 0, 0, 0, 0)),
+            ],
+        );
+        std::fs::rename(&tmp, &f).unwrap();
+
+        // execute：Incr 读尾后发现 file_id 不符 → 回退全量
+        let pf = run_task(ParseTask::Incr {
+            path: f.clone(),
+            offset: entry.offset,
+            state: entry.state.clone(),
+            expect_file_id: entry.file_id,
+        });
+        let row = pf.entry.row.as_ref().expect("回退全量后应有行");
+        assert_eq!(row.tokens_input, 950, "窗口内重写 → 全量重解析（非增量拼接）");
+        assert_eq!(
+            pf.entry.offset,
+            std::fs::metadata(&f).unwrap().len(),
+            "offset 重置为新文件全量长度"
+        );
+        assert_ne!(
+            pf.entry.file_id, entry.file_id,
+            "entry 记新 file_id（防错数据经 unchanged 判定持久化）"
+        );
     }
 }

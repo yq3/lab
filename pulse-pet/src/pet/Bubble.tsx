@@ -8,9 +8,11 @@ import { bubbleAgentBadge } from "../lib/bubble-queue";
  *   自动离场（bubble-queue 内核驱动）；
  * - 视觉走「宠物世界」固定色（`--pet-world-*`，不随主题）：暖白底 + 2px
  *   墨边 + 2px 2px 0 硬阴影 + 像素尖角（45° 旋转小方块）；
- * - critical 级左侧 4px 蜜橘色条（可交互暗示——点宠物确认）；至多两行
- *   （-webkit-line-clamp，v2 打磨轮 #4：idle 汇报「 · 今日 X」追加段在
- *   208px 单行省略下不可见，改两行后完整可见；短文案仍单行）。
+ * - critical 级左侧 4px 蜜橘色条（可交互暗示——点宠物确认）；至多三行截断
+ *   （v2 打磨轮 #4：idle 汇报「 · 今日 X」追加段在 208px 单行省略下不可见，
+ *   改 `width:max-content + max-width:208px + max-height:70px` 三行后完整
+ *   可见；-webkit-line-clamp 因与 absolute 盒 shrink-to-fit 不兼容已弃用，
+ *   短文案仍单行收窄——见 global.css .pet-bubble 注释）。
  * - v2 M4（TC-M4-13）：critical 且有 reminder 载荷时右侧 snooze 按钮
  *   「稍后 10 分钟」——hover 浮现不喧宾（208px 单行气泡内用 ⏱ 10min 短标 +
  *   title 完整语义），点击 invoke reminders_snooze 气泡即消；点宠物仍 =
