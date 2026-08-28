@@ -12,7 +12,8 @@ import type { TodayTokenState } from "../lib/pet-menu";
  * - 菜单项见 `lib/pet-menu.ts`（今日 token（v2 M3 入口层）/ 设置… /
  *   切换交互模式（穿透：开/关）/ 隐藏宠物）；
  * - 窗口仅 220×220 → 菜单 clamp 在窗口内（挂载后按实际尺寸重算；4 项
- *   menuH 估值 104→130，§3.4 ③）；
+ *   menuH 估值 104→130，§3.4 ③；v2 打磨轮 #12：实测重算改挂
+ *   ResizeObserver，agent 分布子行动态出现/语言切换变高时自适应）；
  * - 点击菜单项执行动作并关闭；点击外部 / 窗口失焦 / Escape 关闭；
  * - 穿透态下 contextmenu 事件透出，本组件根本不会被打开（TC-WIN-04）；
  * - M8 i18n：菜单项文案随语言（订阅 useLangStore）。
@@ -37,18 +38,29 @@ export default function PetMenu() {
     pos ? clampMenuPosition(pos.x, pos.y, 220, 176, 130) : { x: 0, y: 0 },
   );
 
+  // v2 打磨轮 #12（P3-①）：clamp 改 ResizeObserver——原 deps 仅 [pos]，首帧
+  // 估值 130 不含「今日 token」的 agent 分布子行（双 agent 日菜单增高 ~14px，
+  // 贴下缘时底项被裁）；token 数据/语言切换等任何高度变化源都会触发实测
+  // 重算（observe 挂上即回调一次，首帧估值随即被实测修正），无需逐一枚举
+  // 依赖（对比 deps 加 todayToken 的方案：语言切换变高仍漏）。
   useEffect(() => {
     if (!pos || !ref.current) return;
     const el = ref.current;
-    setStyle(
-      clampMenuPosition(
-        pos.x,
-        pos.y,
-        220,
-        el.offsetWidth || 176,
-        el.offsetHeight || 130,
-      ),
-    );
+    const reclamp = () => {
+      setStyle(
+        clampMenuPosition(
+          pos.x,
+          pos.y,
+          220,
+          el.offsetWidth || 176,
+          el.offsetHeight || 130,
+        ),
+      );
+    };
+    reclamp();
+    const ro = new ResizeObserver(reclamp);
+    ro.observe(el);
+    return () => ro.disconnect();
   }, [pos]);
 
   // v2 M3：菜单打开即拉今日 token（30s 缓存；错误 → error 态显示 —）

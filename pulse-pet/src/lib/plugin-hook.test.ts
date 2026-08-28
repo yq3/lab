@@ -760,8 +760,7 @@ describe("M3 deliver：detail 桶语义四条（reaction 后判定，TC-M3-13-3�
     // 同桶低优先级（working ≤ working）被节流吞 → 状态不发、detail 桶不消耗
     await deliverer.deliver("working", "s1", "bash:npm");
     expect(rec.posted.length, "状态被吞 → 无投递").toBe(1);
-    t = 9_000; // reaction 10s 已过（1s→9s 差 8s？未到）—— t=11_000
-    t = 11_000;
+    t = 11_000; // reaction 10s 冷却已过（1s → 11s）
     await deliverer.deliver("working", "s1", "bash:npm"); // 状态放行；detail 桶从未消耗 → 携带
     expect(rec.posted[1]).toEqual({ kind: "working", detail: "bash:npm" });
   });

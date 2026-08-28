@@ -89,10 +89,18 @@ select {
   color: var(--danger);
 }
 
-/* 禁用态（craft-floor states：↑/↓ 到边界、加载中刷新等真实场景） */
+/* 禁用态（craft-floor states：↑/↓ 到边界、加载中刷新等真实场景）。
+   task-pulsepet-v2-polish #3：全站禁用语汇统一（原 .seg 用 opacity、
+   intg 按钮用 ink-faint、select 用 ink-faint+wait、表单用 ink-faint+
+   surface-2+not-allowed 四套并存）——统一口径：
+   ① 字色一律 var(--ink-faint)（弃 opacity 弱化）；
+   ② 输入类控件（select/input）加 surface-2 底，按钮类底色不动（与 hover
+     态保持视觉隔离）；
+   ③ cursor 二分：wait = 加载/操作进行中（select 切换中、接入安装卸载中）；
+     not-allowed = 锁定/边界不可用（本类与表单锁定）。 */
 .seg:disabled {
-  opacity: 0.45;
-  cursor: default;
+  color: var(--ink-faint);
+  cursor: not-allowed;
 }
 
 .seg:disabled:hover {
@@ -130,12 +138,27 @@ select {
 }
 
 /* ---- 宠物气泡（v2 M2：宠物世界固定色，不随主题，§2.6.3） ---- */
+/* task-pulsepet-v2-polish #4：单行省略 → 至多两行——idle 汇报「… · 今日 X」
+   追加段在 208px 单行内被截断不可见；两行后短文案仍单行（收窄）、长文案
+   第二行完整可见。
+   实现要点（playwright 实测定案）：
+   - absolute 盒 left:50% 居中法下 shrink-to-fit 可用宽只剩 110（containing
+     block 减 left），white-space:normal 的折行文本会塌成 110px 窄柱——
+     显式 width:max-content 恢复「短收窄 / 长 208」；
+   - -webkit-line-clamp 需配 -webkit-box 布局，后者无视 max-content 测宽
+     （仍窄柱），弃用；改 max-height 截断；
+   - 行数取 3 非 2：idle 汇报实测 ~476px 超 208px 两行容量（~360px），
+     两行下「· 今日 X」仍落第三行被裁；文案措辞被 TC-M3-09-1 逐字钉住
+     不可精简，三行（70px）是尾段可见的最小行数。超三行直接裁掉无省略号
+     提示（sanitize 上限 140 字符的极端文案，可接受）。 */
 .pet-bubble {
   position: absolute;
   top: 2px;
   left: 50%;
   transform: translateX(-50%);
+  width: max-content;
   max-width: 208px;
+  max-height: 70px; /* 3×行高 18.2 + padding 14 ≈ 68.6，余 1.4 容字体涨落 */
   padding: 7px 12px;
   background: var(--pet-world-surface);
   border: 2px solid var(--pet-world-line);
@@ -143,9 +166,8 @@ select {
   color: #29241d; /* 墨字（pet-world 固定暖白面上的墨色，两主题同值） */
   font-size: 13px;
   line-height: 1.4;
-  white-space: nowrap;
+  white-space: normal;
   overflow: hidden;
-  text-overflow: ellipsis;
   z-index: 2;
   font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", system-ui, sans-serif;
 }
@@ -486,8 +508,10 @@ select {
   max-width: 480px;
 }
 
+/* 禁用统一口径见 .seg:disabled 注释（#3）；wait = 切换中/语言切换中的忙态 */
 .panel-settings select:disabled {
   color: var(--ink-faint);
+  background: var(--surface-2);
   cursor: wait;
 }
 
@@ -601,6 +625,7 @@ select {
   background: var(--surface-2);
 }
 
+/* 禁用统一口径见 .seg:disabled 注释（#3）；wait = 安装/卸载进行中的忙态 */
 .intg-row-actions button:disabled {
   color: var(--ink-faint);
   cursor: wait;

@@ -518,7 +518,8 @@ export default function TokenStats() {
   );
 }
 
-/** 勾选切换纯逻辑（不可变更新；模型/agent 筛选共用）。 */
+/** 勾选切换纯逻辑（不可变更新；模型筛选用——v2-m5 R2 后 agent 维度已改
+ *  为恒全集展示，不再消费本函数，勿据旧注释恢复调用）。 */
 function symmetricToggle<T>(set: ReadonlySet<T>, key: T): Set<T> {
   const next = new Set(set);
   if (next.has(key)) next.delete(key);

@@ -169,7 +169,8 @@ pub fn validate_declared(
 
 // ---- 解码 ----
 
-#[derive(Clone)]
+/// 像素数据载荷（按值移动传递；无 Clone——rgba 缓冲达数 MB，刻意不做
+/// 隐式深拷贝，task-pulsepet-v2-polish #1 清偿死代码 derive）。
 pub struct AtlasData {
     pub cols: u32,
     pub rows: u32,

@@ -162,21 +162,24 @@ Rust 命令错误串未 i18n（与代码库既有模式一致）——待 i18n �
 
 ## 七、打磨轮清单（代码级 P3，非阻断）
 
-| # | 来源 | 事项 | 位置与修法建议 |
-|---|---|---|---|
-| 1 | v2-m2 P3-5 | AtlasData Clone derive 死代码 | atlas.rs——动 atlas.rs 时顺手删 |
-| 2 | v2-m2 P3-6 | Settings notice 重复计算 | 微优化 |
-| 3 | v2-m2 P3-7 | 禁用语汇四套不一致 | CSS/微打磨轮统一 |
-| 4 | v2-m3 P3-1 | idle 汇报「 · 今日 X」追加段在 220px 气泡被单行省略截断不可见 | 气泡文案/CSS 打磨轮（两行或精简） |
-| 5 | v2-m3 P3-5 | plugin-hook.test.ts:763 注释草稿痕迹 | 删 |
-| 6 | v2-m4 P3① | logging.rs `ends_with("x"×64)` 残余竞态（并行 plog! 旧句柄 .old 尾部污染偶发） | 测试专用助手持全局 slot 锁内轮转，或删 ends_with 只留 len>= |
-| 7 | v2-m4 P3② | action_exec.rs:622-635 注释块复制粘贴重复（**注**：v0.2.1 R2 已动该文件加 creation_flags，此项或已顺手消化——打磨轮核对后勾销） | 删 |
-| 8 | v2-m5 P3-1 | transcript.rs:208-210 注释块重复 | 删一行 |
-| 9 | v2-m5 P3-2 | transcript.rs:590-624 `assert_ne!(本地日, UTC日)` 硬假设非零时区偏移（TZ=UTC 环境会红） | 去 assert_ne 或 TZ 注入，保留 oracle 对账 |
-| 10 | v2-m5 P3-3 | TokenStats.tsx:521 symmetricToggle 注释「模型/agent 共用」过时（R2 后仅模型用） | 改注释 |
-| 11 | v2-m5 P3-4 | token_stats.rs:709-712 TranscriptCache 全目录解析在 Mutex 持有期执行 | 观察项：文件体量增长时改锁内判定+锁外解析 |
-| 12 | v2-m6 P3-① | PetMenu clamp effect deps 仅 `[pos]`、首帧估值 130 不含 agent 分布子行——双 agent 日菜单增高 ~14px 贴下缘时底项被裁 | deps 加 todayToken 或 ResizeObserver，或估值 130→146 |
-| 13 | OBS-SIGTERM | 外部 kill 不产生 `exit` 日志行、runtime token/endpoint 残留不清理（v1 既有） | 主去向=V1-OPEN-ITEMS §八维护版清单；退出钩子补 SIGTERM 路径 |
+> **状态（2026-08-27 闭环）**：13 项**全部清偿**（task-pulsepet-v2-polish，2026-08-27）——12 项代码落地 + #13 落文档（V1-OPEN-ITEMS §8.6）。逐项落点：
+> #1 删 derive（atlas.rs）；#2 composeActionNotice 单次计算（Settings.tsx）；#3 禁用语汇统一（ink-faint 字色 + 输入类 surface-2 底 + cursor wait=加载/not-allowed=锁定 二分，global.css）；#4 气泡改 `width:max-content + max-width:208 + max-height:70px` 三行截断（line-clamp/-webkit-box 与 absolute shrink-to-fit 不兼容，playwright 实测定案；文案钉字不动），CSS 钉子 bubble-clamp.test.ts + DOM 实测佐证；#5 删草稿注释；#6 测试专用助手 `init_at_exclusive` 持全局 slot 锁内「预写+轮转+换柄」，ends_with 强断言保留（global.css 外的 rust 侧 8 轮稳定绿）；#7 核对结论：原 622-635 区域已是 v0.2.1 改写后内容（无重复），但 dispatch_exec 函数体内 R5 注释块（"fire 决策即时持久化"）逐字重复两遍——删一份；#8 删重复行；#9 去 assert_ne（oracle 对账保留；TZ 注入因 chrono Local/SQLite localtime 平台缓存行为不稳而弃）；#10 改注释；#11 方案 α 落地（增量偏移解析 + 锁外解析 + in-flight 让路 + file_id 防重写拼接，七枚 alpha 钉子测试）；#12 ResizeObserver（实测重算，子行注入 h 132→147 y 86→71 自动上移）；#13 → V1-OPEN-ITEMS §8.6。测试基线：cargo test 327 passed + 3 ignored / npm test 418 / tsc 0 错 / build 通过。
+
+| # | 来源 | 事项 | 位置与修法建议 | 状态 |
+|---|---|---|---|---|
+| 1 | v2-m2 P3-5 | AtlasData Clone derive 死代码 | atlas.rs——动 atlas.rs 时顺手删 | ✅ task-pulsepet-v2-polish 2026-08-27 |
+| 2 | v2-m2 P3-6 | Settings notice 重复计算 | 微优化 | ✅ 同上 |
+| 3 | v2-m2 P3-7 | 禁用语汇四套不一致 | CSS/微打磨轮统一 | ✅ 同上 |
+| 4 | v2-m3 P3-1 | idle 汇报「 · 今日 X」追加段在 220px 气泡被单行省略截断不可见 | 气泡文案/CSS 打磨轮（两行或精简） | ✅ 同上（CSS 三行截断，文案钉字不动） |
+| 5 | v2-m3 P3-5 | plugin-hook.test.ts:763 注释草稿痕迹 | 删 | ✅ 同上 |
+| 6 | v2-m4 P3① | logging.rs `ends_with("x"×64)` 残余竞态（并行 plog! 旧句柄 .old 尾部污染偶发） | 测试专用助手持全局 slot 锁内轮转，或删 ends_with 只留 len>= | ✅ 同上（选前者，强断言保留） |
+| 7 | v2-m4 P3② | action_exec.rs:622-635 注释块复制粘贴重复（**注**：v0.2.1 R2 已动该文件加 creation_flags，此项或已顺手消化——打磨轮核对后勾销） | 删 | ✅ 同上（核对：原区域已消化，删 dispatch_exec 体内 R5 重复注释块） |
+| 8 | v2-m5 P3-1 | transcript.rs:208-210 注释块重复 | 删一行 | ✅ 同上 |
+| 9 | v2-m5 P3-2 | transcript.rs:590-624 `assert_ne!(本地日, UTC日)` 硬假设非零时区偏移（TZ=UTC 环境会红） | 去 assert_ne 或 TZ 注入，保留 oracle 对账 | ✅ 同上（选去 assert_ne） |
+| 10 | v2-m5 P3-3 | TokenStats.tsx:521 symmetricToggle 注释「模型/agent 共用」过时（R2 后仅模型用） | 改注释 | ✅ 同上 |
+| 11 | v2-m5 P3-4 | token_stats.rs:709-712 TranscriptCache 全目录解析在 Mutex 持有期执行 | 观察项：文件体量增长时改锁内判定+锁外解析 | ✅ 同上（方案 α：增量偏移 + 锁外解析） |
+| 12 | v2-m6 P3-① | PetMenu clamp effect deps 仅 `[pos]`、首帧估值 130 不含 agent 分布子行——双 agent 日菜单增高 ~14px 贴下缘时底项被裁 | deps 加 todayToken 或 ResizeObserver，或估值 130→146 | ✅ 同上（选 ResizeObserver） |
+| 13 | OBS-SIGTERM | 外部 kill 不产生 `exit` 日志行、runtime token/endpoint 残留不清理（v1 既有） | 主去向=V1-OPEN-ITEMS §八维护版清单；退出钩子补 SIGTERM 路径 | ✅ 同上（只落文档：V1-OPEN-ITEMS §8.6） |
 
 ---
 

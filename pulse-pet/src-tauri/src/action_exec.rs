@@ -648,13 +648,6 @@ pub fn dispatch_exec<R: tauri::Runtime>(
     // 同规则重复入队双重执行）。落库在 sched 锁外（锁序 db/sched 不嵌套，
     // 与 reload_state 的 db→sched 反序安全）。start_exec_run 内的二次
     // mark_triggered 保留（出队执行时刻刷新锚点，幂等无害）。
-    // R5（tester R4 P2）：**fire 决策即时持久化**——collect_due 已把该规则按
-    // "本周期触发"推进（内存），此处无条件 mark_triggered 落库（含排队分支：
-    // 此前仅 start_exec_run 落库，排队条目的 handled 标记只在内存 → 排队期间
-    // CRUD reload 重建内存后 next_due 回到过去时刻 → 下个 tick 重复 fire →
-    // 同规则重复入队双重执行）。落库在 sched 锁外（锁序 db/sched 不嵌套，
-    // 与 reload_state 的 db→sched 反序安全）。start_exec_run 内的二次
-    // mark_triggered 保留（出队执行时刻刷新锚点，幂等无害）。
     {
         let db = app.state::<Mutex<Connection>>();
         let guard = db.lock();

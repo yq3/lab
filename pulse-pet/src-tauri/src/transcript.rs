@@ -17,14 +17,19 @@
 //! - `sqlite_week_label`：复刻 SQLite `strftime('%Y-W%W',…,'localtime')` 语义
 //!   （周一起始的日历年周号，**非 ISO 年周**——跨年边界分叉会致双源同周拆柱，P2-4）。
 //! - `TranscriptCache`（managed state，`Arc<Mutex<…>>` 窗口创建前 manage）：
-//!   `entries: HashMap<PathBuf,(mtime_ms,size,CcSessionRow)>` + `index:
-//!   HashMap<String,PathBuf>` sessionId 二级索引（P2-2——idle hook 只有
-//!   (agent, session_id)）；查询时 mtime+size 未变直接用缓存、变了重解析；
-//!   无常驻 watcher（查询驱动懒解析）；缓存缺失（首查/idle 先于查询）由
-//!   refresh scan 补建。
+//!  `entries: HashMap<PathBuf,CacheEntry>`（mtime/size/file_id 判定 + 已解析
+//!  偏移 + 增量续算状态 + row/负缓存）+ `index: HashMap<String,PathBuf>`
+//!  sessionId 二级索引（P2-2——idle hook 只有 (agent, session_id)）；查询时
+//!  未变直接用缓存、append 增长走**增量偏移解析**（只读尾部新增行）、变小/
+//!  换文件对象回退全量；无常驻 watcher（查询驱动懒解析）；缓存缺失（首查/
+//!  idle 先于查询）由 refresh scan 补建。
+//!  并发口径（task-pulsepet-v2-polish #11 方案 α）：锁内只做轻量判定与写回，
+//!  I/O 与解析在锁外（[`refresh_unlocked`] / [`find_session_unlocked`]）；
+//!  刷新进行中后来者用旧快照让路。跨重启仍全量一次（内存缓存固有）。
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
@@ -136,26 +141,31 @@ pub fn sqlite_week_label(ms: i64) -> Option<String> {
     Some(format!("{}-W{:02}", date.year(), week))
 }
 
-/// 单文件解析（坏行/空文件/非 JSON 行跳过不崩；无 assistant 行 → None）。
-pub fn parse_session(path: &Path) -> Option<CcSessionRow> {
-    let Ok(text) = std::fs::read_to_string(path) else {
-        return None;
-    };
-    let session_id = path
-        .file_stem()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "unknown".into());
+/// usage 五维映射（S2；缺字段按 0——防御式）。
+type Usage5 = (i64, i64, i64, i64, i64); // input, output, reasoning, cache_read, cache_write
 
-    let mut usage_by_key: HashMap<String, (i64, i64, i64, i64, i64)> = HashMap::new();
-    let mut line_seq = 0u64; // 独立计入行的唯一键（id/uuid 皆缺，P3-4）
-    let mut first_ts: Option<i64> = None;
-    let mut last_ts: Option<i64> = None;
-    let mut last_assistant_ts: Option<i64> = None;
-    let mut model_id: Option<String> = None;
-    let mut title: Option<String> = None;
-    let mut project_name: Option<String> = None;
-    let mut assistant_seen = false;
+/// 会话增量解析器状态（task-pulsepet-v2-polish #11 方案 α）：一遍行扫描的
+/// 全部累积态。跨多次 append 续算——「全量 = 从 offset 0 一口气 feed」与
+/// 「增量 = 分多批 feed」对同一字节流逐字段等价（行级状态机，无跨行回看）。
+#[derive(Debug, Default, Clone)]
+pub struct SessionState {
+    /// message.id → 末条 usage（S3 去重覆盖）。
+    usage_by_key: HashMap<String, Usage5>,
+    /// id/uuid 皆缺的独立计入行序号（P3-4）。
+    line_seq: u64,
+    first_ts: Option<i64>,
+    last_ts: Option<i64>,
+    /// 末条 assistant 行 timestamp（N-1 护栏口径）。
+    last_assistant_ts: Option<i64>,
+    model_id: Option<String>,
+    title: Option<String>,
+    project_name: Option<String>,
+    assistant_seen: bool,
+}
 
+/// 喂入一批**完整行**（不含换行符；半行由调用方截掉留到下次）。
+/// 行为与原 parse_session 循环体逐字一致（增量等价性的根基）。
+fn feed_lines(state: &mut SessionState, text: &str) {
     for line in text.lines() {
         let line = line.trim();
         if line.is_empty() {
@@ -170,16 +180,16 @@ pub fn parse_session(path: &Path) -> Option<CcSessionRow> {
             .and_then(|v| v.as_str())
             .and_then(parse_timestamp_ms)
         {
-            if first_ts.is_none() {
-                first_ts = Some(ts);
+            if state.first_ts.is_none() {
+                state.first_ts = Some(ts);
             }
-            last_ts = Some(ts);
+            state.last_ts = Some(ts);
         }
         // cwd：首条含非空 cwd 的行 → basename（P2-6）
-        if project_name.is_none() {
+        if state.project_name.is_none() {
             if let Some(cwd) = obj.get("cwd").and_then(|v| v.as_str()) {
                 if !cwd.trim().is_empty() {
-                    project_name = Path::new(cwd)
+                    state.project_name = Path::new(cwd)
                         .file_name()
                         .map(|n| n.to_string_lossy().into_owned());
                 }
@@ -202,32 +212,31 @@ pub fn parse_session(path: &Path) -> Option<CcSessionRow> {
                             .map(|s| s.to_string())
                     })
                     .unwrap_or_else(|| {
-                        line_seq += 1;
-                        format!("\u{0}line-{line_seq}")
+                        state.line_seq += 1;
+                        format!("\u{0}line-{}", state.line_seq)
                     });
                 // 按行序取末条：直接覆盖（S3）
                 let usage = usage5_of(message);
-                // 按行序取末条：直接覆盖（S3）
-                usage_by_key.insert(key, usage);
-                assistant_seen = true;
+                state.usage_by_key.insert(key, usage);
+                state.assistant_seen = true;
                 // 末条 assistant 行 timestamp（N-1 护栏口径）
                 if let Some(ts) = obj
                     .get("timestamp")
                     .and_then(|v| v.as_str())
                     .and_then(parse_timestamp_ms)
                 {
-                    last_assistant_ts = Some(ts);
+                    state.last_assistant_ts = Some(ts);
                 }
                 // model 取最后一条 message.model（纯字符串）
                 if let Some(m) = message.and_then(|m| m.get("model")).and_then(|v| v.as_str()) {
                     if !m.is_empty() {
-                        model_id = Some(m.to_string());
+                        state.model_id = Some(m.to_string());
                     }
                 }
             }
             "user" => {
                 // 标题：首条 user 且 content 为 string 的行截断（chars 按字符，P3-13）
-                if title.is_none() {
+                if state.title.is_none() {
                     if let Some(content) = obj
                         .get("message")
                         .and_then(|m| m.get("content"))
@@ -235,7 +244,7 @@ pub fn parse_session(path: &Path) -> Option<CcSessionRow> {
                     {
                         let trimmed = content.trim();
                         if !trimmed.is_empty() {
-                            title = Some(trimmed.chars().take(60).collect());
+                            state.title = Some(trimmed.chars().take(60).collect());
                         }
                     }
                 }
@@ -243,40 +252,71 @@ pub fn parse_session(path: &Path) -> Option<CcSessionRow> {
             _ => {} // 未知行类型跳过（防御式）
         }
     }
+}
 
-    if !assistant_seen {
+/// 状态 → 会话行（assistant_seen=false → None）。
+fn finalize_state(state: &SessionState, session_id: &str) -> Option<CcSessionRow> {
+    if !state.assistant_seen {
         return None;
     }
-
     let mut sum = (0i64, 0i64, 0i64, 0i64, 0i64);
-    for (_, u) in usage_by_key {
+    for (_, u) in &state.usage_by_key {
         sum.0 += u.0;
         sum.1 += u.1;
         sum.2 += u.2;
         sum.3 += u.3;
         sum.4 += u.4;
     }
-
-    let title = title.unwrap_or_else(|| session_id.chars().take(8).collect());
+    let title = state
+        .title
+        .clone()
+        .unwrap_or_else(|| session_id.chars().take(8).collect());
     Some(CcSessionRow {
-        session_id,
+        session_id: session_id.to_string(),
         cost: 0.0,
         tokens_input: sum.0,
         tokens_output: sum.1,
         tokens_reasoning: sum.2,
         tokens_cache_read: sum.3,
         tokens_cache_write: sum.4,
-        time_created: first_ts,
-        time_updated: last_ts,
-        model_id,
-        project_name,
+        time_created: state.first_ts,
+        time_updated: state.last_ts,
+        model_id: state.model_id.clone(),
+        project_name: state.project_name.clone(),
         title,
-        last_assistant_ts,
+        last_assistant_ts: state.last_assistant_ts,
     })
 }
 
-/// usage 五维映射（S2；缺字段按 0——防御式）。
-type Usage5 = (i64, i64, i64, i64, i64); // input, output, reasoning, cache_read, cache_write
+/// 单文件解析（坏行/空文件/非 JSON 行跳过不崩；无 assistant 行 → None）。
+/// 方案 α 起口径统一为「只解析以换行符结束的完整行」（与增量路径一致；
+/// CC 正在写的半行不入账——jsonl 语义，逐字段等价的前提）。
+/// 生产路径已全量走 CacheEntry 增量链路（parse_file_full/increment），
+/// 本函数仅测试使用（task-pulsepet-v2-polish R1 追加：cfg(test) 清 release
+/// 档 dead_code 警告）。
+#[cfg(test)]
+pub fn parse_session(path: &Path) -> Option<CcSessionRow> {
+    let bytes = std::fs::read(path).ok()?;
+    let session_id = session_id_of(path);
+    let (state, _) = feed_complete_lines(SessionState::default(), &bytes)?;
+    finalize_state(&state, &session_id)
+}
+
+/// 文件名 stem → sessionId。
+fn session_id_of(path: &Path) -> String {
+    path.file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "unknown".into())
+}
+
+/// 完整行口径喂入：只处理到最后一个 `\n`（含），返回推进后的状态与新偏移。
+/// 无任何完整行 → None（半行/空文件留到下次）。
+fn feed_complete_lines(mut state: SessionState, bytes: &[u8]) -> Option<(SessionState, u64)> {
+    let last_nl = bytes.iter().rposition(|&b| b == b'\n')?;
+    let text = std::str::from_utf8(&bytes[..=last_nl]).ok()?; // 非 UTF-8 → None（回退防御）
+    feed_lines(&mut state, text);
+    Some((state, last_nl as u64 + 1))
+}
 
 fn usage5_of(message: Option<&serde_json::Value>) -> Usage5 {
     let usage = message.and_then(|m| m.get("usage"));
@@ -303,53 +343,285 @@ fn usage5_of(message: Option<&serde_json::Value>) -> Usage5 {
 // TranscriptCache：文件级缓存 + sessionId 二级索引（TC-M5-02）
 // ---------------------------------------------------------------------------
 
+/// 单文件缓存条目（方案 α）：`(mtime, size)` 失效判定 + 已解析字节偏移 +
+/// 增量解析器状态 + 结果（row=None 为负缓存——解析过但无 assistant 行，
+/// 不再每次重试；后续 append 出现 assistant 行可从状态续算转正）。
+#[derive(Debug, Clone)]
+pub struct CacheEntry {
+    pub mtime: SystemTime,
+    pub size: u64,
+    /// 已解析到的字节偏移（只推进到最后一个完整换行符 +1；半行留到下次）。
+    pub offset: u64,
+    /// 文件对象身份（unix=inode / windows=creation_time；None=不可用）。
+    /// append 不变、tmp+rename 重写必变——「变长但前缀已换」的重写文件
+    /// 靠它识破并回退全量，防增量拼接出错误数据。
+    pub file_id: u64,
+    /// 增量续算状态（下次 append 从 offset 续）。
+    pub state: SessionState,
+    /// 解析结果（None = 负缓存）。
+    pub row: Option<CcSessionRow>,
+}
+
 #[derive(Debug, Default)]
 pub struct TranscriptCache {
-    /// PathBuf → (mtime, size, 解析行)；mtime+size 未变直接复用（S7）。
+    /// PathBuf → 缓存条目；mtime+size+file_id 未变直接复用（S7）。
     /// mtime 用 SystemTime 纳秒精度（CC 原子写 tmp+rename 可能落在同一毫秒内，
     /// 毫秒精度会漏失效——R4）。
-    pub entries: HashMap<PathBuf, (SystemTime, u64, CcSessionRow)>,
+    pub entries: HashMap<PathBuf, CacheEntry>,
     /// sessionId → PathBuf（P2-2：idle hook 只有 (agent, session_id)）。
     pub index: HashMap<String, PathBuf>,
+    /// 方案 α：锁外刷新进行中标记（plan 置位 / commit 清除；后来者让路用旧
+    /// 快照）。持有起始时刻：execute 线程 panic 残留的 stale 标记超过 TTL 由
+    /// 后来者接管（写回幂等，双写无害）。
+    pub refresh_in_flight: Option<std::time::Instant>,
 }
+
+/// in-flight 标记的 stale 判定窗口（execute 异常残留的兜底接管时限）。
+const REFRESH_STALE_AFTER: std::time::Duration = std::time::Duration::from_secs(30);
 
 fn mtime_of(meta: &std::fs::Metadata) -> SystemTime {
     meta.modified().unwrap_or(UNIX_EPOCH)
 }
 
+/// 文件对象身份（unix inode / windows creation_time 近似；拿不到 → 0）。
+/// 同一文件 append 身份不变；tmp+rename 落位的新文件身份不同。
+fn file_id_of(meta: &std::fs::Metadata) -> u64 {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        meta.ino()
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        meta.creation_time()
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        0
+    }
+}
+
+/// 锁外解析任务（plan 阶段产出，execute 阶段锁外执行）。
+#[derive(Debug)]
+enum ParseTask {
+    /// 全量（新文件 / 变小 / mtime 变而 size 未变 / 身份变了）。
+    Full { path: PathBuf },
+    /// 增量：从 offset 续算（append-only 增长）。
+    /// `expect_file_id` = plan 时该文件的 inode/creation_time——execute 读尾
+    /// 后复核，不符（plan→execute 窗口内被 tmp+rename 重写）则放弃增量回退
+    /// 全量，防新文件尾部拼进旧状态（tester P3-2）。
+    Incr {
+        path: PathBuf,
+        offset: u64,
+        state: SessionState,
+        expect_file_id: u64,
+    },
+}
+
+/// 锁内判定的刷新计划（task-pulsepet-v2-polish #11 方案 α）。
+pub struct RefreshPlan {
+    tasks: Vec<ParseTask>,
+}
+
+/// 锁外解析产物：path → 新缓存条目（含解析后实测 mtime/size）。
+pub struct ParsedFile {
+    path: PathBuf,
+    entry: CacheEntry,
+}
+
+impl RefreshPlan {
+    /// 锁外执行全部解析任务（I/O + JSON 解析不持锁）。
+    fn execute(self) -> Vec<ParsedFile> {
+        self.tasks.into_iter().map(run_task).collect()
+    }
+}
+
+/// 单任务执行：读文件 → 完整行口径解析 → 解析后实测 (mtime,size) 入条目。
+/// 全量失败（读不了/非 UTF-8）→ 负缓存条目（mtime/size 用实测值，state 空）。
+/// 增量执行中文件被截断（读后实测 size < 起始 offset）或 file_id 与 plan 时
+/// 不符（窗口内被重写）→ 就地回退全量。
+fn run_task(task: ParseTask) -> ParsedFile {
+    match task {
+        ParseTask::Full { path } => parse_file_full(&path),
+        ParseTask::Incr {
+            path,
+            offset,
+            state,
+            expect_file_id,
+        } => match parse_file_incr(&path, offset, state, expect_file_id) {
+            Some(entry) => ParsedFile { path, entry },
+            None => parse_file_full(&path),
+        },
+    }
+}
+
+/// 全量解析：从头读整个文件，只处理完整行。
+fn parse_file_full(path: &Path) -> ParsedFile {
+    let bytes = std::fs::read(path).unwrap_or_default();
+    let session_id = session_id_of(path);
+    let (state, offset) = feed_complete_lines(SessionState::default(), &bytes)
+        .unwrap_or((SessionState::default(), 0));
+    let row = finalize_state(&state, &session_id);
+    let (mtime, size, file_id) = stat3(path);
+    ParsedFile {
+        path: path.to_path_buf(),
+        entry: CacheEntry {
+            mtime,
+            size,
+            offset,
+            file_id,
+            state,
+            row,
+        },
+    }
+}
+
+/// 增量解析：seek 到 offset 只读尾部新增字节（旧字节不再读），喂完整行。
+/// 返回 None 表示应回退全量，触发条件（tester P3-2）：
+/// 读失败 / 非 UTF-8 / 读后实测文件已缩到 offset 之下（窗口内截断）/
+/// 实测 file_id 与 plan 时的期望不符（窗口内 tmp+rename 重写——只查 size
+/// 挡不住"重写且更长"，尾部会拼进旧状态）。
+fn parse_file_incr(
+    path: &Path,
+    offset: u64,
+    mut state: SessionState,
+    expect_file_id: u64,
+) -> Option<CacheEntry> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut f = std::fs::File::open(path).ok()?;
+    f.seek(SeekFrom::Start(offset)).ok()?;
+    let mut tail = Vec::new();
+    f.read_to_end(&mut tail).ok()?;
+    let (new_state, advanced) = feed_complete_lines(state, &tail)?;
+    state = new_state;
+    let new_offset = offset + advanced;
+    let (mtime, size, file_id) = stat3(path);
+    if size < new_offset {
+        // 锁外期间文件被截断/重写 → 本次结果作废，交回全量
+        return None;
+    }
+    if file_id != expect_file_id {
+        // plan→execute 窗口内文件对象已被替换（tmp+rename 重写）→ 增量状态
+        // 与新内容前缀无继承关系，作废交回全量（entry 由全量路径记新 file_id）
+        return None;
+    }
+    let row = finalize_state(&state, &session_id_of(path));
+    Some(CacheEntry {
+        mtime,
+        size,
+        offset: new_offset,
+        file_id,
+        state,
+        row,
+    })
+}
+
+/// (mtime, size, file_id)；stat 失败 → (UNIX_EPOCH, 0, 0)。
+fn stat3(path: &Path) -> (SystemTime, u64, u64) {
+    match std::fs::metadata(path) {
+        Ok(m) => (mtime_of(&m), m.len(), file_id_of(&m)),
+        Err(_) => (UNIX_EPOCH, 0, 0),
+    }
+}
+
 impl TranscriptCache {
-    /// 全目录扫描 + 缓存刷新：未变文件直接用缓存，变了重解析；新文件解析入缓存；
-    /// 消失的文件移除缓存与索引。返回全部会话行（时间倒序）。
+    /// 全目录扫描 + 缓存刷新（单线程便捷路径：plan → execute → commit 一气呵成，
+    /// 语义与 v2-m5 相同；并发场景用 [`refresh_unlocked`]）。
+    /// 增量口径：append-only 增长的文件从已记录偏移只读尾部新增行；
+    /// 变小 / mtime 变而 size 未变 / 文件身份变了 → 全量重解析。
+    /// 生产调用方已全走 refresh_unlocked（token_stats 三入口）；本方法仅
+    /// 测试使用（task-pulsepet-v2-polish R1 追加：cfg(test) 清 release 档
+    /// dead_code 警告）。
+    #[cfg(test)]
     pub fn refresh(&mut self, dir: &Path) -> Vec<CcSessionRow> {
+        let Some(plan) = self.plan_refresh(dir) else {
+            return self.snapshot_rows();
+        };
+        let parsed = plan.execute();
+        self.commit_refresh(parsed)
+    }
+
+    /// 锁内①：扫描清单 + (mtime,size,file_id) 轻量对比 + in-flight 标记。
+    /// Some(plan) → 调用方锁外 `execute` 后 `commit_refresh` 写回；
+    /// None → 已有刷新进行中（调用方直接 `snapshot_rows` 用旧数据）。
+    pub fn plan_refresh(&mut self, dir: &Path) -> Option<RefreshPlan> {
+        if let Some(t0) = self.refresh_in_flight {
+            if t0.elapsed() < REFRESH_STALE_AFTER {
+                return None; // 进行中 → 让路（旧快照）
+            }
+            // stale（execute 线程 panic 残留）→ 接管（写回幂等，双写无害）
+        }
+        self.refresh_in_flight = Some(std::time::Instant::now());
         let files = transcript_scan(dir);
         let seen: std::collections::HashSet<PathBuf> = files.iter().cloned().collect();
-        let mut rows = Vec::new();
+        let mut tasks = Vec::new();
         for f in &files {
             let meta = std::fs::metadata(f).ok();
-            let (mtime, size) = meta
+            let (mtime, size, file_id) = meta
                 .as_ref()
-                .map(|m| (mtime_of(m), m.len()))
-                .unwrap_or((UNIX_EPOCH, 0));
-            if let Some((cm, cs, row)) = self.entries.get(f) {
-                if *cm == mtime && *cs == size {
-                    rows.push(row.clone());
-                    continue;
+                .map(|m| (mtime_of(m), m.len(), file_id_of(m)))
+                .unwrap_or((UNIX_EPOCH, 0, 0));
+            if let Some(e) = self.entries.get(f) {
+                let unchanged = e.mtime == mtime && e.size == size && e.file_id == file_id;
+                if unchanged {
+                    continue; // 复用缓存
                 }
-            }
-            if let Some(row) = parse_session(f) {
-                self.index.insert(row.session_id.clone(), f.clone());
-                self.entries.insert(f.clone(), (mtime, size, row.clone()));
-                rows.push(row);
+                let grew = size > e.offset && file_id == e.file_id;
+                if grew {
+                    // append-only 增长 → 增量（只读尾部；携带 plan 时 file_id，
+                    // execute 端复核防窗口内重写拼接）
+                    tasks.push(ParseTask::Incr {
+                        path: f.clone(),
+                        offset: e.offset,
+                        state: e.state.clone(),
+                        expect_file_id: e.file_id,
+                    });
+                } else {
+                    // 变小（截断/重写）、原地改写（mtime 变 size 未变）、
+                    // tmp+rename 换了文件对象（更长也全量，防拼接错数据）
+                    tasks.push(ParseTask::Full { path: f.clone() });
+                }
+            } else {
+                tasks.push(ParseTask::Full { path: f.clone() });
             }
         }
+        // 消失的文件移除缓存与索引（轻量，锁内完成）
         self.entries.retain(|p, _| seen.contains(p));
         self.index.retain(|_, p| seen.contains(p));
+        Some(RefreshPlan { tasks })
+    }
+
+    /// 锁内③：写回解析结果 + 清 in-flight + 返回全部会话行（时间倒序）。
+    pub fn commit_refresh(&mut self, parsed: Vec<ParsedFile>) -> Vec<CcSessionRow> {
+        for pf in parsed {
+            if let Some(row) = &pf.entry.row {
+                self.index.insert(row.session_id.clone(), pf.path.clone());
+            }
+            self.entries.insert(pf.path, pf.entry);
+        }
+        self.refresh_in_flight = None;
+        self.snapshot_rows()
+    }
+
+    /// 收集全部会话行快照（时间倒序；in-flight 让路路径共用）。
+    pub fn snapshot_rows(&self) -> Vec<CcSessionRow> {
+        let mut rows: Vec<CcSessionRow> = self
+            .entries
+            .values()
+            .filter_map(|e| e.row.clone())
+            .collect();
         rows.sort_by(|a, b| b.time_updated.cmp(&a.time_updated));
         rows
     }
 
-    /// 经 sessionId 索引定位文件并取会话行：索引命中 → (mtime,size) 校验/
-    /// 重解析；索引缺失（首查/idle 先于查询）→ refresh 补建后取。无 → None。
+    /// 经 sessionId 索引定位文件并取会话行（单线程便捷路径；并发场景用
+    /// [`find_session_unlocked`]）。索引缺失（首查/idle 先于查询）→ refresh
+    /// 补建后取。无 → None。
+    /// 生产调用方（build_cc_idle_report）已走 find_session_unlocked；本方法
+    /// 仅测试使用（task-pulsepet-v2-polish R1 追加：cfg(test) 清 release 档
+    /// dead_code 警告）。
+    #[cfg(test)]
     pub fn find_session(&mut self, dir: &Path, session_id: &str) -> Option<CcSessionRow> {
         let path = match self.index.get(session_id).cloned() {
             Some(p) => p,
@@ -358,20 +630,115 @@ impl TranscriptCache {
                 self.index.get(session_id).cloned()?
             }
         };
+        // 命中文件单点校验（mtime,size,file_id 未变直接复用）
         let meta = std::fs::metadata(&path).ok();
-        let (mtime, size) = meta
+        let (mtime, size, file_id) = meta
             .as_ref()
-            .map(|m| (mtime_of(m), m.len()))
-            .unwrap_or((UNIX_EPOCH, 0));
-        if let Some((cm, cs, row)) = self.entries.get(&path) {
-            if *cm == mtime && *cs == size {
-                return Some(row.clone());
+            .map(|m| (mtime_of(m), m.len(), file_id_of(m)))
+            .unwrap_or((UNIX_EPOCH, 0, 0));
+        if let Some(e) = self.entries.get(&path) {
+            if e.mtime == mtime && e.size == size && e.file_id == file_id {
+                return e.row.clone();
             }
         }
-        let row = parse_session(&path)?;
-        self.index.insert(row.session_id.clone(), path.clone());
-        self.entries.insert(path, (mtime, size, row.clone()));
-        Some(row)
+        let pf = run_task(ParseTask::Full { path });
+        let row = pf.entry.row.clone();
+        if let Some(r) = &row {
+            self.index.insert(r.session_id.clone(), pf.path.clone());
+        }
+        self.entries.insert(pf.path, pf.entry);
+        row
+    }
+}
+
+/// 并发路径的锁获取（poison 容忍，与库内惯例一致）。
+fn lock_cache(cache: &Arc<Mutex<TranscriptCache>>) -> std::sync::MutexGuard<'_, TranscriptCache> {
+    cache.lock().unwrap_or_else(|p| p.into_inner())
+}
+
+/// 锁外刷新（方案 α 主入口，task-pulsepet-v2-polish #11）：
+/// ① 锁内轻量判定（清单 + mtime/size/file_id 对比 + in-flight 标记）→
+/// ② 锁外 I/O 与解析（增量：只读尾部新增行）→ ③ 锁内写回。
+/// **并发策略**：刷新进行中（in-flight）时后来者不等待——直接用现有缓存
+/// 快照返回（旧数据；查询驱动懒解析下，下一次查询自然拿到新数据）。
+/// 全目录并行解析**不做**（全量仅启动一次发生，且本函数已在
+/// spawn_blocking 后台线程，收益不抵复杂度——任务定案）。跨重启仍全量一次
+/// （内存缓存固有；β 落库方案留作数据量真大时演进方向）。
+/// 锁为 PulsePet 进程内内存锁，与 CC 写文件无任何相互影响。
+pub fn refresh_unlocked(dir: &Path, cache: &Arc<Mutex<TranscriptCache>>) -> Vec<CcSessionRow> {
+    let plan = {
+        let mut c = lock_cache(cache);
+        match c.plan_refresh(dir) {
+            Some(p) => p,
+            None => return c.snapshot_rows(), // in-flight → 旧快照让路
+        }
+    };
+    let parsed = plan.execute(); // 锁外：I/O + 解析
+    let mut c = lock_cache(cache);
+    c.commit_refresh(parsed)
+}
+
+/// 并发路径的 sessionId 定位（idle 汇报用）：
+/// 索引命中且未变 → 直接给行；命中但文件变化 → 单文件任务锁外解析；
+/// 索引缺失 → [`refresh_unlocked`] 全目录补建后取。
+pub fn find_session_unlocked(
+    dir: &Path,
+    cache: &Arc<Mutex<TranscriptCache>>,
+    session_id: &str,
+) -> Option<CcSessionRow> {
+    // ① 锁内：索引定位 + 轻量判定
+    enum Step {
+        Hit(Option<CcSessionRow>),
+        Task(ParseTask),
+        Miss,
+    }
+    let step = {
+        let c = lock_cache(cache);
+        match c.index.get(session_id).cloned() {
+            Some(path) => {
+                let meta = std::fs::metadata(&path).ok();
+                let (mtime, size, file_id) = meta
+                    .as_ref()
+                    .map(|m| (mtime_of(m), m.len(), file_id_of(m)))
+                    .unwrap_or((UNIX_EPOCH, 0, 0));
+                match c.entries.get(&path) {
+                    Some(e) if e.mtime == mtime && e.size == size && e.file_id == file_id => {
+                        Step::Hit(e.row.clone())
+                    }
+                    Some(e) if size > e.offset && file_id == e.file_id => Step::Task(ParseTask::Incr {
+                        path,
+                        offset: e.offset,
+                        state: e.state.clone(),
+                        expect_file_id: e.file_id,
+                    }),
+                    _ => Step::Task(ParseTask::Full { path }),
+                }
+            }
+            None => Step::Miss,
+        }
+    };
+    match step {
+        Step::Hit(row) => row,
+        Step::Task(task) => {
+            // ② 锁外：单文件解析（增量或全量）
+            let pf = run_task(task);
+            // ③ 锁内：写回 + 返回
+            let mut c = lock_cache(cache);
+            let row = pf.entry.row.clone();
+            if let Some(r) = &row {
+                c.index.insert(r.session_id.clone(), pf.path.clone());
+            }
+            c.entries.insert(pf.path, pf.entry);
+            row
+        }
+        Step::Miss => {
+            refresh_unlocked(dir, cache);
+            let c = lock_cache(cache);
+            c.index
+                .get(session_id)
+                .and_then(|p| c.entries.get(p))
+                .and_then(|e| e.row.clone())
+        }
     }
 }
 
@@ -596,8 +963,14 @@ mod tests {
             .timestamp_millis();
         assert_eq!(ms, expect);
         assert_eq!(local_day_label(ms).as_deref(), Some(sqlite_day(ms).as_str()));
-        // 本地口径断言：日标签 = chrono Local 日期（本机 UTC+8 下为 08-25，
-        // 与 UTC 日期 08-24 跨日——注入时区后由 Local/SQLite oracle 双侧钉住）
+        // 本地口径断言：日标签 = chrono Local 日期（非零偏移时区下自然覆盖
+        // 「与 UTC 日期跨日」转换路径——如 UTC+8 下 16:30Z = 次日 00:30）
+        //
+        // task-pulsepet-v2-polish #9：原「assert_ne!(本地日, UTC日)」硬假设
+        // 本机时区非零偏移（TZ=UTC 环境必红）已移除——本地口径语义已由上方
+        // Local/SQLite oracle 双侧对账钉住（label ≡ Local 日期 ≡ localtime）；
+        // 不做 TZ 注入（chrono Local 与 SQLite localtime 对 TZ env 的重读
+        // 行为均有平台差异，注入会引入新的不稳定）。
         use chrono::{Datelike, TimeZone};
         let local_date = chrono::Local.timestamp_millis_opt(ms).single().unwrap().date_naive();
         let label = local_day_label(ms).unwrap();
@@ -609,17 +982,6 @@ mod tests {
                 local_date.month(),
                 local_date.day()
             )
-        );
-        let utc_date = chrono::Utc.timestamp_millis_opt(ms).single().unwrap().date_naive();
-        assert_ne!(
-            format!("{label}"),
-            format!(
-                "{:04}-{:02}-{:02}",
-                utc_date.year(),
-                utc_date.month(),
-                utc_date.day()
-            ),
-            "本机时区非零偏移下 UTC 16:30 与 UTC 日期跨日（转换到本地口径生效）"
         );
     }
 
@@ -860,5 +1222,326 @@ mod tests {
             );
             assert_eq!(r.cost, 0.0, "cost 恒 0（S4）");
         }
+    }
+
+    // ---- 方案 α（task-pulsepet-v2-polish #11）：增量偏移解析 + 锁外解析钉子 ----
+
+    use std::io::Write as _;
+    use std::sync::{Arc, Mutex};
+
+    fn append_line(path: &Path, line: &serde_json::Value) {
+        let mut f = std::fs::OpenOptions::new()
+            .append(true)
+            .create(true)
+            .open(path)
+            .unwrap();
+        f.write_all(serde_json::to_string(line).unwrap().as_bytes())
+            .unwrap();
+        f.write_all(b"\n").unwrap();
+    }
+
+    fn append_partial(path: &Path, bytes: &[u8]) {
+        let mut f = std::fs::OpenOptions::new()
+            .append(true)
+            .create(true)
+            .open(path)
+            .unwrap();
+        f.write_all(bytes).unwrap();
+    }
+
+    /// 钉子①：多文件多轮 append 后，增量缓存与「独立全新全量解析」逐字段一致
+    ///（含 message.id 去重覆盖语义、负缓存文件转正、顶层散落文件）。
+    #[test]
+    fn alpha_incremental_matches_full_reparse() {
+        let dir = temp_dir("alpha-eq");
+        let proj = dir.join("proj");
+        std::fs::create_dir_all(&proj).unwrap();
+        let f1 = proj.join("11111111-1111-2222-3333-444444444444.jsonl");
+        let f2 = dir.join("22222222-1111-2222-3333-444444444444.jsonl"); // 顶层散落
+        let ts = "2026-08-24T07:03:35.156Z";
+        let mut cache = TranscriptCache::default();
+        // 轮 0：f1 含同 message.id 双行（覆盖语义）+ user 标题；f2 无 assistant 行（负缓存）
+        write_lines(
+            &f1,
+            &[
+                assistant_line(Some("m1"), Some("u1"), ts, usage5(100, 1, 0, 0, 0)),
+                assistant_line(Some("m1"), Some("u1b"), ts, usage5(111, 2, 0, 0, 0)),
+                json!({"type": "user", "timestamp": ts, "message": {"role": "user", "content": "标题甲"}}),
+            ],
+        );
+        write_lines(
+            &f2,
+            &[json!({"type": "user", "message": {"content": "无 assistant 行"}})],
+        );
+        let _ = cache.refresh(&dir);
+        // 轮 1~3：交替 append（增量路径）
+        for i in 0..3 {
+            append_line(
+                &f1,
+                &assistant_line(Some(&format!("mx{i}")), None, ts, usage5(10 + i, 0, 0, 1, 0)),
+            );
+            if i == 1 {
+                // f2 后来才出现 assistant 行：负缓存 → 增量续算转正
+                append_line(&f2, &assistant_line(Some("f2m"), None, ts, usage5(7, 0, 0, 0, 0)));
+            }
+            let _ = cache.refresh(&dir);
+        }
+        // 对账：独立全新缓存全量解析 vs 增量缓存
+        //（两行同 time_updated 时 sort_by 稳定序受 HashMap 迭代序影响，
+        // 对比前按 session_id 归一排序——逐字段对账不受快照顺序干扰）
+        let mut fresh = TranscriptCache::default();
+        let mut full = fresh.refresh(&dir);
+        let mut incr = cache.refresh(&dir);
+        full.sort_by(|a, b| a.session_id.cmp(&b.session_id));
+        incr.sort_by(|a, b| a.session_id.cmp(&b.session_id));
+        assert_eq!(incr.len(), 2);
+        assert_eq!(incr, full, "增量结果与全量解析逐字段一致");
+        // 去重覆盖语义抽查（m1 取末条 111）
+        let f1_row = incr.iter().find(|r| r.session_id.starts_with("11111111")).unwrap();
+        assert_eq!(f1_row.tokens_input, 111 + 10 + 11 + 12);
+    }
+
+    /// 钉子②：append 尾部新增行走增量（旧字节不再读），结果正确、偏移推进。
+    #[test]
+    fn alpha_append_tail_incremental_parse() {
+        let dir = temp_dir("alpha-append");
+        let f = dir.join("aaaaaaaa-3333-2222-3333-444444444444.jsonl");
+        write_lines(
+            &f,
+            &[assistant_line(
+                Some("m1"),
+                Some("u1"),
+                "2026-08-24T07:03:35.156Z",
+                usage5(100, 0, 0, 0, 0),
+            )],
+        );
+        let mut cache = TranscriptCache::default();
+        let rows = cache.refresh(&dir);
+        assert_eq!(rows[0].tokens_input, 100);
+        assert_eq!(
+            cache.entries[&f].offset,
+            std::fs::metadata(&f).unwrap().len(),
+            "全量解析后偏移 = 文件长度"
+        );
+        append_line(
+            &f,
+            &assistant_line(
+                Some("m2"),
+                None,
+                "2026-08-24T07:04:35.156Z",
+                usage5(50, 5, 0, 0, 0),
+            ),
+        );
+        let rows2 = cache.refresh(&dir);
+        assert_eq!(rows2[0].tokens_input, 150, "尾部增量入账");
+        assert_eq!(rows2[0].tokens_output, 5);
+        assert_eq!(
+            rows2[0].time_updated,
+            parse_timestamp_ms("2026-08-24T07:04:35.156Z")
+        );
+        assert_eq!(
+            cache.entries[&f].offset,
+            std::fs::metadata(&f).unwrap().len(),
+            "增量后偏移推进到文件末"
+        );
+    }
+
+    /// 钉子③：CC 正在写的半行不入账、偏移不推进；补完换行后下次补读。
+    #[test]
+    fn alpha_offset_advances_only_to_complete_line() {
+        let dir = temp_dir("alpha-halfline");
+        let f = dir.join("bbbbbbbb-3333-2222-3333-444444444444.jsonl");
+        let ts = "2026-08-24T07:03:35.156Z";
+        write_lines(&f, &[assistant_line(Some("m1"), Some("u1"), ts, usage5(100, 0, 0, 0, 0))]);
+        let mut cache = TranscriptCache::default();
+        cache.refresh(&dir);
+        let offset0 = cache.entries[&f].offset;
+        // 半行：合法 JSON 前缀、无换行（CC 正在写）
+        let half = serde_json::to_string(&assistant_line(Some("m2"), None, ts, usage5(500, 0, 0, 0, 0)))
+            .unwrap();
+        append_partial(&f, half.as_bytes());
+        let rows = cache.refresh(&dir);
+        assert_eq!(rows[0].tokens_input, 100, "半行不入账");
+        assert_eq!(cache.entries[&f].offset, offset0, "偏移不推进（无完整换行）");
+        // 补完换行 → 下次补读
+        append_partial(&f, b"\n");
+        let rows2 = cache.refresh(&dir);
+        assert_eq!(rows2[0].tokens_input, 600, "补完换行后整行入账");
+        assert_eq!(cache.entries[&f].offset, std::fs::metadata(&f).unwrap().len());
+    }
+
+    /// 钉子④：文件变小（重写/截断，size < 已记录偏移）→ 回退全量重解析。
+    #[test]
+    fn alpha_shrunk_file_falls_back_to_full_reparse() {
+        let dir = temp_dir("alpha-shrink");
+        let f = dir.join("cccccccc-3333-2222-3333-444444444444.jsonl");
+        let ts = "2026-08-24T07:03:35.156Z";
+        write_lines(
+            &f,
+            &[
+                assistant_line(Some("m1"), None, ts, usage5(300, 0, 0, 0, 0)),
+                assistant_line(Some("m2"), None, ts, usage5(30, 0, 0, 0, 0)),
+                assistant_line(Some("m3"), None, ts, usage5(3, 0, 0, 0, 0)),
+            ],
+        );
+        let mut cache = TranscriptCache::default();
+        assert_eq!(cache.refresh(&dir)[0].tokens_input, 333);
+        // 重写为更短的不同内容（mtime/size 均变，size < offset）
+        write_lines(&f, &[assistant_line(Some("m9"), None, ts, usage5(9, 0, 0, 0, 0))]);
+        let rows = cache.refresh(&dir);
+        assert_eq!(rows[0].tokens_input, 9, "变小回退全量（非增量拼接）");
+        assert_eq!(rows[0].title, "cccccccc");
+        assert_eq!(cache.entries[&f].offset, std::fs::metadata(&f).unwrap().len());
+    }
+
+    /// 钉子⑤：锁外解析不阻塞并发查询（P3-3 加固为确定性构造）——手动拆分
+    /// plan/execute/commit：B 的让路查询被钉死在「plan 已置 in-flight、execute
+    /// 未开始」的确定窗口，消除原 sleep(150ms) 依赖 A 未完成的竞速面
+    ///（A 若先完成则 B 拿新快照，b==20_000 断言翻车——tester P3-3）。
+    /// B 语义达标 = in-flight 让路拿旧快照 + 未被长时间阻塞；execute 锁外
+    /// 由 plan 返回时锁 guard 已 drop 的结构保证（B 能在任意非持锁时刻拿锁）。
+    #[test]
+    fn alpha_unlocked_refresh_does_not_block_concurrent_query() {
+        let dir = temp_dir("alpha-conc");
+        let f = dir.join("dddddddd-3333-2222-3333-444444444444.jsonl");
+        let ts = "2026-08-24T07:03:35.156Z";
+        // 预热：2 万行（旧数据快照来源；无 id/uuid → 每行独立计入，和 = 行数）
+        let line_text = serde_json::to_string(&assistant_line(None, None, ts, usage5(1, 0, 0, 0, 0)))
+            .unwrap();
+        {
+            let mut w = std::fs::File::create(&f).unwrap();
+            for _ in 0..20_000 {
+                writeln!(w, "{line_text}").unwrap();
+            }
+        }
+        let cache = Arc::new(Mutex::new(TranscriptCache::default()));
+        let warm = refresh_unlocked(&dir, &cache);
+        assert_eq!(warm.len(), 1);
+        assert_eq!(warm[0].tokens_input, 20_000);
+        // 增量解析量拉大（10 万行，~20MB）：execute 真实耗时顺带覆盖
+        {
+            let mut w = std::fs::OpenOptions::new().append(true).open(&f).unwrap();
+            for _ in 0..100_000 {
+                writeln!(w, "{line_text}").unwrap();
+            }
+        }
+        // A①：plan（锁内轻量判定 + in-flight 置位后即释放锁）
+        let plan = {
+            let mut c = lock_cache(&cache);
+            c.plan_refresh(&dir)
+                .expect("无并发刷新在途，plan 必成功")
+        };
+        // B：in-flight 期间并发查询 → 确定性让路（旧快照 20_000）+ 不阻塞
+        let t0 = std::time::Instant::now();
+        let b_rows = refresh_unlocked(&dir, &cache);
+        let b_elapsed = t0.elapsed();
+        assert_eq!(b_rows.len(), 1);
+        assert_eq!(b_rows[0].tokens_input, 20_000, "in-flight 让路 → 旧快照（确定性）");
+        assert!(
+            b_elapsed < std::time::Duration::from_millis(300),
+            "并发查询不应被长时间阻塞: {b_elapsed:?}"
+        );
+        // A②：execute（锁外，不持 Mutex）→ A③：commit（锁内写回）
+        let parsed = plan.execute();
+        let a_rows = {
+            let mut c = lock_cache(&cache);
+            c.commit_refresh(parsed)
+        };
+        assert_eq!(a_rows.len(), 1);
+        assert_eq!(a_rows[0].tokens_input, 120_000, "A 增量入账");
+    }
+
+    /// 补充：rename 落位「更长但前缀完全不同」的文件（tmp+rename 重写）——
+    /// unix 下 inode 变 → 全量重解析，防增量拼接出错误数据。
+    #[test]
+    fn alpha_rewritten_longer_file_full_reparse() {
+        let dir = temp_dir("alpha-rename-longer");
+        let f = dir.join("eeeeeeee-3333-2222-3333-444444444444.jsonl");
+        let ts = "2026-08-24T07:03:35.156Z";
+        write_lines(&f, &[assistant_line(Some("m1"), None, ts, usage5(100, 0, 0, 0, 0))]);
+        let mut cache = TranscriptCache::default();
+        assert_eq!(cache.refresh(&dir)[0].tokens_input, 100);
+        // tmp：不同内容且更长（若无身份防御，增量会读 [offset,..) 只得 50）
+        let tmp = dir.join(".tmp-session");
+        write_lines(
+            &tmp,
+            &[
+                assistant_line(Some("n1"), None, ts, usage5(900, 0, 0, 0, 0)),
+                assistant_line(Some("n2"), None, ts, usage5(50, 0, 0, 0, 0)),
+            ],
+        );
+        std::fs::rename(&tmp, &f).unwrap();
+        assert_eq!(cache.refresh(&dir)[0].tokens_input, 950, "重写更长 → 全量重解析");
+    }
+
+    /// 补充：find_session_unlocked（锁外单文件路径）索引未命中 → refresh 补建；
+    /// 命中且文件变化 → 增量更新。
+    #[test]
+    fn alpha_find_session_unlocked_paths() {
+        let dir = temp_dir("alpha-find");
+        let f = dir.join("ffffffff-3333-2222-3333-444444444444.jsonl");
+        let ts = "2026-08-24T07:03:35.156Z";
+        write_lines(&f, &[assistant_line(Some("m1"), None, ts, usage5(100, 0, 0, 0, 0))]);
+        let cache = Arc::new(Mutex::new(TranscriptCache::default()));
+        // 索引未命中 → refresh 补建
+        let row = find_session_unlocked(&dir, &cache, "ffffffff-3333-2222-3333-444444444444")
+            .expect("scan 补建后命中");
+        assert_eq!(row.tokens_input, 100);
+        // 未知 id → None
+        assert!(find_session_unlocked(&dir, &cache, "nope-nope").is_none());
+        // append → 索引命中的单文件增量（锁外）
+        append_line(&f, &assistant_line(Some("m2"), None, ts, usage5(33, 0, 0, 0, 0)));
+        let row2 = find_session_unlocked(&dir, &cache, "ffffffff-3333-2222-3333-444444444444")
+            .expect("命中且增量更新");
+        assert_eq!(row2.tokens_input, 133);
+    }
+
+    /// P3-2 补钉（task-pulsepet-v2-polish R1 追加，tester 白盒建议）：plan→execute
+    /// 毫秒窗口内文件被 tmp+rename 重写且更长——Incr 任务携带的期望 file_id
+    /// 与实际不符 → 放弃增量、回退全量（不把新文件尾部拼进旧状态），
+    /// entry 记新 file_id（此后 unchanged 判定用新身份，不持久化错数据）。
+    /// 与钉子⑥（alpha_rewritten_longer_file_full_reparse）的区分：⑥测 plan
+    /// 时已见新文件（锁内判定直接走 Full）；本钉子白盒模拟 plan 已拿旧
+    /// (offset, state, file_id) 之后文件才被重写的窗口。
+    #[test]
+    fn alpha_incr_file_id_mismatch_in_window_falls_back_to_full() {
+        let dir = temp_dir("alpha-fid");
+        let f = dir.join("aaaaaaaa-4444-2222-3333-444444444444.jsonl");
+        let ts = "2026-08-24T07:03:35.156Z";
+        // 旧文件（一行 m1=100）→ refresh 建立带旧 file_id 的缓存条目
+        write_lines(&f, &[assistant_line(Some("m1"), None, ts, usage5(100, 0, 0, 0, 0))]);
+        let mut cache = TranscriptCache::default();
+        cache.refresh(&dir);
+        let entry = cache.entries[&f].clone();
+
+        // 窗口模拟：plan 已持有旧 (offset, state, file_id)；此后重写且更长
+        let tmp = dir.join(".tmp-session");
+        write_lines(
+            &tmp,
+            &[
+                assistant_line(Some("n1"), None, ts, usage5(900, 0, 0, 0, 0)),
+                assistant_line(Some("n2"), None, ts, usage5(50, 0, 0, 0, 0)),
+            ],
+        );
+        std::fs::rename(&tmp, &f).unwrap();
+
+        // execute：Incr 读尾后发现 file_id 不符 → 回退全量
+        let pf = run_task(ParseTask::Incr {
+            path: f.clone(),
+            offset: entry.offset,
+            state: entry.state.clone(),
+            expect_file_id: entry.file_id,
+        });
+        let row = pf.entry.row.as_ref().expect("回退全量后应有行");
+        assert_eq!(row.tokens_input, 950, "窗口内重写 → 全量重解析（非增量拼接）");
+        assert_eq!(
+            pf.entry.offset,
+            std::fs::metadata(&f).unwrap().len(),
+            "offset 重置为新文件全量长度"
+        );
+        assert_ne!(
+            pf.entry.file_id, entry.file_id,
+            "entry 记新 file_id（防错数据经 unchanged 判定持久化）"
+        );
     }
 }
