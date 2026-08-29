@@ -13,7 +13,8 @@
  */
 
 import { t, type Lang } from "./i18n";
-import { agentShortName, formatTokens, type TodayStats } from "./token-stats";
+import { shortOf } from "./agents";
+import { formatTokens, type TodayStats } from "./token-stats";
 
 export type PetMenuAction =
   | "today-token"
@@ -58,12 +59,12 @@ export function todayTokenValue(state: TodayTokenState): string {
  * v2 M6（V2-DESIGN §6.2，TC-M6-04-1/4）：今日 agent 分布行文本——
  * `oc 36.0M · cc 3.0M`（有数据的 agent 降序、formatTokens 同口径）。
  * **单项时不显示**（单 agent 无辨识需求）→ null；零数据/缺省同样 null
- * （省略）。短名 oc/cc/task 与气泡徽标共用 agentShortName（技术名不翻译）。
+ * （省略）。短名 oc/cc/task 与气泡徽标共用 shortOf（技术名不翻译）。
  */
 export function todayByAgentText(s: TodayStats): string | null {
   const rows = s.by_agent ?? [];
   if (rows.length < 2) return null;
-  return rows.map((r) => `${agentShortName(r.agent)} ${formatTokens(r.total)}`).join(" · ");
+  return rows.map((r) => `${shortOf(r.agent)} ${formatTokens(r.total)}`).join(" · ");
 }
 
 /**

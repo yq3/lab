@@ -232,4 +232,43 @@ mod tests {
         let cache = app.handle().state::<Arc<Mutex<crate::transcript::TranscriptCache>>>();
         let _guard = cache.lock().unwrap_or_else(|p| p.into_inner());
     }
+
+    /// P2 钉（agent-registry §6.3/§8.7.2）：双端互钉——include_str! 前端
+    /// 注册表源码（相对本文件两级上溯到 pulse-pet 根），断言两端 id + short
+    /// 集合逐项一致（防 Rust/TS 两表漂移——4 份注册表各自腐烂的根因；
+    /// include_str 源码断言先例见 v0.2.1 R4）。匹配依赖 agents.ts 表
+    /// 「每 agent 一行 `{ id: "..", short: "..", ... }`」格式（该文件头有注记）。
+    #[test]
+    fn frontend_agents_table_matches_rust_registry() {
+        let ts = include_str!("../../src/lib/agents.ts");
+        // 1) Rust → TS：每个 (id, short) 对在前端表逐项出现
+        for spec in AGENTS {
+            assert!(
+                ts.contains(&format!("id: \"{}\", short: \"{}\"", spec.id, spec.short_name)),
+                "前端 AGENTS 表缺或不一致：id={} short={}",
+                spec.id,
+                spec.short_name
+            );
+        }
+        // 2) TS → Rust：前端表的 id 条目数与 Rust 相等（无多出/缺少），
+        //    且每个 id 都在 Rust 表注册
+        let ts_ids: Vec<&str> = ts
+            .lines()
+            .filter(|l| {
+                let t = l.trim_start();
+                !t.starts_with("//") && !t.starts_with("*")
+            })
+            .filter_map(|l| l.split_once("id: \"").map(|(_, r)| r))
+            .filter_map(|r| r.split_once('"').map(|(id, _)| id))
+            .collect();
+        let rust_ids: Vec<&str> = AGENTS.iter().map(|s| s.id).collect();
+        assert_eq!(
+            ts_ids.len(),
+            rust_ids.len(),
+            "前端表条目数须与 Rust 一致（多出/缺少注册）：ts={ts_ids:?}"
+        );
+        for id in &ts_ids {
+            assert!(rust_ids.contains(id), "前端 id {id} 未在 Rust AGENTS 注册");
+        }
+    }
 }

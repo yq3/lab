@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  AGENT_OPENCODE,
+  // v2 registry：AGENT_OPENCODE 常量已删（迁 agents.ts 表）；夹具直接用
+  // 字面量钉 wire 值
   dayLabelsBetween,
   formatCost,
   formatTokens,
@@ -12,6 +13,9 @@ import {
   sumRows,
   type TokenRow,
 } from "./token-stats";
+
+/** 夹具默认 agent（原 AGENT_OPENCODE 常量位）。 */
+const AGENT_OPENCODE = "opencode";
 
 function row(overrides: Partial<TokenRow> = {}): TokenRow {
   return {

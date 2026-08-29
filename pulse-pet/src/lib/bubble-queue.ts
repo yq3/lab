@@ -11,7 +11,7 @@
  * （只有 dismissed/acked 最终离场才回报——被顶回队期间不结案）。
  */
 
-import { agentShortName } from "./token-stats";
+import { shortOf } from "./agents";
 
 /** 气泡级别（提醒=critical / 会话汇报·庆祝=info / 工具播报=ambient）。 */
 export type BubbleLevel = "critical" | "info" | "ambient";
@@ -61,7 +61,7 @@ export interface BubbleItem {
  * 与 M5 会话列表（无括号 `oc` 列徽标）**刻意不同**，勿顺手统一（P3-2）。
  */
 export function bubbleAgentBadge(agent?: string | null): string | null {
-  return agent ? agentShortName(agent) : null;
+  return agent ? shortOf(agent) : null;
 }
 
 export interface BubbleState {

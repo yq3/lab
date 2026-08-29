@@ -1,6 +1,11 @@
 /**
  * AgentAdapter 抽象（DESIGN §3.4，TC-EV-23）。
  *
+ * ⚠️ 装饰性抽象（agent-registry §2/§6.7 核定）：主链路无人 import（仅各
+ * adapter 自测试引用），新增 adapter 无运行时效果——**agent 的事实源是
+ * `src/lib/agents.ts` 注册表**（Rust 侧 agents.rs 互钉），新增 agent 勿以
+ * 此层为接入点（是否激活/清退本抽象，见 docs/v2/agent-registry.md §6.7）。
+ *
  * v1 仅实现 OpenCodeAdapter（见 ./adapters/opencode.ts）。插件侧已把原始事件归一化，
  * 本抽象层 `normalizeRawEvent` 作兜底；token 读取在 Rust 侧（M3），此处只声明
  * `tokenSource` 语义。新增 adapter（如 ClaudeCodeAdapter）只需新增文件，不改主链路。

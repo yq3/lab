@@ -39,6 +39,7 @@ PulsePet 是一个桌面宠物 App（Tauri 2 + React + TS + Vite），监听 ope
 - **不读 opencode 原生 todo 表**：opencode 的 `todo` 表语义是"会话内子任务"，与用户日常待办无关。
 - **事件来源**：M2 起由 opencode 插件经本地 HTTP（127.0.0.1 + token）上报；M1 阶段状态由前端 store 手动驱动（点击宠物循环切换）。
 - **git 约定**：默认分支 `develop`，除非明确要求否则不 commit/push；push 用 SSH。
+- **新增 agent（v2 registry）**：agent 注册的事实源是两端注册表——Rust `src-tauri/src/agents.rs` 的 `AGENTS` 表 + 前端 `src/lib/agents.ts` 的 `AGENTS` 表（include_str! 测试互钉 id/short 一致）；新增 agent 指南见 `docs/v2/agent-registry.md`（一行注册 + hook 脚本三件套 + i18n 键，勿再散落 if/switch/三元分支）。
 
 ## 里程碑速览（DESIGN §10）
 

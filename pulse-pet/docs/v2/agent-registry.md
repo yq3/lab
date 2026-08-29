@@ -299,6 +299,8 @@ tempdir 注入单测（install_cc / install_opencode 内层函数）签名不动
 
 验证：`npm test`（基线 442，评审轮实测校正——P2-6）/ `npx tsc --noEmit` / `npm run build` 全绿。测试策略 = **既有网回归**（短名兜底 `bubble-queue.test.ts:330` / agentsWithRows / i18n 键完备性）+ **新钉 2 枚**（badgeOf 未知 id 显原名、include_str 互钉；`IntegrationId` 派生类型由 tsc 编译期自证，无需专测），清单见 §8.7.2。
 
+> **实施记录（P2，2026-08-29，task-pulsepet-v2-registry R1）**：已实施。npm 基线实测 442 passed（31 文件）→ 实施后 **447 passed（32 文件）**（新钉 5 例：agents.test.ts 五个 it，其中含 P2 钉 1 badgeOf 未知 id 显原名与表完整性；P2 钉 2 include_str 互钉落 Rust 侧 agents.rs tests，cargo 351 → **352 passed** + 3 ignored）；`npx tsc --noEmit` / `npm run build` 全绿。实施微调：① `agentShortName` 消费方比 §8.2 盘点的 4 文件多两处（bubble-queue.ts / pet-menu.ts 的 import）——迁移为 `shortOf` 时一并改引 agents.ts（§8.7.1 既有短名兜底钉 bubble-queue.test.ts:330 原样通过）；② 两个测试文件的 `AGENT_*` 引用改为**本地字面量常量**（钉 wire 值而非同源常量，解 import 耦合）；③ Settings nameKey 查表后未知 id 走原名兜底渲染（`nameKey ? t(nameKey) : s.id`，消 §4 #10 第三卡错名温床）；④ agent-adapter.ts 按 §6.7 加装饰性标注注释（不激活不删除）。附带核定：遗留事项 B（TokenStats.tsx symmetricToggle 注释「模型/agent 共用」过时）经查**已在 polish 轮（8a054e0）清偿**（现行注释即准确措辞「模型筛选用——R2 后 agent 维度不再消费」），无需重复修改。
+
 ### 8.3 P3：N 源编排 + degraded/报错口径 A′（~300 行，语义扩展）
 
 - `query_stats_dual`/`today_stats_dual` → **`query_stats_all`/`today_stats_all`**（评审 P2-4：避开与现存单源函数 `query_stats`（:441）/ `today_stats`（:568）重名——旧单源函数保留原名，继续被 idle 汇报引用）：遍历 AGENTS 逐源查询合并（enum dispatch，无 trait object）；源结果三态化 Ok/Missing/Failed，判据按文件存在性两段式（§6.4，评审 P1-2）——**本阶段含三处有意行为变更**：① CC-only（oc Missing × CC 有数据）从横幅改静默；②③ oc Missing / oc Failed × CC Ok-0行 两组合从 Err 改空态（差异表见 §6.4，评审 P1-1）；

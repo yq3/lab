@@ -33,27 +33,9 @@ export interface TokenRow {
   agent: string;
 }
 
-/** v2 M5：agent 常量（与 Rust token_stats.rs 一致）。 */
-export const AGENT_OPENCODE = "opencode";
-export const AGENT_CLAUDE_CODE = "claude-code";
-
-/**
- * v2 M6（V2-DESIGN §6.2）：agent 短名（opencode→oc / claude-code→cc /
- * task→task；未知 agent 原名兜底）。气泡徽标 `[oc]` 与今日分布行 `oc 39M`
- * 共用；技术名约定，i18n 不翻译。
- */
-export function agentShortName(agent: string): string {
-  switch (agent) {
-    case AGENT_OPENCODE:
-      return "oc";
-    case AGENT_CLAUDE_CODE:
-      return "cc";
-    case "task":
-      return "task";
-    default:
-      return agent;
-  }
-}
+// v2 registry（agent-registry §8.2）：AGENT_OPENCODE / AGENT_CLAUDE_CODE 常量
+// 与 agentShortName switch 已删——短名查 src/lib/agents.ts 注册表（shortOf）；
+// Rust 侧常量（token_stats.rs）与前端表经 include_str! 互钉。
 
 /** v2 M6：by_agent 行类型（与 Rust token_stats.rs AgentTodayTotal 一致）。 */
 export interface AgentTodayTotal {

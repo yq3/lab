@@ -28,6 +28,7 @@ import { usePetStore } from "../pet/petStore";
 import { setPetSize, type PetSize } from "../lib/size-bridge";
 import { fetchToolBroadcast, setToolBroadcast } from "../lib/tool-bubble-bridge";
 import { changeLanguage, t, useLangStore, type Lang } from "../lib/i18n";
+import { descKeyOf } from "../lib/agents";
 
 /**
  * 设置页（M5 落地"选择宠物"，DESIGN §6.2 / §10.2，TC-SP-11/12 + TC-APP-12）：
@@ -562,7 +563,9 @@ export default function Settings() {
         {(intg ?? []).map((s) => {
           const ui = uiStateOf(s);
           const busy = intgBusy === s.id;
-          const nameKey = s.id === "opencode" ? "integrations.opencodeDesc" : "integrations.claudeDesc";
+          // v2 registry（§6.2）：nameKey 三元 → descKeyOf 查表；未知 id
+          // 原名兜底（原三元 else→claudeDesc 会给第三卡显示错名，§4 #10）
+          const nameKey = descKeyOf(s.id);
           // P3-6（task-pulsepet-v2-polish #2）：单次计算——此前条件判断与渲染
           // 各调一次 composeActionNotice，重复拼串
           const actionNotice =
@@ -572,7 +575,7 @@ export default function Settings() {
             <div className="intg-row" key={s.id}>
               <div className="intg-row-head">
                 <span className={ui === "notInstalled" ? "intg-dot" : `intg-dot intg-dot-${ui}`} />
-                <span className="intg-name">{t(nameKey)}</span>
+                <span className="intg-name">{nameKey ? t(nameKey) : s.id}</span>
                 <span className="intg-state-label">
                   {t(INTG_STATE_KEYS[ui])} · v{s.version}
                 </span>
