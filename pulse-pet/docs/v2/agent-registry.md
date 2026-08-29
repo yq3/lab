@@ -366,7 +366,7 @@ tempdir 注入单测（install_cc / install_opencode 内层函数）签名不动
 
 （附：`IntegrationId` 派生类型无需专测——`tsc` 即编译期验证。）
 
-**P3（6 枚，明细已在 §8.3 测试条）**：三组行为变更钉子（Missing × 有数据 = 无横幅 / 两组 Ok-0行 = 空态）＋"db 在但打不开"Failed 用例＋`m5_degraded_opencode_error_with_cc_data_degrades` 改写（预期从 degraded=Some 变 None）＋三源合成用例；`m5_degraded_both_missing_error_passthrough` 回归确认（语义不变仍 Err）。
+**P3（6 枚，明细已在 §8.3 测试条）**：三组行为变更钉子（Missing × 有数据 = 无横幅 / 两组 Ok-0行 = 空态）＋"db 在但打不开"Failed 用例＋`m5_degraded_opencode_error_with_cc_data_degrades` 改写（构造从"无 db"改为伪造 schema 错=Failed，预期**仍** degraded=Some；Some→None 属"无 db"=Missing 构造的行为变更①，由 `p3_cc_only_opencode_missing_silent` 钉住——本括注原文误写"Some 变 None"，2026-08-29 终审裁定更正，见 §8.3 实施记录微调①）＋三源合成用例；`m5_degraded_both_missing_error_passthrough` 回归确认（语义不变仍 Err）。
 
 #### 8.7.3 既有缺口发现与豁免
 
