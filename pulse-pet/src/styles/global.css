@@ -547,6 +547,12 @@ select {
   color: var(--ink-faint);
 }
 
+/* §十八（2026-08-29）：接入管理"接入说明"多行脚注——文案含 \n 编号行，
+   pre-line 按行渲染（无 \n 的其余 settings-current 用法渲染不受影响） */
+.settings-current.settings-notes {
+  white-space: pre-line;
+}
+
 .settings-problems {
   margin-top: 8px;
   padding-left: 18px;

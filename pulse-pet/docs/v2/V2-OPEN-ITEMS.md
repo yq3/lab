@@ -571,7 +571,7 @@ Rust 定义 `AgentSpec { id, short_name, bundled_hook, install/uninstall/status,
 
 **事实口径**：接入插件全装在用户主目录（opencode `~/.config/opencode/plugins/` + `opencode.json(c)` 条目；CC `~/.pulsepet/hooks/` + `~/.claude/settings.json` 条目），App 卸载（macOS 拖废纸篓 / Windows 卸载器）只删 App 自身文件、**不碰用户目录** → 插件残留。残留无害已核实：hook 上报全链路 try/catch 静默（指数退避），agent 功能零影响，仅孤儿文件。**裁定**：选方案 1（文档提示；Windows 卸载器清理不做、App 内 status 提示对"App 已被卸"场景无从谈起）。
 
-**实施落点**：① README「卸载插件」节补 blockquote 提示（先在设置→接入管理卸载/跑 `--uninstall`，再卸应用；注明残留无功能影响）；② 设置页接入管理卡：**用户二轮裁定**——原「标题下备份提示」（`integrations.backupNote`）与卸载提示**合并为单条脚注**移至列表下方（`integrations.uninstallHint` 一键承载两句，zh/en 同改，backupNote 键清退，i18n 完备性测试通过）；playwright 渲染实测合并句出现。基线 tsc 0 错 / npm 447 原样。
+**实施落点**：① README「卸载插件」节 blockquote 提示（**四轮定稿**：与设置页同步升级为"接入说明"三点版——备份 / 重开会话生效〔注明插件随会话进程加载不热重载〕 / 卸载顺序 + 残留无害）；② 设置页接入管理卡列表下方单条脚注，**三轮改版（同日用户逐轮裁定）**：初版单句 → 二轮并入备份提示合一句 → 三轮定稿为"接入说明"三行编号格式（`integrations.notes` 键承载，zh/en 同改；backupNote/uninstallHint 两旧键清退；备份 / 会话生效时机〔opencode/CC 均在会话进程启动时加载插件，卸载后已运行中的会话保持原样——当日实机排查证实的反直觉行为〕 / 卸载顺序三点；CSS `settings-notes` pre-line 按行渲染）；playwright 渲染实测 4 行 76.75px。基线 tsc 0 错 / npm 447 原样。
 
 ---
 
@@ -586,4 +586,4 @@ Rust 定义 `AgentSpec { id, short_name, bundled_hook, install/uninstall/status,
 - [x] **§十五 Windows 托盘/任务栏图标 tile 化**：✅ 已实施 2026-08-29（F15 后续，同日）——Windows 侧资产换"灰底玻璃 tile + 猫"（`icon.ico`/`Square*Logo` 9 件/`StoreLogo` 更新 + `tray-tile.png` 新增）+ `tray.rs` cfg 平台分叉（唯一代码改动）；macOS/Linux 侧资产零改动。底色经 dock 实测取色复刻（粉稿两版被否 → 浅灰玻璃），猫 bbox 与 dock 逐像素对齐（67%×79%）。基线 cargo 367+3 / npm 447 / tsc 0 错 / build 通过；Windows 任务栏 exe 图标待 release 实机（同 F15 口径）。完整留痕：§十五
 - [x] **§十六 panel 默认高度 640→650**：✅ 已实施 2026-08-29（同日）——`tauri.conf.json` panel `height` 650，Token 页柱图日期标签完整可见（标签底距窗口底 5.5px，截屏像素实测）；页面其余保持滚动。基线 tsc 0 错 / npm 447 原样；目验 = 打开 Token 页标签不裁半
 - [x] **§十七 设置页选择宠物下拉间距 +10px**：✅ 已实施 2026-08-29（同日）——`global.css` 兄弟选择器一条（`select + .settings-pet-label` margin-top 10px，全页唯一命中），playwright 实测 gap=10px；基线 tsc 0 错 / npm 447 原样；目验 = 设置页宠物区两下拉不再挤贴
-- [x] **§十八 卸载应用不自动清理接入插件提示**：✅ 已实施 2026-08-29（同日）——README「卸载插件」节 blockquote + 设置页接入管理卡单条合并脚注（备份提示并入 `integrations.uninstallHint` zh/en，backupNote 键清退，列表下方 `settings-current` 样式），playwright 渲染实测；基线 tsc 0 错 / npm 447 原样；目验 = 设置页接入卡下方见合并提示行
+- [x] **§十八 卸载应用不自动清理接入插件提示**：✅ 已实施 2026-08-29（同日）——README「卸载插件」节 blockquote + 设置页接入管理卡"接入说明"三行编号脚注（`integrations.notes` zh/en；备份 / 会话生效时机 / 卸载顺序；`settings-notes` pre-line 渲染；经三轮用户逐轮裁定），playwright 渲染实测；基线 tsc 0 错 / npm 447 原样；目验 = 设置页接入卡下方见三行接入说明

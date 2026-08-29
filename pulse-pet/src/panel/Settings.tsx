@@ -605,11 +605,11 @@ export default function Settings() {
           );
         })}
       </div>
-      {/* §十八（2026-08-29 用户问询 + 二轮裁定）：接入列表下方单条脚注 = 备份
-          提示（原标题下，backupNote 键已并入）+ 卸载提示合一句——插件装在
-          用户配置目录，App 卸载不会自动清理，先卸接入再卸应用（README 卸载
-          插件节同款提示） */}
-      <p className="settings-current">{t("integrations.uninstallHint")}</p>
+      {/* §十八（2026-08-29 用户问询，三轮改版）：接入列表下方"接入说明"三行
+          编号脚注（备份 / 会话生效时机 / 卸载顺序）——插件装在用户配置目录，
+          App 卸载不会自动清理；opencode/CC 均在会话进程启动时加载插件，
+          卸载后已运行中的会话保持原样（README 卸载插件节同款提示） */}
+      <p className="settings-current settings-notes">{t("integrations.notes")}</p>
     </section>
   );
 }
