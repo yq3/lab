@@ -59,9 +59,8 @@ pub const CC_EVENTS: [&str; 8] = [
 /// managed 标记（claude-code 走 command 数据级；opencode 走 JSONC 行内注释）。
 pub const MANAGED_FLAG: &str = "--pulse-pet-managed";
 
-/// claude-code 接入 id；opencode 接入 id。
-pub const ID_CLAUDE_CODE: &str = "claude-code";
-pub const ID_OPENCODE: &str = "opencode";
+// 接入 id 常量（ID_OPENCODE / ID_CLAUDE_CODE）已迁 `crate::agents`（v2
+// registry：AgentSpec.id 为唯一事实源，本模块经查表引用）。
 
 /// `lastEventAt` 新鲜度阈值（10 分钟，超阈显示 noEvent，§1.5 P2-3）。
 pub const LAST_EVENT_FRESH_MS: u64 = 10 * 60 * 1000;
@@ -873,133 +872,179 @@ fn state_name(s: ConfigState) -> &'static str {
 /// 真实环境探测 + 组装（阻塞 I/O：调用方须在 spawn_blocking 内）。
 /// 关键探测结论落 plog!（configPath 存在性 / 三态判定 / node 探测耗时 /
 /// hookFile 对账）——doctor 是排障第一入口。
-fn status_for(id: &str, activity_last: Option<u64>, lang: Lang) -> IntegrationStatus {
+///
+/// v2 registry（agent-registry §8.1）：原 if/else 两分支拆为
+/// `status_opencode` / `status_cc` 两函数，经 `spec.integration.status_probe`
+/// 指针分发；node 探测由 `needs_node_probe` 字段控制（查表分发层现测）。
+/// **未知 id 明确 Err**——不再默认落 CC 探测（消静默错误 ①，§8.7.2 P1 钉 4）。
+pub fn status_for(
+    id: &str,
+    activity_last: Option<u64>,
+    lang: Lang,
+) -> Result<IntegrationStatus, String> {
+    let Some(spec) = crate::agents::find(id) else {
+        return Err(format!("未知接入 id：{id}"));
+    };
+    let Some(integ) = spec.integration.as_ref() else {
+        return Err(format!("agent {id} 无本地接入形态"));
+    };
+    Ok(probe_status(integ, activity_last, lang))
+}
+
+/// 查表探测分发：按 IntegrationSpec 执行——node 现测仅 `needs_node_probe`
+/// 的接入执行（CC 独有 spawn node 提为注册表字段），探测函数经指针分发。
+fn probe_status(
+    integ: &crate::agents::IntegrationSpec,
+    activity_last: Option<u64>,
+    lang: Lang,
+) -> IntegrationStatus {
+    if integ.needs_node_probe {
+        let t0 = std::time::Instant::now();
+        let node = detect_node();
+        let probe_ms = t0.elapsed().as_millis();
+        plog!("[pulsepet] integrations node probe: available={node} ({probe_ms}ms)");
+        (integ.status_probe)(Some(node), activity_last, lang)
+    } else {
+        (integ.status_probe)(None, activity_last, lang)
+    }
+}
+
+/// opencode 接入探测（status_for 拆分；阻塞 I/O，调用方须在 spawn_blocking
+/// 内）。node 恒 None（opencode 无 node 依赖，由 needs_node_probe=false 保证）。
+pub fn status_opencode(
+    node: Option<bool>,
+    activity_last: Option<u64>,
+    lang: Lang,
+) -> IntegrationStatus {
     let now_ms = epoch_ms(SystemTime::now());
     let version = env!("CARGO_PKG_VERSION").to_string();
-    if id == ID_OPENCODE {
-        let dir = opencode_dir();
-        let (state, cfg) = match opencode_config_state(&dir) {
-            Ok(x) => x,
-            Err(e) => {
-                plog!("[pulsepet] integrations status opencode: probe failed: {e}");
-                return IntegrationStatus {
-                    id: id.to_string(),
-                    installed: false,
-                    stale: false,
-                    version,
-                    config_path: find_opencode_config(&dir).display().to_string(),
-                    hook_file: HookFileStatus {
-                        exists: false,
-                        matches_bundled: false,
-                    },
-                    node_available: None,
-                    last_event_at: activity_last,
-                    message: lang.intg_error(&e),
-                    error: Some(e),
-                };
-            }
-        };
-        let hook = match hook_file_status(&opencode_plugin_file(&dir), BUNDLED_OPENCODE_HOOK) {
-            Ok(h) => h,
-            Err(e) => {
-                plog!("[pulsepet] integrations status opencode: hook file probe failed: {e}");
-                return IntegrationStatus {
-                    id: id.to_string(),
-                    installed: false,
-                    stale: false,
-                    version,
-                    config_path: cfg.display().to_string(),
-                    hook_file: HookFileStatus {
-                        exists: false,
-                        matches_bundled: false,
-                    },
-                    node_available: None,
-                    last_event_at: activity_last,
-                    message: lang.intg_error(&e),
-                    error: Some(e),
-                };
-            }
-        };
-        plog!(
-            "[pulsepet] integrations status opencode: cfg={} (exists={}) marker={} plugin file (exists={}, matches_bundled={}) → {}",
-            cfg.display(),
-            cfg.is_file(),
-            state != ConfigState::NotInstalled,
-            hook.exists,
-            hook.matches_bundled,
-            state_name(state)
-        );
-        let mut st = build_status(
-            id,
-            StatusInputs {
-                config_state: state,
-                hook_file: hook,
-                node_available: None,
+    let dir = opencode_dir();
+    let (state, cfg) = match opencode_config_state(&dir) {
+        Ok(x) => x,
+        Err(e) => {
+            plog!("[pulsepet] integrations status opencode: probe failed: {e}");
+            return IntegrationStatus {
+                id: crate::agents::ID_OPENCODE.to_string(),
+                installed: false,
+                stale: false,
+                version,
+                config_path: find_opencode_config(&dir).display().to_string(),
+                hook_file: HookFileStatus {
+                    exists: false,
+                    matches_bundled: false,
+                },
+                node_available: node,
                 last_event_at: activity_last,
-            },
-            lang,
-            now_ms,
-        );
-        st.config_path = cfg.display().to_string();
-        st
-    } else {
-        let settings = claude_settings_path();
-        let hooks_dir = cc_hooks_dir();
-        let canonical = canonical_cc_command(cfg!(windows), &hooks_dir);
-        let node_probe_start = std::time::Instant::now();
-        let node = detect_node();
-        let node_probe_ms = node_probe_start.elapsed().as_millis();
-        let (state, hook) = (
-            cc_config_state(&settings, &canonical),
-            hook_file_status(&hooks_dir.join("claude-code-hook.js"), BUNDLED_CC_HOOK),
-        );
-        match (state, hook) {
-            (Ok(state), Ok(hook)) => {
-                plog!(
-                    "[pulsepet] integrations status claude-code: settings={} (exists={}) → {} · hook file (exists={}, matches_bundled={}) · node={} (probe {}ms)",
-                    settings.display(),
-                    settings.is_file(),
-                    state_name(state),
-                    hook.exists,
-                    hook.matches_bundled,
-                    node,
-                    node_probe_ms
-                );
-                let mut st = build_status(
-                    id,
-                    StatusInputs {
-                        config_state: state,
-                        hook_file: hook,
-                        node_available: Some(node),
-                        last_event_at: activity_last,
-                    },
-                    lang,
-                    now_ms,
-                );
-                st.config_path = settings.display().to_string();
-                st
-            }
-            (Err(e), _) | (_, Err(e)) => {
-                plog!(
-                    "[pulsepet] integrations status claude-code: probe failed: {e} · node={} (probe {}ms)",
-                    node,
-                    node_probe_ms
-                );
-                IntegrationStatus {
-                    id: id.to_string(),
-                    installed: false,
-                    stale: false,
-                    version,
-                    config_path: settings.display().to_string(),
-                    hook_file: HookFileStatus {
-                        exists: false,
-                        matches_bundled: false,
-                    },
-                    node_available: Some(node),
+                message: lang.intg_error(&e),
+                error: Some(e),
+            };
+        }
+    };
+    let hook = match hook_file_status(&opencode_plugin_file(&dir), BUNDLED_OPENCODE_HOOK) {
+        Ok(h) => h,
+        Err(e) => {
+            plog!("[pulsepet] integrations status opencode: hook file probe failed: {e}");
+            return IntegrationStatus {
+                id: crate::agents::ID_OPENCODE.to_string(),
+                installed: false,
+                stale: false,
+                version,
+                config_path: cfg.display().to_string(),
+                hook_file: HookFileStatus {
+                    exists: false,
+                    matches_bundled: false,
+                },
+                node_available: node,
+                last_event_at: activity_last,
+                message: lang.intg_error(&e),
+                error: Some(e),
+            };
+        }
+    };
+    plog!(
+        "[pulsepet] integrations status opencode: cfg={} (exists={}) marker={} plugin file (exists={}, matches_bundled={}) → {}",
+        cfg.display(),
+        cfg.is_file(),
+        state != ConfigState::NotInstalled,
+        hook.exists,
+        hook.matches_bundled,
+        state_name(state)
+    );
+    let mut st = build_status(
+        crate::agents::ID_OPENCODE,
+        StatusInputs {
+            config_state: state,
+            hook_file: hook,
+            node_available: node,
+            last_event_at: activity_last,
+        },
+        lang,
+        now_ms,
+    );
+    st.config_path = cfg.display().to_string();
+    st
+}
+
+/// claude-code 接入探测（status_for 拆分；阻塞 I/O，调用方须在
+/// spawn_blocking 内）。node 探测结果由查表分发层注入（needs_node_probe）。
+pub fn status_cc(
+    node: Option<bool>,
+    activity_last: Option<u64>,
+    lang: Lang,
+) -> IntegrationStatus {
+    let now_ms = epoch_ms(SystemTime::now());
+    let version = env!("CARGO_PKG_VERSION").to_string();
+    let settings = claude_settings_path();
+    let hooks_dir = cc_hooks_dir();
+    let canonical = canonical_cc_command(cfg!(windows), &hooks_dir);
+    let (state, hook) = (
+        cc_config_state(&settings, &canonical),
+        hook_file_status(&hooks_dir.join("claude-code-hook.js"), BUNDLED_CC_HOOK),
+    );
+    match (state, hook) {
+        (Ok(state), Ok(hook)) => {
+            plog!(
+                "[pulsepet] integrations status claude-code: settings={} (exists={}) → {} · hook file (exists={}, matches_bundled={}) · node={}",
+                settings.display(),
+                settings.is_file(),
+                state_name(state),
+                hook.exists,
+                hook.matches_bundled,
+                node.unwrap_or(false)
+            );
+            let mut st = build_status(
+                crate::agents::ID_CLAUDE_CODE,
+                StatusInputs {
+                    config_state: state,
+                    hook_file: hook,
+                    node_available: node,
                     last_event_at: activity_last,
-                    message: lang.intg_error(&e),
-                    error: Some(e),
-                }
+                },
+                lang,
+                now_ms,
+            );
+            st.config_path = settings.display().to_string();
+            st
+        }
+        (Err(e), _) | (_, Err(e)) => {
+            plog!(
+                "[pulsepet] integrations status claude-code: probe failed: {e} · node={}",
+                node.unwrap_or(false)
+            );
+            IntegrationStatus {
+                id: crate::agents::ID_CLAUDE_CODE.to_string(),
+                installed: false,
+                stale: false,
+                version,
+                config_path: settings.display().to_string(),
+                hook_file: HookFileStatus {
+                    exists: false,
+                    matches_bundled: false,
+                },
+                node_available: node,
+                last_event_at: activity_last,
+                message: lang.intg_error(&e),
+                error: Some(e),
             }
         }
     }
@@ -1010,6 +1055,8 @@ fn status_for(id: &str, activity_last: Option<u64>, lang: Lang) -> IntegrationSt
 // ---------------------------------------------------------------------------
 
 /// 两个接入的完整状态（即 doctor）。进入设置页 / tauri://focus 时调用。
+/// v2 registry（§8.1）：原 `vec![两行]` 硬编码 → 遍历 agents::AGENTS
+/// （无接入形态的 agent 不出卡；卡序 = 注册表序，与改前一致）。
 #[tauri::command]
 pub async fn integrations_status(
     app: tauri::AppHandle,
@@ -1017,12 +1064,15 @@ pub async fn integrations_status(
     let activity = activity_of(&app);
     let lang = i18n::current();
     let blocking = tauri::async_runtime::spawn_blocking(move || {
-        let last_opencode = read_activity_last_event(&activity, ID_OPENCODE);
-        let last_cc = read_activity_last_event(&activity, ID_CLAUDE_CODE);
-        vec![
-            status_for(ID_OPENCODE, last_opencode, lang),
-            status_for(ID_CLAUDE_CODE, last_cc, lang),
-        ]
+        let mut out = Vec::new();
+        for spec in crate::agents::AGENTS {
+            let Some(integ) = spec.integration.as_ref() else {
+                continue;
+            };
+            let last = read_activity_last_event(&activity, spec.id);
+            out.push(probe_status(integ, last, lang));
+        }
+        out
     })
     .await
     .map_err(|e| format!("status task join: {e}"))?;
@@ -1030,31 +1080,33 @@ pub async fn integrations_status(
 }
 
 /// 安装/重装（升级即重装：先移除全部特征条目再写 canonical）。
+/// v2 registry（§8.1）：id 守卫 + match 二元分发 → `agents::find` + 注册表
+/// 函数指针；CC 独有安装提示 → `install_hint` 字段。
 #[tauri::command]
 pub async fn integrations_install(
     app: tauri::AppHandle,
     id: String,
 ) -> Result<IntegrationStatus, String> {
-    if id != ID_OPENCODE && id != ID_CLAUDE_CODE {
+    let Some(spec) = crate::agents::find(&id) else {
         return Err(format!("未知接入 id：{id}"));
-    }
+    };
+    let Some(integ) = spec.integration.as_ref() else {
+        return Err(format!("agent {id} 无本地接入形态"));
+    };
     let lang = i18n::current();
     let activity = activity_of(&app);
-    let install_id = id.clone();
+    let install_fn = integ.install;
     let result: Result<(), String> =
-        tauri::async_runtime::spawn_blocking(move || match install_id.as_str() {
-            ID_OPENCODE => install_opencode(&opencode_dir()).map(|_| ()),
-            _ => install_cc(&claude_settings_path(), &cc_hooks_dir()),
-        })
-        .await
-        .map_err(|e| format!("install task join: {e}"))?;
+        tauri::async_runtime::spawn_blocking(move || install_fn())
+            .await
+            .map_err(|e| format!("install task join: {e}"))?;
     match result {
         Ok(()) => plog!("[pulsepet] integrations install {id}: ok"),
         Err(ref e) => plog!("[pulsepet] integrations install {id}: failed: {e}"),
     }
     result?;
     let mut st = spawn_status(&activity, &id, lang).await?;
-    if id == ID_CLAUDE_CODE {
+    if integ.install_hint {
         // §1.4.4：Windows 字面路径无逐事件自愈，安装后建议新开 CC 会话
         // v2 M2 L1（P2-1）：安装路径用安装措辞（不再复用卸载文案）
         st.message = format!("{} · {}", st.message, action_hint(lang, "install"));
@@ -1062,32 +1114,33 @@ pub async fn integrations_install(
     Ok(st)
 }
 
-/// 卸载（幂等；二次卸载 no-op）。
+/// 卸载（幂等；二次卸载 no-op）。v2 registry（§8.1）：同 install——查表 +
+/// 函数指针 + install_hint 字段。
 #[tauri::command]
 pub async fn integrations_uninstall(
     app: tauri::AppHandle,
     id: String,
 ) -> Result<IntegrationStatus, String> {
-    if id != ID_OPENCODE && id != ID_CLAUDE_CODE {
+    let Some(spec) = crate::agents::find(&id) else {
         return Err(format!("未知接入 id：{id}"));
-    }
+    };
+    let Some(integ) = spec.integration.as_ref() else {
+        return Err(format!("agent {id} 无本地接入形态"));
+    };
     let lang = i18n::current();
     let activity = activity_of(&app);
-    let uninstall_id = id.clone();
+    let uninstall_fn = integ.uninstall;
     let result: Result<(), String> =
-        tauri::async_runtime::spawn_blocking(move || match uninstall_id.as_str() {
-            ID_OPENCODE => uninstall_opencode(&opencode_dir()),
-            _ => uninstall_cc(&claude_settings_path(), &cc_hooks_dir()),
-        })
-        .await
-        .map_err(|e| format!("uninstall task join: {e}"))?;
+        tauri::async_runtime::spawn_blocking(move || uninstall_fn())
+            .await
+            .map_err(|e| format!("uninstall task join: {e}"))?;
     match result {
         Ok(()) => plog!("[pulsepet] integrations uninstall {id}: ok"),
         Err(ref e) => plog!("[pulsepet] integrations uninstall {id}: failed: {e}"),
     }
     result?;
     let mut st = spawn_status(&activity, &id, lang).await?;
-    if id == ID_CLAUDE_CODE {
+    if integ.install_hint {
         // §1.4.4：Windows 字面路径无逐事件自愈，卸载后建议新开 CC 会话
         st.message = format!("{} · {}", st.message, action_hint(lang, "uninstall"));
     }
@@ -1110,6 +1163,7 @@ fn action_hint(lang: Lang, action: &str) -> &'static str {
 }
 
 /// 探测 + 组装单个接入状态（阻塞 I/O → spawn_blocking）。
+/// v2 registry：status_for 已查表化（未知 id 明确 Err），此处透传。
 async fn spawn_status(
     activity: &crate::http_server::AgentActivity,
     id: &str,
@@ -1122,7 +1176,7 @@ async fn spawn_status(
         status_for(&id, last, lang)
     })
     .await
-    .map_err(|e| format!("status task join: {e}"))
+    .map_err(|e| format!("status task join: {e}"))?
 }
 
 // ---------------------------------------------------------------------------
@@ -1132,6 +1186,7 @@ async fn spawn_status(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agents::{find, ID_CLAUDE_CODE, ID_OPENCODE};
     use std::fs;
 
     fn tempdir(tag: &str) -> PathBuf {
@@ -1726,6 +1781,18 @@ mod tests {
             |app, id| Box::pin(integrations_install(app, id));
         let _uninstall: fn(tauri::AppHandle, String) -> OneFut =
             |app, id| Box::pin(integrations_uninstall(app, id));
+    }
+
+    // ---- v2 registry（agent-registry §8.7.2 P1 钉 4）：未知 id 消静默错误① ----
+
+    #[test]
+    fn status_for_unknown_id_is_explicit_error() {
+        // 收敛前：status_for 的 if/else 把未知 id 一律落 CC 探测分支（读错误
+        // 路径 + spawn node）——静默错误 ①，现状无任何测试把守。收敛后必须
+        // 明确 Err（消温床）。
+        let err = status_for("codex", None, Lang::Zh).expect_err("未知 id 必须 Err");
+        assert!(err.contains("codex"), "错误信息须含未知 id 本身：{err}");
+        assert!(find("codex").is_none(), "codex 未注册（钉子前提）");
     }
 
     // ---- v2 M2 L1（P2-1）：安装路径提示文案修复 ----

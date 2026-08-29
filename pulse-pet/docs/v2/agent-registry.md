@@ -283,6 +283,8 @@ tempdir 注入单测（install_cc / install_opencode 内层函数）签名不动
 
 验证：`cargo test` 全绿（基线 346 passed + 3 ignored）+ `cargo build` 零警告 + dev 冒烟（设置页两张接入卡 doctor / 安装 / 卸载与改前一致）。测试策略 = **既有网回归**（白名单双向 / idle 未知分支 / 双臂闭包注入 / tempdir 全套，覆盖核定见 §8.7.1）+ **新钉 5 枚**（agents.rs 自测 ×3、status_for 未知 id 报错、时序钉子改写，清单见 §8.7.2）。
 
+> **实施记录（P1，2026-08-29，task-pulsepet-v2-registry R1）**：已实施。cargo 基线实测 346 passed + 3 ignored → 实施后 **351 passed + 3 ignored**（新钉 5 枚：agents.rs 自测 ×3 + register_states 功能钉〔mock_app 驱动 + 指针表身份断言〕+ status_for 未知 id 明确 Err；时序钉子为改写不计增量）；`cargo build` 零警告。行号基线 e7d58ed → 实施 HEAD b8cf83d，§8.1 表格点位行号漂移 +0~+2，均按源码核对命中。实施微调三处：① install/uninstall 函数指针经 agents.rs 薄适配函数挂表（`install_opencode` 返回 `PathBuf`、`install_cc` 双路径注入，签名异构无法直接挂表；**内层函数与 tempdir 注入单测零改动**）；② node 探测耗时日志自 status_cc 内移至查表分发层 `probe_status`（原 CC 状态行 "(probe {}ms)" 片段改为独立 plog 行，诊断信息保留；IntegrationStatus 输出逐字节一致）；③ `register_states` 置于 `http_server::start` **之前**（强于"窗口创建前"下限——cc_dispatch 改经 `app.state` 取句柄后，server 先起会留 manage 前派发的 panic 窗口，#9 同源；时序钉子相应加严为双断言）。附带核定：遗留事项 A（reconcile manual SQL 旧口径）经查**已在 M6 R1（8973813）顺手修复**（现行 SQL 即 `GROUP BY day,agent,model_id` + mock 过滤），无需重复修改。
+
 ### 8.2 P2：前端 `agents.ts` 注册表（~150 行）
 
 **新增 `src/lib/agents.ts`**：`AGENTS` 表 + helpers（`shortOf` / `badgeOf` / `hasCostOf` / `descKeyOf`）+ `IntegrationId` 派生类型（§6.2）。

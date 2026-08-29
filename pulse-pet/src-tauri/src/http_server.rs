@@ -22,6 +22,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
+use crate::agents;
 use crate::runtime;
 use crate::session_state::{Kind, SessionStateMachine};
 
@@ -34,11 +35,6 @@ pub type StateChangeCallback = Arc<dyn Fn(Kind, &str) + Send + Sync>;
 /// lib.rs 里做 opencode.db 查询 + 气泡下发 + success 状态注入，DESIGN §4.3 /
 /// V2-DESIGN §1.5 / TC-INT-11）。
 pub type IdleHook = Arc<dyn Fn(&str, &str) + Send + Sync>;
-
-/// agent 白名单（v2 M1：`/state` body 的 `agent` 从「校验但不消费」升级为
-/// 白名单消费，未知值 400——防 typo 产生幽灵 session，如 `claude`；
-/// 新增 agent 时同步白名单与文档，V2-DESIGN §1.5）。
-pub const AGENT_WHITELIST: [&str; 2] = ["opencode", "claude-code"];
 
 /// per-agent 最近事件时刻（v2 M1 AgentActivity，V2-DESIGN §1.5 P2-3：
 /// `lastEventAt` 的数据源——不能复用 `SessionRecord.last_event_at`（per-session
@@ -275,7 +271,9 @@ fn get_str(obj: &serde_json::Map<String, serde_json::Value>, key: &str) -> Optio
 }
 
 /// 解析并校验 `/state` body：`sessionId/kind/agent` 必填、`kind` 合法、
-/// `agent` 在白名单内（v2 M1，未知值 400——防 typo 幽灵 session，TC-INT-10-1）。
+/// `agent` 已注册（v2 M1 白名单语义，未知值 400——防 typo 幽灵 session，
+/// TC-INT-10-1；v2 registry 收敛为查 agents::AGENTS 注册表，新增 agent
+/// 一行注册即自动放行）。
 fn parse_state_event(body: &[u8]) -> Result<StateEvent, String> {
     let v: serde_json::Value =
         serde_json::from_slice(body).map_err(|_| "invalid json".to_string())?;
@@ -284,7 +282,7 @@ fn parse_state_event(body: &[u8]) -> Result<StateEvent, String> {
     let kind_str = get_str(obj, "kind").ok_or("missing kind")?;
     let agent = get_str(obj, "agent").ok_or("missing agent")?;
     let kind = Kind::parse(&kind_str).ok_or("invalid kind")?;
-    if !AGENT_WHITELIST.contains(&agent.as_str()) {
+    if agents::find(&agent).is_none() {
         return Err(format!("invalid agent: {agent}"));
     }
     let project = get_str(obj, "project");
@@ -964,8 +962,10 @@ mod tests {
 
     #[test]
     fn state_whitelist_accepts_both_agents() {
-        // TC-INT-10-1：opencode / claude-code 合法
-        for agent in AGENT_WHITELIST {
+        // TC-INT-10-1：注册表内 agent 合法（v2 registry：遍历 agents::AGENTS，
+        // 新增 agent 自动纳入本用例）
+        for spec in agents::AGENTS {
+            let agent = spec.id;
             let body = format!(r#"{{"sessionId":"s","kind":"editing","agent":"{agent}"}}"#);
             match handle_request("POST", "/state", Some(TOKEN), TOKEN, body.as_bytes(), 16 * 1024) {
                 HandleOutcome::State(ev) => assert_eq!(ev.agent, agent),
