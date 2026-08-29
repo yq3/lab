@@ -1,7 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  AGENT_CLAUDE_CODE,
-  AGENT_OPENCODE,
   dayLabelsBetween,
   fetchTokenRows,
   formatCost,
@@ -14,6 +12,7 @@ import {
   type StatsError,
   type TokenRow,
 } from "../lib/token-stats";
+import { AGENTS, hasCostOf } from "../lib/agents";
 import {
   agentsWithRows,
   computeModelChips,
@@ -79,20 +78,20 @@ function isRoutineSession(s: TokenRow): boolean {
   return (s.title ?? "").startsWith("pulsepet 例程:");
 }
 
-/** v2 M5：会话行 agent 徽标文本（oc / cc 等宽小字；title 提示全名经 i18n）。 */
+/** v2 registry（agent-registry §6.2）：会话行 agent 徽标查表——**未知 id
+ *  显原名**（消静默错误 ②：原三元 else→oc 会把新 agent 会话行错标 oc）；
+ *  title 走 i18n 全名，未知 id 原名兜底。 */
 function agentBadgeOf(s: TokenRow): { text: string; title: string } {
-  return s.agent === AGENT_CLAUDE_CODE
-    ? { text: "cc", title: t("token.agent.claudeCode") }
-    : { text: "oc", title: t("token.agent.opencode") };
+  const spec = AGENTS.find((a) => a.id === s.agent);
+  return spec
+    ? { text: spec.short, title: t(spec.labelKey) }
+    : { text: s.agent, title: s.agent };
 }
 
 /** v2 M5 R2（TC-M5-04-1）：agent tab 显示名（i18n 全名；未知 agent 原样）。 */
 function agentLabel(agent: string): string {
-  return agent === AGENT_CLAUDE_CODE
-    ? t("token.agent.claudeCode")
-    : agent === AGENT_OPENCODE
-      ? t("token.agent.opencode")
-      : agent;
+  const spec = AGENTS.find((a) => a.id === agent);
+  return spec ? t(spec.labelKey) : agent;
 }
 
 /** 项目列：project_name basename；null → global/unknown 回退标签（前端判定）。 */
@@ -480,9 +479,10 @@ export default function TokenStats() {
                     </span>
                     <span className="session-project">{projectName(s)}</span>
                     <span className="session-tokens">{formatTokens(total)}</span>
-                    {/* v2 M5：CC 行 cost 列 `—`（数据层恒 0，S4 口径） */}
+                    {/* v2 registry：无费用数据源的 agent（CC 数据层恒 0，S4 口径）
+                        行 cost 列 `—`——查表 hasCostOf（§6.2） */}
                     <span className="session-cost">
-                      {s.agent === AGENT_CLAUDE_CODE ? "—" : formatCost(s.cost)}
+                      {!hasCostOf(s.agent) ? "—" : formatCost(s.cost)}
                     </span>
                     <span className="session-caret">{open ? "▾" : "▸"}</span>
                   </button>
@@ -515,10 +515,8 @@ export default function TokenStats() {
                       </div>
                       <div>
                         <dt>cost</dt>
-                        {/* v2 M5：CC 行 cost 恒 0（S4）→ 详情同样显示 — */}
-                        <dd>
-                          {s.agent === AGENT_CLAUDE_CODE ? "—" : formatCost(s.cost)}
-                        </dd>
+                        {/* v2 registry：同会话行——`!hasCostOf` 查表（CC 恒 0 → —） */}
+                        <dd>{!hasCostOf(s.agent) ? "—" : formatCost(s.cost)}</dd>
                       </div>
                       <div className="detail-wide">
                         <dt>{t("token.sessions.updated")}</dt>

@@ -6,7 +6,12 @@ import {
   TOOLTIP_ROW_ORDER,
   type ModelKey,
 } from "./token-chart";
-import { AGENT_CLAUDE_CODE, AGENT_OPENCODE, type TokenRow } from "./token-stats";
+// v2 registry：AGENT_* 常量已删（迁 agents.ts 表）；测试本地定义字面量钉
+// wire 值（opencode / claude-code，与 Rust 侧互钉把守）
+import { type TokenRow } from "./token-stats";
+
+const AGENT_OPENCODE = "opencode";
+const AGENT_CLAUDE_CODE = "claude-code";
 
 function gRow(
   day: string,

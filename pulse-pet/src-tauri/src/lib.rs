@@ -1,4 +1,5 @@
 mod action_exec;
+mod agents;
 mod atlas;
 mod db;
 mod hotkeys;
@@ -94,10 +95,15 @@ fn get_display_state(state: tauri::State<'_, Arc<Mutex<SessionStateMachine>>>) -
 /// http 请求线程仅做派发，解析（缓存未命中 scan 补建）→ 护栏 → apply+emit
 /// 全部在后台线程完成（不 join 回 http 线程，N-3）。
 ///
-/// 查询与气泡下发以闭包注入（`idle_hook_body` 单测断言 CC idle 零 opencode 查询）。
-/// v2 M6（V2-DESIGN §6.2，TC-M6-03-1）：`emit_bubble` 签名 `(agent, text)`——
-/// `pulsepet://bubble` payload 补 `agent` 字段（opencode→[oc] / CC→[cc] 徽标
-/// 数据源；同版本锁步发布，前端旧解析只读既有字段向后兼容）。
+/// 查询与气泡下发以闭包注入（`idle_hook_body` 单测断言 CC idle 零 opencode 查询；
+/// **注入式签名冻结不变**——§6.1 决策 4，P4 接第三家带统计源的 agent 时再做
+/// 第二波泛化）。v2 M6（V2-DESIGN §6.2，TC-M6-03-1）：`emit_bubble` 签名
+/// `(agent, text)`——`pulsepet://bubble` payload 补 `agent` 字段（opencode→[oc] /
+/// CC→[cc] 徽标数据源；同版本锁步发布，前端旧解析只读既有字段向后兼容）。
+///
+/// v2 registry（agent-registry §8.1）：match 两臂字面量分流 → `agents::find`
+/// 查表 + `spec.stats` enum dispatch；臂内 agent 字面量 → `spec.id`。未注册
+/// agent 维持原「记日志跳过」语义（白名单外值到不了这里，防御性钉住）。
 fn idle_hook_body(
     state: &Arc<Mutex<SessionStateMachine>>,
     emit_bubble: &dyn Fn(&str, &str),
@@ -106,8 +112,14 @@ fn idle_hook_body(
     agent: &str,
     session_id: &str,
 ) {
-    match agent {
-        "opencode" => {
+    let Some(spec) = agents::find(agent) else {
+        // 分流决策记录（低频：每 CC 轮次结束一条；排障时区分「CC idle 被
+        // 正常分流跳过」与「事件没到达」）
+        plog!("[pulsepet] idle hook: skip token report (agent={agent}, unknown)");
+        return;
+    };
+    match spec.stats {
+        agents::StatsSource::OpenencodeDb => {
             let now = token_stats::now_ms();
             if let Some((text, today)) = query_report(session_id, now) {
                 let full = match today {
@@ -121,20 +133,22 @@ fn idle_hook_body(
                 };
                 {
                     let mut st = state.lock().unwrap_or_else(|p| p.into_inner());
-                    st.apply_event("opencode", session_id, Kind::Success, Instant::now());
+                    st.apply_event(spec.id, session_id, Kind::Success, Instant::now());
                 }
-                emit_bubble("opencode", &full);
+                emit_bubble(spec.id, &full);
             }
         }
-        "claude-code" => {
+        agents::StatsSource::CcTranscript => {
             // v2 M5：CC idle → 派发后台线程（解析/护栏/apply+emit 均在后台，
             // 本线程只派发——不阻塞 http 响应，N-3）。opencode.db 零查询。
             cc_dispatch(session_id);
         }
-        other => {
-            // 分流决策记录（低频：每 CC 轮次结束一条；排障时区分「CC idle 被
-            // 正常分流跳过」与「事件没到达」）
-            plog!("[pulsepet] idle hook: skip token report (agent={other}, unknown)");
+        agents::StatsSource::None => {
+            // 仅事件链接入、无统计源的形态（§7.1）：idle 无汇报可查，跳过
+            plog!(
+                "[pulsepet] idle hook: skip token report (agent={}, no stats source)",
+                spec.id
+            );
         }
     }
 }
@@ -142,13 +156,17 @@ fn idle_hook_body(
 fn make_idle_hook(
     state: &Arc<Mutex<SessionStateMachine>>,
     app: &tauri::AppHandle,
-    cc_cache: &Arc<Mutex<transcript::TranscriptCache>>,
     notifier: &Arc<http_server::DisplayNotifier>,
 ) -> http_server::IdleHook {
     let state = state.clone();
     let app = app.clone();
-    let cc_cache = cc_cache.clone();
     let notifier = notifier.clone();
+    // v2 registry（agent-registry §8.1）：cc_dispatch 闭包内 agent 字面量 →
+    // 查表 spec.id（AGENTS 静态注册，find 命中由 agents.rs 自测钉住；防御性
+    // 回退同值常量，零 panic）。
+    let cc_id = agents::find(agents::ID_CLAUDE_CODE)
+        .map(|spec| spec.id)
+        .unwrap_or(agents::ID_CLAUDE_CODE);
     Arc::new(move |agent: &str, session_id: &str| {
         idle_hook_body(
             &state,
@@ -173,10 +191,16 @@ fn make_idle_hook(
                 // 不 join 回 http 线程（AppHandle/State 的 Arc 均 Send 可移入）。
                 // 竞态诚实口径（P2-3）：护栏只防陈旧不防尾行未 flush——
                 // Stop 先于 transcript 尾行落盘时可能欠计最后一条 message（接受）。
+                // v2 registry：缓存句柄改从 managed state 取（§6.1 源生命周期
+                // 自注册；integrations activity_of 同款模式）——register_states
+                // 先于 http server 启动完成 manage，此处无 panic 窗口。
                 let sid = sid.to_string();
                 let state = state.clone();
                 let app = app.clone();
-                let cache = cc_cache.clone();
+                let cache = app
+                    .state::<Arc<Mutex<transcript::TranscriptCache>>>()
+                    .inner()
+                    .clone();
                 let notifier = notifier.clone();
                 std::thread::spawn(move || {
                     let now = token_stats::now_ms();
@@ -198,8 +222,8 @@ fn make_idle_hook(
                         };
                         {
                             let mut st = state.lock().unwrap_or_else(|p| p.into_inner());
-                            // 复合键 claude-code:{sessionId}（P2-5）
-                            st.apply_event("claude-code", &sid, Kind::Success, Instant::now());
+                            // 复合键 claude-code:{sessionId}（P2-5；id 自注册表）
+                            st.apply_event(cc_id, &sid, Kind::Success, Instant::now());
                         }
                         // apply + notify 成对（后台线程内 apply 后立即推送，
                         // 不依赖 1s tick 兜底）
@@ -207,7 +231,7 @@ fn make_idle_hook(
                         // v2 M6：payload 补 agent（CC → [cc] 徽标，§6.2）
                         let _ = app.emit(
                             "pulsepet://bubble",
-                            serde_json::json!({ "text": full, "agent": "claude-code" }),
+                            serde_json::json!({ "text": full, "agent": cc_id }),
                         );
                     }
                 });
@@ -289,10 +313,12 @@ pub fn run() {
             // integrations_status 读取为 lastEventAt。与 state 同批 manage
             // （issue #9 铁律：窗口创建循环之前）。
             let activity = http_server::new_agent_activity();
-            // v2 M5（V2-DESIGN §5.2，TC-M5-02）：CC transcript 文件级缓存
-            // （managed state——查询命令与 CC idle hook 双方访问，P2-1；
-            // issue #9 铁律：窗口创建循环之前 manage）。
-            let cc_cache = Arc::new(Mutex::new(transcript::TranscriptCache::default()));
+            // v2 registry（agent-registry §6.1 源生命周期自注册，吸收 #13 接线组）：
+            // 各统计源的 managed state（CC TranscriptCache 等）经注册表集中注册，
+            // 取代此前「逐个创建 + app.manage」的接线。必须在 HTTP server 启动与
+            // 窗口创建循环**之前**（issue #9 铁律；cc_dispatch 派发时经 app.state
+            // 取句柄，server 先起会留 manage 前派发的 panic 窗口——order_nails 有钉）。
+            agents::register_states(app.handle());
             // 显示状态变化 → Tauri event 推给前端（http-bridge → petStore）；
             // v2 M1 payload 携带归属 agent（前端只存不显示，向后兼容旧解析）
             let emit_handle = app.handle().clone();
@@ -308,7 +334,7 @@ pub fn run() {
             let server = http_server::start(
                 state.clone(),
                 notifier.clone(),
-                make_idle_hook(&state, app.handle(), &cc_cache, &notifier),
+                make_idle_hook(&state, app.handle(), &notifier),
                 // v2 M3（§3.7.2，N8）：含非空 detail 的状态事件 → 定向 pet 窗
                 // 透传字符串（不解析不判开关——App 侧过滤）
                 // v2 M6（§6.2）：+agent（(detail, agent)——[oc]/[cc] 徽标数据源）
@@ -356,7 +382,8 @@ pub fn run() {
 
             app.manage(state);
             app.manage(activity);
-            app.manage(cc_cache);
+            // cc_cache（TranscriptCache）已由 agents::register_states 在
+            // HTTP server 启动前注册（v2 registry 接线收敛，issue #9 铁律）
             app.manage(shutdown);
             // Moved 防抖保存器（P2-5）
             app.manage(windows::PositionSaver::new(app.handle().clone()));
@@ -745,28 +772,32 @@ mod order_nails {
         );
     }
 
-    /// v2 M5（TC-M5-02-1）：TranscriptCache 的 manage 同样必须在窗口创建
-    /// 循环之前（issue #9 铁律——查询命令/CC idle hook 双方访问的 managed
-    /// state，Windows 上窗口先建会在 WebView 异步初始化期间派发 IPC 触发
-    /// state() panic）。
+    /// v2 registry（agent-registry §8.7.2 P1 钉 5，改写自 TC-M5-02-1）：
+    /// 统计源 managed state 的集中注册点 `agents::register_states` 必须在
+    /// 窗口创建循环**之前**（issue #9 铁律——原 `app.manage(cc_cache)` 钉子
+    /// 随接线组收敛改盯此调用）；且先于 `http_server::start`——cc_dispatch
+    /// 派发时经 app.state 取缓存句柄，server 先起会留 manage 前派发的
+    /// panic 窗口（#9 同源时序）。
     #[test]
-    fn cc_transcript_cache_managed_before_window_creation() {
+    fn agent_states_registered_before_window_creation_and_server_start() {
         let src = include_str!("lib.rs");
-        let manage_at = src
-            .find("app.manage(cc_cache)")
-            .expect("lib.rs 须含 app.manage(cc_cache)（issue #9）");
+        let register_at = src
+            .find("agents::register_states(app.handle())")
+            .expect("lib.rs 须含 agents::register_states 调用（issue #9）");
         let windows_at = src
             .find("for wc in app.config().app.windows.iter()")
             .expect("lib.rs 须含窗口创建循环");
         assert!(
-            manage_at < windows_at,
-            "TranscriptCache 的 manage 必须在窗口创建循环之前（issue #9 铁律）"
+            register_at < windows_at,
+            "register_states 必须在窗口创建循环之前（issue #9 铁律）"
         );
-        // 状态构造也在窗口创建前（与 manage 同段）
-        let construct_at = src
-            .find("Arc::new(Mutex::new(transcript::TranscriptCache::default()))")
-            .expect("lib.rs 须含 TranscriptCache 构造");
-        assert!(construct_at < windows_at);
+        let server_at = src
+            .find("http_server::start(")
+            .expect("lib.rs 须含 http_server::start 调用");
+        assert!(
+            register_at < server_at,
+            "register_states 必须先于 http server 启动（派发闭包经 app.state 取缓存）"
+        );
     }
 
     /// issue #20：pet 窗口必须隐藏创建（conf visible:false），setup 内位置

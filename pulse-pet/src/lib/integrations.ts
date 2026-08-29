@@ -6,6 +6,8 @@
  * （i18n.rs 双语模板），前端只渲染。
  */
 
+import type { AgentId } from "./agents";
+
 /** hook 脚本文件健康快照（与 App 内嵌副本逐字节对账的等价表达）。 */
 export interface HookFileStatus {
   exists: boolean;
@@ -30,7 +32,9 @@ export interface IntegrationStatus {
   error: string | null;
 }
 
-export type IntegrationId = "opencode" | "claude-code";
+// v2 registry（agent-registry §6.2）：IntegrationId 联合类型改由 agents.ts
+// 注册表派生（新增 agent 一行注册即自动纳入；tsc 编译期自证，无需专测）。
+export type IntegrationId = AgentId;
 
 function tauriInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   // 动态 import（与 http-bridge 同模式），保持本模块在 vitest/node 下可 import
