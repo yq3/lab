@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { getVersion } from "@tauri-apps/api/app";
+import pkg from "../../package.json";
 import {
   fetchPetOptions,
   selectPet,
@@ -99,6 +101,16 @@ export default function Settings() {
   /** §十一：档位切换 busy / 行级错误（与语言切换同款乐观更新 + 回滚模式）。 */
   const [sizeBusy, setSizeBusy] = useState(false);
   const [sizeError, setSizeError] = useState<string | null>(null);
+  /** §十九（2026-08-29）：设置页底部版本信息——初值取 package.json（版本四件套
+   * lockstep 同步），Tauri 运行时以 getVersion() 刷新（权威源 = tauri.conf.json，
+   * 即真实打包版本）；非 Tauri 预览/取值失败保持 package.json 回退值。 */
+  const [appVersion, setAppVersion] = useState<string>(pkg.version);
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    getVersion()
+      .then(setAppVersion)
+      .catch(() => {});
+  }, []);
 
   // L2：语言切换 → 旧语言的 notice（Rust message 无法前端重算）整组清除
   useEffect(() => {
@@ -610,6 +622,11 @@ export default function Settings() {
           App 卸载不会自动清理；opencode/CC 均在会话进程启动时加载插件，
           卸载后已运行中的会话保持原样（README 卸载插件节同款提示） */}
       <p className="settings-current settings-notes">{t("integrations.notes")}</p>
+
+      {/* §十九（2026-08-29）：设置页最底部版本信息——与其他区块同款分节形态
+          （h2 标题 + settings-current 小字），版本源见 appVersion 注释 */}
+      <h2>{t("settings.versionTitle")}</h2>
+      <p className="settings-current">{appVersion}</p>
     </section>
   );
 }
