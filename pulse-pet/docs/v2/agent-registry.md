@@ -522,3 +522,11 @@ tempdir 注入单测（install_cc / install_opencode 内层函数）签名不动
 > 修订 P1-1/P1-2（含差异表补行与判据两段式化）后，文档可作为 P1/P2 阶段的实施依据；P3 实施前还需同步消化 P2 清单中的口径与清单完整性问题。
 
 **终审（2026-08-28 用户）**：按评审意见修改——P1×2、P2×8、P3×5 与澄清项×4 当日全部修订落档（处置见 11.1/11.2 各条）；按结论口径，本档可作为 P1/P2 实施依据，P3 启动前以本修订版为准。
+
+---
+
+## 12. 补充说明：§14（token 聚合 message 级下沉）与本架构的关系（2026-08-29）
+
+> 来源：V2-OPEN-ITEMS §十四实施当日留痕——token 统计跨天会话归属缺陷修复（day/week/range/today 四类聚合从 session 级下沉 message 级、按消息时间归天；opencode 走 `message` 表 SQL、CC 走 `CcSessionRow.by_day` 分桶）。
+
+本档设计结论**未受该实施影响、无需修订**：§14 改动全部收敛于**单源实现内部**（`StatsSource::OpenencodeDb` 的查询函数体 / `CcTranscript` 的解析 internals 与消费分支），正是本档收敛创造的封装边界；`AgentSpec` 注册表、N 源编排（`query_stats_all`/`today_stats_sources`）、三态判据（口径 A′）、`MergeAcc`、`register_states` 接线一行未动。两处口径层面交集均落在既有框架内：① §14 新增的「message 表缺失 → schema-mismatch」按 §6.4 两段式判据 = 主源 **Failed**（detect Some × 后续错，三态表 Failed 示例"schema 变更"即此类）——已有状态的新触发器，非语义变更；② §8.3 微调③的 per-source cache 注记不受影响（`TranscriptCache` 结构不变，仅 `SessionState` 值类型扩展）。本档 §4/§10 等处的 token_stats.rs/transcript.rs 行号为历史基线（e7d58ed / 实施 HEAD），按惯例不随本轮漂移回改。P4 接第三家时：有 db 形态照抄 opencode 模式即自动获得 message 级口径，有 transcript 形态照抄 `by_day` 分桶模式——§3 模板随现行代码自然升级，无需回读本档。

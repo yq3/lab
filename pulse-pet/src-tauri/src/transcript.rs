@@ -6,7 +6,9 @@
 //!   - **message.id 去重（S3）**：assistant 行收集 (message.id, usage 快照)，
 //!     按 message.id 去重、**按行序取最后一条**（勿按 timestamp——尾行可能无
 //!     ts）；id 缺失的行按行级顶层 uuid 兜底去重、两者皆缺独立计入（P3-4）。
-//!   - SUM 五维 usage：input/output/cache_write/cache_read/reasoning（S2）。
+//!   - SUM 五维 usage：input/output/cache_write/cache_read/reasoning（S2）；
+//!     §14 起同时产出 [`CcSessionRow::by_day`] 按消息时间归天的分桶明细
+//!     （会话级总量 = 各桶之和，去重语义不变）。
 //!   - model 取最后一条 message.model；title = 首条 user string 行
 //!     `chars().take(60)`（中文按字符，P3-13）；project = 首条含非空 cwd 行
 //!     basename（P2-6）；time_created/time_updated = 首/末条含 timestamp 的
@@ -45,6 +47,13 @@ pub struct CcSessionRow {
     pub tokens_reasoning: i64,
     pub tokens_cache_read: i64,
     pub tokens_cache_write: i64,
+    /// §14（V2-OPEN-ITEMS）：按**消息时间**归天的用量明细（升序；去重后每条
+    /// assistant usage 计入其行 timestamp 所在日）。day/week/range/today 聚合
+    /// 消费它——跨天会话每天各得各的，不再整行归最后活跃日。会话级五维总量
+    /// = by_day 各桶之和（去重口径不变，两者同源同时产出；例外：行 ts 与
+    /// 会话 time_updated 皆无的条目计总量不进桶——防御口径，committer P3-1
+    /// 括注，详见 finalize_state）。
+    pub by_day: Vec<CcDayUsage>,
     /// 首条含 timestamp 的事件行（UTC ISO8601 → epoch ms）。
     pub time_created: Option<i64>,
     /// 末条含 timestamp 的事件行（P1-1：非事件行无 ts，按字面首末行会得 None）。
@@ -57,6 +66,23 @@ pub struct CcSessionRow {
     /// 实测末条 system 行可晚于末条 assistant 3 分钟，护栏若用 time_updated
     /// 会误判静置会话为新鲜）。
     pub last_assistant_ts: Option<i64>,
+}
+
+/// §14：单日用量桶（`CcSessionRow.by_day` 元素）。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CcDayUsage {
+    /// 本地日标签 `%Y-%m-%d`（[`local_day_label`] 同口径）。
+    pub day: String,
+    /// 桶内**最早**消息时刻（epoch ms；tester P3-1：取最小值，与 HashMap
+    /// 迭代序/文件行序无关）——week/range 窗口过滤与周标签推导的代表时刻
+    /// （custom 窗口双侧天对齐故任意同日时刻等价；preset to=now 下桶内时刻
+    /// 不可能晚于已落盘解析时刻，同样精确）。
+    pub first_ts: i64,
+    pub tokens_input: i64,
+    pub tokens_output: i64,
+    pub tokens_reasoning: i64,
+    pub tokens_cache_read: i64,
+    pub tokens_cache_write: i64,
 }
 
 /// CC transcript 项目目录（Windows `%USERPROFILE%\.claude\projects`）。
@@ -149,8 +175,9 @@ type Usage5 = (i64, i64, i64, i64, i64); // input, output, reasoning, cache_read
 /// 「增量 = 分多批 feed」对同一字节流逐字段等价（行级状态机，无跨行回看）。
 #[derive(Debug, Default, Clone)]
 pub struct SessionState {
-    /// message.id → 末条 usage（S3 去重覆盖）。
-    usage_by_key: HashMap<String, Usage5>,
+    /// message.id → (末条 usage, 该行 timestamp)（S3 去重覆盖；§14 起值携带
+    /// 行 ts——去重语义不变，末条覆盖时 ts 一并被末条替换，分桶用）。
+    usage_by_key: HashMap<String, (Usage5, Option<i64>)>,
     /// id/uuid 皆缺的独立计入行序号（P3-4）。
     line_seq: u64,
     first_ts: Option<i64>,
@@ -175,11 +202,11 @@ fn feed_lines(state: &mut SessionState, text: &str) {
             continue; // 坏行/非 JSON：跳过不崩
         };
         // 时间戳：任何含 timestamp 的行（事件行；非事件行无 ts，P1-1）
-        if let Some(ts) = obj
+        let line_ts = obj
             .get("timestamp")
             .and_then(|v| v.as_str())
-            .and_then(parse_timestamp_ms)
-        {
+            .and_then(parse_timestamp_ms);
+        if let Some(ts) = line_ts {
             if state.first_ts.is_none() {
                 state.first_ts = Some(ts);
             }
@@ -215,16 +242,12 @@ fn feed_lines(state: &mut SessionState, text: &str) {
                         state.line_seq += 1;
                         format!("\u{0}line-{}", state.line_seq)
                     });
-                // 按行序取末条：直接覆盖（S3）
+                // 按行序取末条：直接覆盖（S3）；ts 随 usage 同行同源携带（§14）
                 let usage = usage5_of(message);
-                state.usage_by_key.insert(key, usage);
+                state.usage_by_key.insert(key, (usage, line_ts));
                 state.assistant_seen = true;
                 // 末条 assistant 行 timestamp（N-1 护栏口径）
-                if let Some(ts) = obj
-                    .get("timestamp")
-                    .and_then(|v| v.as_str())
-                    .and_then(parse_timestamp_ms)
-                {
+                if let Some(ts) = line_ts {
                     state.last_assistant_ts = Some(ts);
                 }
                 // model 取最后一条 message.model（纯字符串）
@@ -255,18 +278,53 @@ fn feed_lines(state: &mut SessionState, text: &str) {
 }
 
 /// 状态 → 会话行（assistant_seen=false → None）。
+/// §14：求和循环同时按 `local_day_label(ts)` 分桶产出 by_day 明细（BTreeMap
+/// 保 day 字典序 → 升序确定性）；HashMap 值迭代无序，但加法交换律保证五维
+/// 总量与桶内和均确定，桶 `first_ts` 取**桶内最小消息时刻**（tester P3-1：
+/// 取迭代首遇值会随 HashMap 实例随机序漂移——同日多消息时值级不确定）。
+/// ts 缺失的条目兜底归会话 time_updated（last_ts）日——防御口径（真实
+/// assistant 行均带 ts）；两者皆无则不进 by_day（仍计入会话总量，与 day
+/// 视图跳过无 ts 行的现状一致）。
 fn finalize_state(state: &SessionState, session_id: &str) -> Option<CcSessionRow> {
     if !state.assistant_seen {
         return None;
     }
     let mut sum = (0i64, 0i64, 0i64, 0i64, 0i64);
-    for (_, u) in &state.usage_by_key {
+    // day → (first_ts=桶内最早消息时刻, 五维和)
+    let mut buckets: std::collections::BTreeMap<String, (i64, i64, i64, i64, i64, i64)> =
+        std::collections::BTreeMap::new();
+    for (u, ts) in state.usage_by_key.values() {
         sum.0 += u.0;
         sum.1 += u.1;
         sum.2 += u.2;
         sum.3 += u.3;
         sum.4 += u.4;
+        let effective_ts = ts.or(state.last_ts);
+        if let Some(label) = effective_ts.and_then(local_day_label) {
+            let t = effective_ts.unwrap();
+            let e = buckets.entry(label).or_insert((t, 0, 0, 0, 0, 0));
+            if t < e.0 {
+                e.0 = t; // 同日多条消息 → 取最早（确定性，与 HashMap 迭代序无关）
+            }
+            e.1 += u.0;
+            e.2 += u.1;
+            e.3 += u.2;
+            e.4 += u.3;
+            e.5 += u.4;
+        }
     }
+    let by_day: Vec<CcDayUsage> = buckets
+        .into_iter()
+        .map(|(day, (first_ts, i, o, r, cr, cw))| CcDayUsage {
+            day,
+            first_ts,
+            tokens_input: i,
+            tokens_output: o,
+            tokens_reasoning: r,
+            tokens_cache_read: cr,
+            tokens_cache_write: cw,
+        })
+        .collect();
     let title = state
         .title
         .clone()
@@ -279,6 +337,7 @@ fn finalize_state(state: &SessionState, session_id: &str) -> Option<CcSessionRow
         tokens_reasoning: sum.2,
         tokens_cache_read: sum.3,
         tokens_cache_write: sum.4,
+        by_day,
         time_created: state.first_ts,
         time_updated: state.last_ts,
         model_id: state.model_id.clone(),
@@ -1543,5 +1602,134 @@ mod tests {
             pf.entry.file_id, entry.file_id,
             "entry 记新 file_id（防错数据经 unchanged 判定持久化）"
         );
+    }
+
+    // ---- §14（V2-OPEN-ITEMS，2026-08-29）：by_day 按消息时间归天 ----
+
+    /// §14 钉①：单 jsonl 跨天两行 assistant（不同 message.id）→ by_day 两桶
+    /// 各得各的；会话级五维总量 = 各桶之和（去重口径不变）。
+    #[test]
+    fn s14_by_day_buckets_cross_day_session() {
+        let dir = temp_dir("s14-byday");
+        let f = dir.join("12345678-1111-2222-3333-444444444444.jsonl");
+        // 本地日标签经 sqlite oracle 对账（与实现同口径，防时区假设）
+        let d0 = sqlite_day(parse_timestamp_ms("2026-08-28T04:00:00.000Z").unwrap());
+        let d1 = sqlite_day(parse_timestamp_ms("2026-08-29T04:00:00.000Z").unwrap());
+        write_lines(
+            &f,
+            &[
+                json!({"type": "user", "timestamp": "2026-08-28T04:00:00.000Z",
+                       "message": {"role": "user", "content": "跨天会话"}}),
+                assistant_line(Some("m1"), Some("u1"), "2026-08-28T04:00:00.000Z",
+                    usage5(100, 10, 0, 5, 0)),
+                assistant_line(Some("m2"), Some("u2"), "2026-08-29T04:00:00.000Z",
+                    usage5(200, 20, 1, 6, 0)),
+            ],
+        );
+        let row = parse_session(&f).expect("应有行");
+        assert_eq!(row.tokens_input, 300, "会话累计不变");
+        assert_eq!(row.by_day.len(), 2, "跨天会话两桶（升序）");
+        assert_eq!(row.by_day[0].day, d0);
+        assert_eq!(row.by_day[0].tokens_input, 100);
+        assert_eq!(row.by_day[0].tokens_output, 10);
+        assert_eq!(row.by_day[0].tokens_cache_read, 5);
+        assert_eq!(
+            row.by_day[0].first_ts,
+            parse_timestamp_ms("2026-08-28T04:00:00.000Z").unwrap()
+        );
+        assert_eq!(row.by_day[1].day, d1);
+        assert_eq!(row.by_day[1].tokens_input, 200);
+        assert_eq!(row.by_day[1].tokens_reasoning, 1);
+        // 总量 = 各桶之和（同源同时产出，防两套口径漂移）
+        assert_eq!(row.by_day.iter().map(|b| b.tokens_input).sum::<i64>(), row.tokens_input);
+        assert_eq!(row.by_day.iter().map(|b| b.tokens_cache_read).sum::<i64>(), row.tokens_cache_read);
+    }
+
+    /// §14 钉②：去重先于分桶——同 message.id 双行跨天 → 末条覆盖（ts 随行
+    /// 替换），by_day 只计末条那天。
+    #[test]
+    fn s14_dedup_precedes_day_bucketing() {
+        let dir = temp_dir("s14-dedup");
+        let f = dir.join("22345678-1111-2222-3333-444444444444.jsonl");
+        let d1 = sqlite_day(parse_timestamp_ms("2026-08-29T04:00:00.000Z").unwrap());
+        write_lines(
+            &f,
+            &[
+                assistant_line(Some("m1"), Some("u1a"), "2026-08-28T04:00:00.000Z",
+                    usage5(100, 0, 0, 0, 0)),
+                assistant_line(Some("m1"), Some("u1b"), "2026-08-29T04:00:00.000Z",
+                    usage5(150, 0, 0, 0, 0)),
+            ],
+        );
+        let row = parse_session(&f).expect("应有行");
+        assert_eq!(row.tokens_input, 150, "末条覆盖（S3 不变）");
+        assert_eq!(row.by_day.len(), 1, "只计末条那天");
+        assert_eq!(row.by_day[0].day, d1);
+        assert_eq!(row.by_day[0].tokens_input, 150);
+    }
+
+    /// §14 钉③：assistant 行缺 timestamp 的兜底（真实数据不出现；防御口径
+    /// 钉住）——归会话 time_updated（last_ts）日；两者皆无则不进 by_day
+    ///（仍计入会话总量，与 day 视图跳过无 ts 行的现状一致）。
+    #[test]
+    fn s14_missing_ts_falls_back_to_session_time_updated() {
+        let dir = temp_dir("s14-nots");
+        let f = dir.join("32345678-1111-2222-3333-444444444444.jsonl");
+        let d0 = sqlite_day(parse_timestamp_ms("2026-08-28T04:00:00.000Z").unwrap());
+        // m1 带 ts（day0）；m2 无 ts → 兜底归 last_ts（= m1 的 day0）
+        let m2_no_ts = json!({
+            "type": "assistant",
+            "message": {"id": "m2", "model": "deepseek-v4-pro",
+                        "usage": usage5(50, 0, 0, 0, 0)},
+        });
+        write_lines(
+            &f,
+            &[
+                assistant_line(Some("m1"), Some("u1"), "2026-08-28T04:00:00.000Z",
+                    usage5(100, 0, 0, 0, 0)),
+                m2_no_ts,
+            ],
+        );
+        let row = parse_session(&f).expect("应有行");
+        assert_eq!(row.tokens_input, 150);
+        assert_eq!(row.by_day.len(), 1, "无 ts 行兜底归 time_updated 日");
+        assert_eq!(row.by_day[0].day, d0);
+        assert_eq!(row.by_day[0].tokens_input, 150);
+        // 全员无 ts：by_day 空（不崩），会话总量照常
+        let f2 = dir.join("42345678-1111-2222-3333-444444444444.jsonl");
+        write_lines(
+            &f2,
+            &[json!({
+                "type": "assistant",
+                "message": {"id": "m1", "model": "deepseek-v4-pro",
+                            "usage": usage5(70, 0, 0, 0, 0)},
+            })],
+        );
+        let row2 = parse_session(&f2).expect("应有行");
+        assert_eq!(row2.tokens_input, 70);
+        assert!(row2.by_day.is_empty(), "皆无 ts → 不进 by_day");
+    }
+
+    /// §14 钉④（tester P3-1）：同日桶多条消息时 `first_ts` 取**最早**消息
+    /// 时刻——与 HashMap 迭代序/文件行序无关（修复前取迭代首遇值，值级
+    /// 随机漂移）。构造：晚时刻行在文件前部、早时刻行在后部。
+    #[test]
+    fn s14_same_day_bucket_first_ts_is_earliest() {
+        let dir = temp_dir("s14-firstts");
+        let f = dir.join("52345678-1111-2222-3333-444444444444.jsonl");
+        let early = parse_timestamp_ms("2026-08-28T02:00:00.000Z").unwrap();
+        write_lines(
+            &f,
+            &[
+                assistant_line(Some("m-late"), Some("u1"), "2026-08-28T04:00:00.000Z",
+                    usage5(10, 0, 0, 0, 0)),
+                assistant_line(Some("m-early"), Some("u2"), "2026-08-28T02:00:00.000Z",
+                    usage5(5, 0, 0, 0, 0)),
+            ],
+        );
+        let row = parse_session(&f).expect("应有行");
+        assert_eq!(row.by_day.len(), 1, "同日单桶");
+        assert_eq!(row.by_day[0].first_ts, early, "first_ts = 桶内最早消息时刻（非行序/迭代序首遇）");
+        assert_eq!(row.by_day[0].tokens_input, 15);
     }
 }

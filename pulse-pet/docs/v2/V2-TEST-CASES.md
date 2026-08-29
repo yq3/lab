@@ -337,6 +337,18 @@
   3. 命令为 `async fn` + `spawn_blocking`（沿 M1 线程纪律）；
   4. 三层快捷查看（TC-M3-09/10/11）共享此命令，单一数据源。
 
+### TC-M3-18 跨天会话按消息时间归天〔**§14 增补 2026-08-29**，单测〕
+
+> 来源：V2-OPEN-ITEMS §十四（token 统计跨天会话归属缺陷）；day/week/range/today 四类聚合下沉 message 级（v1 TC-TK-06/07 语义扩展——day 归属从「会话 time_updated」改为「消息产生时间」）。Rust 侧已落地钉子：`s14_cross_day_session_attributed_by_message_day` / `s14_window_excluding_last_active_day_counts_earlier_days` / `s14_message_row_filter_user_and_corrupt_rows` / `s14_mid_session_model_switch_splits_groups` / `s14_message_table_missing_is_schema_mismatch` / `s14_cc_cross_day_session_buckets_by_message_day`（token_stats.rs）+ `s14_by_day_buckets_cross_day_session` / `s14_dedup_precedes_day_bucketing` / `s14_missing_ts_falls_back_to_session_time_updated` / `s14_same_day_bucket_first_ts_is_earliest`（transcript.rs；末枚为 tester P3-1 加固钉）。
+
+- **步骤/预期**：
+  1. **opencode 跨天拆分**：同一 session 两条 message 分属两天 → by-day 两天各自聚合、today 只计今天的 message、by-session 仍为会话累计（首日贡献不再消失）；
+  2. **窗口漏计修复**：7d 窗口不含最后活跃日 → 窗口内天数的 message 照常计入（day 与 range 同口径）；
+  3. **message 行筛选**：user 行（无 `$.tokens`，实测 0% 带）不产生零值聚合组；损坏 data 不炸查询不入聚合（json_valid 守卫）；mock 过滤在 message 级 `$.providerID` 生效；
+  4. **message 级模型归并**：同 session 中途换模型 → 按 `$.modelID` 分两组（原 session.model 末值归一组）；
+  5. **schema 严格报错**：message 表缺失 / 缺列 → schema-mismatch（「请升级 pulse-pet」），query/today/current/idle 全链路拦截；
+  6. **CC 侧对称**：单 jsonl 跨天两行 assistant → `by_day` 两桶；同 message.id 跨天去重末条胜且只计末条那天；ts 缺失兜底归会话 time_updated 日；session time_updated 出窗但有窗内桶仍计入；session 视图与 `last_assistant_ts` 护栏不变。
+
 ### TC-M3-04 今日 preset 与面板默认（单测 + 实机）
 
 - **步骤**：`rangeForPreset` 纯函数单测（注入固定时刻）+ 打开面板 Token 页 → 切 7d / 30d / 自定义 range。

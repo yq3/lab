@@ -10,8 +10,14 @@
 //! - 聚合查询：by session / by day 严格按 DESIGN §4.1 SQL（session 表主键列为 `id`，
 //!   设计 SQL 中的 `session_id` 以 `id AS session_id` 落地）；week/range 由前端传
 //!   from/to 计算，后端不写死维度（TC-TK-07）。
+//! - §14（V2-OPEN-ITEMS，2026-08-29）：day/week/range/today 四类聚合**下沉
+//!   message 级**——按消息 `time_created` 归天（跨天会话每天各得各的，原
+//!   session 级口径整会话归最后活跃日且首日贡献消失）；五维/cost/model 从
+//!   `message.data` JSON 提取；by-session 视图与气泡「本期会话」保持会话
+//!   累计语义不动（该语义本来正确）。
 //! - schema 白名单：查询前 `PRAGMA table_info(session)` 校验 tokens_*/cost 列白名单，
-//!   缺失 → schema-mismatch（"请升级 pulse-pet"），不崩溃不查错列（TC-TK-13）。
+//!   缺失 → schema-mismatch（"请升级 pulse-pet"），不崩溃不查错列（TC-TK-13）；
+//!   §14 起同样校验 message 表（缺表/缺列同语义——旧版 opencode 严格报错）。
 //! - WAL 缺失：只读打开报错时映射为 no-database（"数据库未运行/未初始化"，TC-TK-03）。
 //!
 //! ## TC-TK-11 写入时机实测结论（2026-08-16，opencode 1.18.18 + 本机真实 opencode.db）
@@ -158,6 +164,28 @@ pub const MOCK_FILTER_SQL: &str =
 pub const MODEL_ID_SQL: &str =
     "CASE WHEN json_valid(model) THEN json_extract(model,'$.id') END";
 
+/// §14（V2-OPEN-ITEMS）：message 表字段白名单（message 级聚合涉及的全部列；
+/// 缺任一（含整表缺失）→ schema-mismatch，与 session 白名单同语义——旧版
+/// opencode 无 message 表时严格报错不静默口径漂移，2026-08-29 用户裁定）。
+pub const MESSAGE_REQUIRED_COLUMNS: &[&str] = &["id", "session_id", "time_created", "data"];
+
+/// §14：message 行筛选（CASE WHEN 保证 json_valid 先于 json_extract 求值，
+/// 沿 MOCK_FILTER_SQL 守卫先例——损坏 data 不炸查询、不入聚合）：
+/// - `$.tokens` 存在才入聚合：实测 assistant 行 100% 带 tokens、user 行 0%
+///   带（2026-08-29 本机 15344/1276 行抽样），等价"只取有用量的行"，防
+///   user 行形成零值聚合组污染图表；
+/// - mock 过滤下沉 message 级：`$.providerID = 'mock'` 的探测行全查询过滤
+///   （S4 口径延续）。
+pub const MESSAGE_ROW_FILTER_SQL: &str = "\
+    CASE WHEN json_valid(data) THEN \
+        json_extract(data,'$.tokens') IS NOT NULL \
+        AND COALESCE(json_extract(data,'$.providerID'),'') <> 'mock' \
+    ELSE 0 END";
+
+/// §14：message 级 model 归并——`data.$.modelID`（会话中途换模型也能分对，
+/// 较 session.model 末值更准）。WHERE 已保证 json_valid，无需再守卫。
+pub const MESSAGE_MODEL_ID_SQL: &str = "json_extract(data,'$.modelID')";
+
 /// opencode 数据目录（平台区分；测试传自定义目录走 `detect_*` 纯函数）。
 pub fn opencode_data_dir() -> PathBuf {
     #[cfg(target_os = "windows")]
@@ -208,10 +236,16 @@ pub const SESSION_REQUIRED_COLUMNS: &[&str] = &[
     "time_updated",
 ];
 
-/// `PRAGMA table_info(session)` 白名单检测（TC-TK-13）。
-pub fn check_session_schema(conn: &Connection) -> Result<(), StatsError> {
+/// `PRAGMA table_info(<table>)` 白名单检测的共用实现（表名由调用方以静态
+/// 字符串注入——PRAGMA 不支持参数绑定）。
+fn check_table_columns(
+    conn: &Connection,
+    table: &str,
+    required: &[&str],
+) -> Result<(), StatsError> {
+    let sql = format!("PRAGMA table_info({table})");
     let mut stmt = conn
-        .prepare("PRAGMA table_info(session)")
+        .prepare(&sql)
         .map_err(|e| StatsError::new(ERR_SCHEMA_MISMATCH, format!("读取 schema 失败：{e}")))?;
     let columns: Vec<String> = stmt
         .query_map([], |row| row.get::<_, String>(1))
@@ -221,10 +255,10 @@ pub fn check_session_schema(conn: &Connection) -> Result<(), StatsError> {
     if columns.is_empty() {
         return Err(StatsError::new(
             ERR_SCHEMA_MISMATCH,
-            "session 表不存在，请升级 pulse-pet",
+            format!("{table} 表不存在，请升级 pulse-pet"),
         ));
     }
-    let missing: Vec<&str> = SESSION_REQUIRED_COLUMNS
+    let missing: Vec<&str> = required
         .iter()
         .filter(|c| !columns.iter().any(|x| x == *c))
         .copied()
@@ -232,10 +266,21 @@ pub fn check_session_schema(conn: &Connection) -> Result<(), StatsError> {
     if !missing.is_empty() {
         return Err(StatsError::new(
             ERR_SCHEMA_MISMATCH,
-            format!("session 表缺少列 {missing:?}，请升级 pulse-pet"),
+            format!("{table} 表缺少列 {missing:?}，请升级 pulse-pet"),
         ));
     }
     Ok(())
+}
+
+/// `PRAGMA table_info(session)` 白名单检测（TC-TK-13）。
+pub fn check_session_schema(conn: &Connection) -> Result<(), StatsError> {
+    check_table_columns(conn, "session", SESSION_REQUIRED_COLUMNS)
+}
+
+/// `PRAGMA table_info(message)` 白名单检测（§14；缺表/缺列同 session 语义，
+/// 见 [`MESSAGE_REQUIRED_COLUMNS`]）。
+pub fn check_message_schema(conn: &Connection) -> Result<(), StatsError> {
+    check_table_columns(conn, "message", MESSAGE_REQUIRED_COLUMNS)
 }
 
 /// 每次查询新建只读连接（即开即关；NO_MUTEX 不跨线程共享，TC-TK-05）。
@@ -317,7 +362,8 @@ pub fn query_by_session(
     Ok(out)
 }
 
-/// by day（DESIGN §4.1 原样：strftime 天维度 + SUM + GROUP BY day, project_id）。
+/// by day（§14：聚合粒度下沉 message 级——按消息 `time_created` 归天，跨天
+/// 会话每天各得各的；原 session 级口径下整会话归最后活跃日）。
 pub fn query_by_day(
     conn: &Connection,
     from_ms: i64,
@@ -327,11 +373,12 @@ pub fn query_by_day(
         conn,
         from_ms,
         to_ms,
-        "strftime('%Y-%m-%d', time_updated/1000, 'unixepoch', 'localtime')",
+        "strftime('%Y-%m-%d', time_created/1000, 'unixepoch', 'localtime')",
     )
 }
 
-/// by week（周标签 `%Y-W%W`，同 day 聚合形状；from/to 由前端传，不写死维度）。
+/// by week（周标签 `%Y-W%W`，同 day 聚合形状；from/to 由前端传，不写死维度；
+/// §14：归天/过滤同 day 下沉 message 级）。
 pub fn query_by_week(
     conn: &Connection,
     from_ms: i64,
@@ -341,12 +388,13 @@ pub fn query_by_week(
         conn,
         from_ms,
         to_ms,
-        "strftime('%Y-W%W', time_updated/1000, 'unixepoch', 'localtime')",
+        "strftime('%Y-W%W', time_created/1000, 'unixepoch', 'localtime')",
     )
 }
 
 /// by range（任意跨度的按模型聚合，day 为 None；from/to 由前端传；
-/// M3 §3.2：GROUP BY model_id（口径与 day/week 统一），project_id 移除）。
+/// M3 §3.2：GROUP BY model_id（口径与 day/week 统一），project_id 移除；
+/// §14：range 一并下沉 message 级——窗口不含最后活跃日时按天只计窗口内消息）。
 pub fn query_by_range(
     conn: &Connection,
     from_ms: i64,
@@ -355,6 +403,12 @@ pub fn query_by_range(
     query_grouped(conn, from_ms, to_ms, "NULL")
 }
 
+/// day/week/range 共用的 message 级聚合（§14）：`FROM message`、按
+/// `time_created` 过滤与归天；五维/cost 从 `data` JSON 提取（WHERE 已保证
+/// `json_valid` 且 `$.tokens` 存在，SELECT 侧无需再守卫）；model 归并用
+/// message 级 `$.modelID`；mock 过滤与行筛选见 [`MESSAGE_ROW_FILTER_SQL`]。
+/// by-session 视图不在此路径（`query_by_session` 仍走 session 表——会话
+/// 累计语义本来正确，保持不动）。
 fn query_grouped(
     conn: &Connection,
     from_ms: i64,
@@ -365,16 +419,17 @@ fn query_grouped(
     // 与 CC 侧内存聚合 day × agent × model_id 对齐——V2-DESIGN §5.3）
     let sql = format!(
         "SELECT {day_expr} AS day, {model_id} AS model_id, '{agent}' AS agent, \
-                SUM(cost) AS cost, \
-                SUM(tokens_input) AS tokens_input, SUM(tokens_output) AS tokens_output, \
-                SUM(tokens_reasoning) AS tokens_reasoning, \
-                SUM(tokens_cache_read) AS tokens_cache_read, \
-                SUM(tokens_cache_write) AS tokens_cache_write \
-         FROM session WHERE time_updated >= ?1 AND time_updated <= ?2 AND {mock} \
+                SUM(COALESCE(json_extract(data,'$.cost'),0.0)) AS cost, \
+                SUM(COALESCE(json_extract(data,'$.tokens.input'),0)) AS tokens_input, \
+                SUM(COALESCE(json_extract(data,'$.tokens.output'),0)) AS tokens_output, \
+                SUM(COALESCE(json_extract(data,'$.tokens.reasoning'),0)) AS tokens_reasoning, \
+                SUM(COALESCE(json_extract(data,'$.tokens.cache.read'),0)) AS tokens_cache_read, \
+                SUM(COALESCE(json_extract(data,'$.tokens.cache.write'),0)) AS tokens_cache_write \
+         FROM message WHERE time_created >= ?1 AND time_created <= ?2 AND {filter} \
          GROUP BY day, agent, model_id ORDER BY day DESC",
         agent = AGENT_OPENCODE,
-        model_id = MODEL_ID_SQL,
-        mock = MOCK_FILTER_SQL,
+        model_id = MESSAGE_MODEL_ID_SQL,
+        filter = MESSAGE_ROW_FILTER_SQL,
     );
     let mut stmt = conn
         .prepare(&sql)
@@ -476,6 +531,7 @@ pub fn open_checked(data_dir: &Path) -> Result<Connection, StatsError> {
     };
     let conn = open_readonly(&path)?;
     check_session_schema(&conn)?;
+    check_message_schema(&conn)?; // §14：message 级聚合依赖（缺表 → schema-mismatch）
     Ok(conn)
 }
 
@@ -510,18 +566,22 @@ pub fn local_today_start_ms(now_ms: i64) -> i64 {
 }
 
 /// 今日聚合核心（已开连接上执行；含 mock 过滤）。
-/// v2 M6（§6.2）：`by_agent` 填 opencode 单行（total>0 才有行；CC 行由
-/// `today_stats_all` 合并时追加——opencode 源在 SQL 里 agent 恒单值）。
+/// §14：窗口过滤下沉 message 级——`time_created ∈ [from, to]`，昨日的
+/// message 不再因会话 `time_updated` 推进而漏计/多计；五维从 `data` JSON
+/// 提取。v2 M6（§6.2）：`by_agent` 填 opencode 单行（total>0 才有行；CC 行
+/// 由 `today_stats_all` 合并时追加——opencode 源在 SQL 里 agent 恒单值）。
 pub fn query_today_on(
     conn: &Connection,
     from_ms: i64,
     to_ms: i64,
 ) -> Result<TodayStats, StatsError> {
     let sql = format!(
-        "SELECT IFNULL(SUM(tokens_input),0), IFNULL(SUM(tokens_output),0), \
-                IFNULL(SUM(tokens_cache_read),0), IFNULL(SUM(cost),0.0) \
-         FROM session WHERE time_updated >= ?1 AND time_updated <= ?2 AND {mock}",
-        mock = MOCK_FILTER_SQL,
+        "SELECT IFNULL(SUM(COALESCE(json_extract(data,'$.tokens.input'),0)),0), \
+                IFNULL(SUM(COALESCE(json_extract(data,'$.tokens.output'),0)),0), \
+                IFNULL(SUM(COALESCE(json_extract(data,'$.tokens.cache.read'),0)),0), \
+                IFNULL(SUM(COALESCE(json_extract(data,'$.cost'),0.0)),0.0) \
+         FROM message WHERE time_created >= ?1 AND time_created <= ?2 AND {filter}",
+        filter = MESSAGE_ROW_FILTER_SQL,
     );
     conn.query_row(&sql, [from_ms, to_ms], |r| {
         Ok(TodayStats {
@@ -678,46 +738,62 @@ pub fn cc_to_token_row(r: &transcript::CcSessionRow) -> TokenRow {
 }
 
 /// CC 行窗口过滤 + 按 group_by 聚合（Rust 内存侧）：
-/// - session：完整行（时间倒序，与 opencode 统一排序在调用方）；
-/// - day/week：按 `day × agent × model_id` 聚合（本地日/周标签 = transcript
-///   纯函数，与 SQLite 'localtime' 同口径——S5/P2-4）；
-/// - range：按 `agent × model_id` 聚合（无 day 维，P3-6）。
-fn cc_group_rows(rows: &[TokenRow], group_by: &str, from_ms: i64, to_ms: i64) -> Vec<TokenRow> {
-    let in_win: Vec<&TokenRow> = rows
-        .iter()
-        .filter(|r| r.time_updated.is_some_and(|t| t >= from_ms && t <= to_ms))
-        .collect();
+/// - session：完整行（时间倒序，与 opencode 统一排序在调用方）——会话级
+///   累计语义，**不随 §14 下沉**（by-session 视图本来正确）；
+/// - day/week：§14 起按 **by_day 分桶明细**聚合——每条 assistant usage 归
+///   其行 timestamp 所在日（跨天会话每天各得各的）；窗口过滤在桶级
+///   （`first_ts ∈ 窗口`——custom 窗口双侧按天对齐故精确；preset 窗口
+///   to=now 非天对齐，但桶内消息时刻不可能晚于已落盘解析时刻，同样精确。
+///   tester P3-2：勿笼统写"按天对齐"），**不再以会话 time_updated 整行
+///   进/出窗**（原缺陷：跨天会话整行归最后活跃日 + 窗口不含最后活跃日
+///   整会话漏计）；
+/// - range：同 by_day 桶级过滤，按 `agent × model_id` 聚合（无 day 维，P3-6）；
+/// - model 归属保持**会话级**（末条 assistant 的 model，§14 决策 2——只改
+///   时间归属不改模型归属）；cost 恒 0（S4）。
+fn cc_group_rows(
+    rows: &[transcript::CcSessionRow],
+    group_by: &str,
+    from_ms: i64,
+    to_ms: i64,
+) -> Vec<TokenRow> {
     match group_by {
         "session" => {
-            let mut v: Vec<TokenRow> = in_win.into_iter().cloned().collect();
+            let mut v: Vec<TokenRow> = rows
+                .iter()
+                .filter(|r| r.time_updated.is_some_and(|t| t >= from_ms && t <= to_ms))
+                .map(cc_to_token_row)
+                .collect();
             v.sort_by(|a, b| b.time_updated.cmp(&a.time_updated));
             v
         }
         "day" | "week" => {
-            let mut map: HashMap<(Option<String>, Option<String>), (i64, i64, i64, i64, i64, f64)> =
+            let mut map: HashMap<(Option<String>, Option<String>), (i64, i64, i64, i64, i64)> =
                 HashMap::new();
-            for r in in_win {
-                let Some(t) = r.time_updated else { continue };
-                let label = if group_by == "day" {
-                    transcript::local_day_label(t)
-                } else {
-                    transcript::sqlite_week_label(t)
-                };
-                let e = map.entry((label, r.model_id.clone())).or_insert((0, 0, 0, 0, 0, 0.0));
-                e.0 += r.tokens_input;
-                e.1 += r.tokens_output;
-                e.2 += r.tokens_reasoning;
-                e.3 += r.tokens_cache_read;
-                e.4 += r.tokens_cache_write;
-                e.5 += r.cost;
+            for r in rows {
+                for b in &r.by_day {
+                    if b.first_ts < from_ms || b.first_ts > to_ms {
+                        continue; // 桶级窗口过滤（§14：时间窗外的前几日桶不再拖累/漏计）
+                    }
+                    let label = if group_by == "day" {
+                        Some(b.day.clone())
+                    } else {
+                        transcript::sqlite_week_label(b.first_ts)
+                    };
+                    let e = map.entry((label, r.model_id.clone())).or_insert((0, 0, 0, 0, 0));
+                    e.0 += b.tokens_input;
+                    e.1 += b.tokens_output;
+                    e.2 += b.tokens_reasoning;
+                    e.3 += b.tokens_cache_read;
+                    e.4 += b.tokens_cache_write;
+                }
             }
             let mut out: Vec<TokenRow> = map
                 .into_iter()
-                .map(|((day, model), (i, o, rs, cr, cw, cost))| TokenRow {
+                .map(|((day, model), (i, o, rs, cr, cw))| TokenRow {
                     session_id: None,
                     project_id: None,
                     day,
-                    cost,
+                    cost: 0.0, // S4：CC 恒 0
                     tokens_input: i,
                     tokens_output: o,
                     tokens_reasoning: rs,
@@ -735,24 +811,28 @@ fn cc_group_rows(rows: &[TokenRow], group_by: &str, from_ms: i64, to_ms: i64) ->
             out
         }
         _ => {
-            // range：agent × model_id
-            let mut map: HashMap<Option<String>, (i64, i64, i64, i64, i64, f64)> = HashMap::new();
-            for r in in_win {
-                let e = map.entry(r.model_id.clone()).or_insert((0, 0, 0, 0, 0, 0.0));
-                e.0 += r.tokens_input;
-                e.1 += r.tokens_output;
-                e.2 += r.tokens_reasoning;
-                e.3 += r.tokens_cache_read;
-                e.4 += r.tokens_cache_write;
-                e.5 += r.cost;
+            // range：agent × model_id（桶级窗口过滤，§14）
+            let mut map: HashMap<Option<String>, (i64, i64, i64, i64, i64)> = HashMap::new();
+            for r in rows {
+                for b in &r.by_day {
+                    if b.first_ts < from_ms || b.first_ts > to_ms {
+                        continue;
+                    }
+                    let e = map.entry(r.model_id.clone()).or_insert((0, 0, 0, 0, 0));
+                    e.0 += b.tokens_input;
+                    e.1 += b.tokens_output;
+                    e.2 += b.tokens_reasoning;
+                    e.3 += b.tokens_cache_read;
+                    e.4 += b.tokens_cache_write;
+                }
             }
             let mut out: Vec<TokenRow> = map
                 .into_iter()
-                .map(|(model, (i, o, rs, cr, cw, cost))| TokenRow {
+                .map(|(model, (i, o, rs, cr, cw))| TokenRow {
                     session_id: None,
                     project_id: None,
                     day: None,
-                    cost,
+                    cost: 0.0, // S4：CC 恒 0
                     tokens_input: i,
                     tokens_output: o,
                     tokens_reasoning: rs,
@@ -877,9 +957,8 @@ fn query_source_rows(
             // I/O 与解析（增量：append 只读尾部）在锁外。
             let cc_rows_all = transcript::refresh_unlocked(cc_dir, cache);
             let has_data = !cc_rows_all.is_empty();
-            let tokens: Vec<TokenRow> = cc_rows_all.iter().map(cc_to_token_row).collect();
             SourceState::Ok(SourceRows {
-                rows: cc_group_rows(&tokens, group_by, from_ms, to_ms),
+                rows: cc_group_rows(&cc_rows_all, group_by, from_ms, to_ms),
                 has_data,
             })
         }
@@ -919,12 +998,16 @@ fn today_source_stats(spec: &SourceSpec<'_>, now_ms: i64) -> SourceState<SourceT
                 cost: 0.0,
                 by_agent: Vec::new(),
             };
+            // §14：按 by_day 桶归天——只累加桶标签 = 今日的量（跨天会话昨日
+            // 部分不再整行进今天）；标签比较与 day 聚合同口径，天然覆盖
+            // `t <= now_ms`（桶内消息不可能晚于已落盘解析时刻）。
+            let today_label = transcript::local_day_label(from);
             for r in cc_rows_all.iter() {
-                if let Some(t) = r.time_updated {
-                    if t >= from && t <= now_ms {
-                        today.input += r.tokens_input;
-                        today.output += r.tokens_output;
-                        today.cache_read += r.tokens_cache_read;
+                for b in &r.by_day {
+                    if today_label.as_deref() == Some(b.day.as_str()) {
+                        today.input += b.tokens_input;
+                        today.output += b.tokens_output;
+                        today.cache_read += b.tokens_cache_read;
                         // cost 恒 0（S4）
                     }
                 }
@@ -1259,6 +1342,14 @@ mod tests {
     /// project 表（S1：路径列名 = worktree；global 行 id='global'、worktree='/'）。
     const CREATE_PROJECT: &str = "CREATE TABLE project (id TEXT PRIMARY KEY, worktree TEXT NOT NULL)";
 
+    /// §14：message 表（真实 opencode 1.18.x schema——id/session_id/time_created/
+    /// time_updated/data；data JSON 含 $.tokens/$.cost/$.modelID/$.providerID）。
+    const CREATE_MESSAGE: &str = "\
+        CREATE TABLE message (\
+            id TEXT PRIMARY KEY, session_id TEXT NOT NULL, \
+            time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, \
+            data TEXT NOT NULL)";
+
     /// 旧 schema（缺 tokens_* 列）建表语句（TC-TK-13）。
     const CREATE_SESSION_OLD: &str = "\
         CREATE TABLE session (\
@@ -1282,13 +1373,15 @@ mod tests {
         dir
     }
 
-    /// 建一个临时 opencode 数据目录 + 指定 schema 的 opencode.db（含 project 表）。
+    /// 建一个临时 opencode 数据目录 + 指定 schema 的 opencode.db（含 project
+    /// 与 message 表——§14 起 open_checked 校验 message 表且聚合走 message 级）。
     fn make_db(tag: &str, create_sql: &str) -> PathBuf {
         let dir = temp_dir(tag);
         let db = dir.join("opencode.db");
         let conn = Connection::open(&db).unwrap();
         conn.execute_batch(create_sql).unwrap();
         conn.execute_batch(CREATE_PROJECT).unwrap();
+        conn.execute_batch(CREATE_MESSAGE).unwrap();
         conn.execute_batch("PRAGMA journal_mode=WAL;").unwrap();
         conn.close().unwrap();
         dir
@@ -1355,6 +1448,69 @@ mod tests {
     /// model JSON（{id, providerID}）。
     fn model_json(id: &str, provider: &str) -> String {
         format!(r#"{{"id":"{id}","providerID":"{provider}","variant":null}}"#)
+    }
+
+    /// §14：message.data JSON（真实 opencode 形态——tokens 五维中 cache 为
+    /// 嵌套 {read,write}；modelID 缺省省略键 → model_id NULL「未知模型」组）。
+    fn message_data(
+        model: Option<&str>,
+        provider: &str,
+        cost: f64,
+        tokens: (i64, i64, i64, i64, i64),
+    ) -> String {
+        let mut obj = serde_json::json!({
+            "role": "assistant",
+            "providerID": provider,
+            "cost": cost,
+            "tokens": {
+                "input": tokens.0,
+                "output": tokens.1,
+                "reasoning": tokens.2,
+                "cache": {"read": tokens.3, "write": tokens.4},
+            },
+        });
+        if let Some(m) = model {
+            obj["modelID"] = serde_json::json!(m);
+        }
+        obj.to_string()
+    }
+
+    /// §14：插一行 message（model 缺省 glm-5.3@zhipuai）。
+    fn insert_message(
+        dir: &Path,
+        id: &str,
+        session_id: &str,
+        ts: i64,
+        cost: f64,
+        tokens: (i64, i64, i64, i64, i64),
+    ) {
+        insert_message_model(dir, id, session_id, ts, Some("glm-5.3"), "zhipuai", cost, tokens);
+    }
+
+    /// §14：插一行 message（全参：modelID / providerID 可控——mock 过滤与
+    /// 模型归并测试用）。
+    fn insert_message_model(
+        dir: &Path,
+        id: &str,
+        session_id: &str,
+        ts: i64,
+        model: Option<&str>,
+        provider: &str,
+        cost: f64,
+        tokens: (i64, i64, i64, i64, i64),
+    ) {
+        let conn = open_readonly_unchecked(dir);
+        conn.execute(
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) \
+             VALUES (?1, ?2, ?3, ?3, ?4)",
+            rusqlite::params![
+                id,
+                session_id,
+                ts,
+                message_data(model, provider, cost, tokens)
+            ],
+        )
+        .unwrap();
     }
 
     /// 测试插数用的读写连接（业务代码本身仍走 open_readonly）。
@@ -1456,16 +1612,17 @@ mod tests {
     #[test]
     fn query_by_day_groups_by_local_day_and_model() {
         let dir = make_db("day", CREATE_SESSION);
-        // 同一天两个 session 同模型 → SUM 聚合；另一天另一模型 → 分组
+        // §14：分组走 message 表——同一天两个 message（可跨 session）同模型
+        // → SUM 聚合；另一天另一模型 → 分组
         // （M3 §3.2：GROUP BY day, model_id——取代 v1 的 day, project_id）
         let day0 = chrono_local_midnight(2026, 8, 16);
-        insert_session_model(&dir, "s1", "p1", 0.10, (100, 20, 0, 0, 0), day0, day0 + ms(3600),
-            Some(&model_json("glm-5.3", "zhipuai")), None);
-        insert_session_model(&dir, "s2", "p1", 0.20, (200, 30, 0, 0, 0), day0, day0 + ms(7200),
-            Some(&model_json("glm-5.3", "zhipuai")), None);
+        insert_message_model(&dir, "m1", "s1", day0 + ms(3600), Some("glm-5.3"), "zhipuai",
+            0.10, (100, 20, 0, 0, 0));
+        insert_message_model(&dir, "m2", "s2", day0 + ms(7200), Some("glm-5.3"), "zhipuai",
+            0.20, (200, 30, 0, 0, 0));
         let day1 = chrono_local_midnight(2026, 8, 15);
-        insert_session_model(&dir, "s3", "p2", 0.40, (400, 60, 0, 0, 0), day1, day1 + ms(3600),
-            Some(&model_json("kimi-k2", "moonshot")), None);
+        insert_message_model(&dir, "m3", "s3", day1 + ms(3600), Some("kimi-k2"), "moonshot",
+            0.40, (400, 60, 0, 0, 0));
         let conn = open_readonly(&dir.join("opencode.db")).unwrap();
         let rows = query_by_day(&conn, 0, day0 + ms(86_400)).unwrap();
         assert_eq!(rows.len(), 2, "两个 (day, model) 分组");
@@ -1484,11 +1641,9 @@ mod tests {
     fn query_by_week_labels_and_aggregates() {
         let dir = make_db("week", CREATE_SESSION);
         let d = chrono_local_midnight(2026, 8, 11); // 周一（2026-08-10 为 ISO 周一）
-        insert_session_model(&dir, "s1", "p1", 0.1, (10, 1, 0, 0, 0), d, d + ms(3600),
-            Some(&model_json("glm-5.3", "zhipuai")), None);
+        insert_message(&dir, "m1", "s1", d + ms(3600), 0.1, (10, 1, 0, 0, 0));
         let d2 = chrono_local_midnight(2026, 8, 13);
-        insert_session_model(&dir, "s2", "p1", 0.2, (20, 2, 0, 0, 0), d2, d2 + ms(3600),
-            Some(&model_json("glm-5.3", "zhipuai")), None);
+        insert_message(&dir, "m2", "s2", d2 + ms(3600), 0.2, (20, 2, 0, 0, 0));
         let conn = open_readonly(&dir.join("opencode.db")).unwrap();
         let rows = query_by_week(&conn, 0, d2 + ms(86_400)).unwrap();
         assert_eq!(rows.len(), 1, "同一周同模型 → 单行聚合");
@@ -1501,13 +1656,13 @@ mod tests {
     fn query_by_range_aggregates_per_model_without_day() {
         let dir = make_db("range", CREATE_SESSION);
         let d = chrono_local_midnight(2026, 8, 16);
-        // p1 两行同模型 → 单组；p2 一行另一模型 → 另一组（M3：GROUP BY model_id）
-        insert_session_model(&dir, "s1", "p1", 0.1, (10, 1, 0, 0, 0), d, d + ms(1),
-            Some(&model_json("glm-5.3", "zhipuai")), None);
-        insert_session_model(&dir, "s2", "p1", 0.2, (20, 2, 0, 0, 0), d, d + ms(2),
-            Some(&model_json("glm-5.3", "zhipuai")), None);
-        insert_session_model(&dir, "s3", "p2", 0.4, (40, 4, 0, 0, 0), d, d + ms(3),
-            Some(&model_json("kimi-k2", "moonshot")), None);
+        // 两行同模型 → 单组；另一行另一模型 → 另一组（M3：GROUP BY model_id）
+        insert_message_model(&dir, "m1", "s1", d + ms(1), Some("glm-5.3"), "zhipuai",
+            0.1, (10, 1, 0, 0, 0));
+        insert_message_model(&dir, "m2", "s2", d + ms(2), Some("glm-5.3"), "zhipuai",
+            0.2, (20, 2, 0, 0, 0));
+        insert_message_model(&dir, "m3", "s3", d + ms(3), Some("kimi-k2"), "moonshot",
+            0.4, (40, 4, 0, 0, 0));
         let conn = open_readonly(&dir.join("opencode.db")).unwrap();
         let mut rows = query_by_range(&conn, 0, d + ms(10)).unwrap();
         rows.sort_by(|a, b| a.model_id.cmp(&b.model_id));
@@ -1524,7 +1679,9 @@ mod tests {
     fn query_stats_dispatches_group_by_and_rejects_unknown() {
         let dir = make_db("dispatch", CREATE_SESSION);
         let d = local_midnight_ms(2026, 8, 16);
+        // §14：session 维走 session 表、day/week/range 走 message 表——双插
         insert_session(&dir, "s1", "p1", 0.5, (100, 10, 0, 0, 0), d, d + ms(1));
+        insert_message(&dir, "m1", "s1", d + ms(1), 0.5, (100, 10, 0, 0, 0));
         for g in ["session", "day", "week", "range"] {
             let rows = query_stats(&dir, 0, d + ms(10), g).unwrap();
             assert_eq!(rows.len(), 1, "group_by={g} 应返回 1 行");
@@ -1669,6 +1826,8 @@ mod tests {
             now - ms(600),
             now - ms(2),
         );
+        // §14：今日段走 message 级——补插同口径 message（会话累计 = 两条 message 之和）
+        insert_message(&dir, "m1", "ses_live", now - ms(600), 0.05, (58_263, 910, 0, 0, 0));
         let (text, today) = build_idle_report_with_today(&dir, "ses_live", now, 60_000).unwrap();
         assert_eq!(text, "本次会话消耗 token 59.2k");
         assert_eq!(today, Some(58_263 + 910), "今日 = 本会话行（窗口内唯一）");
@@ -1756,12 +1915,13 @@ mod tests {
         let dir = make_db("m3-grouped", CREATE_SESSION);
         let d = chrono_local_midnight(2026, 8, 25);
         // 同日同模型两行 → 单 (day, model_id) 分组聚合；另一模型 → 另一分组
-        insert_session_model(&dir, "s1", "p1", 0.10, (100, 20, 0, 30, 0), d, d + ms(3600),
-            Some(&model_json("glm-5.3", "zhipuai")), None);
-        insert_session_model(&dir, "s2", "p2", 0.20, (200, 30, 0, 40, 0), d, d + ms(7200),
-            Some(&model_json("glm-5.3", "zhipuai")), None);
-        insert_session_model(&dir, "s3", "p1", 0.40, (400, 60, 0, 50, 0), d, d + ms(8000),
-            Some(&model_json("kimi-k2", "moonshot")), None);
+        //（§14：message 级 $.modelID 归并）
+        insert_message_model(&dir, "m1", "s1", d + ms(3600), Some("glm-5.3"), "zhipuai",
+            0.10, (100, 20, 0, 30, 0));
+        insert_message_model(&dir, "m2", "s2", d + ms(7200), Some("glm-5.3"), "zhipuai",
+            0.20, (200, 30, 0, 40, 0));
+        insert_message_model(&dir, "m3", "s3", d + ms(8000), Some("kimi-k2"), "moonshot",
+            0.40, (400, 60, 0, 50, 0));
         let conn = open_readonly(&dir.join("opencode.db")).unwrap();
 
         let mut rows = query_by_day(&conn, 0, d + ms(86_400)).unwrap();
@@ -1795,18 +1955,25 @@ mod tests {
 
     #[test]
     fn m3_grouped_null_model_buckets_into_unknown_group() {
-        // model NULL/损坏 → model_id NULL 自成一组（前端「未知模型」合并，S3 防御）
+        // modelID 缺失（data 无该键）→ model_id NULL 自成一组（前端「未知模型」
+        // 合并，S3 防御）；损坏 data 行被 §14 行筛选排除（不炸、不入组）
         let dir = make_db("m3-nullmodel", CREATE_SESSION);
         let d = chrono_local_midnight(2026, 8, 25);
-        insert_session(&dir, "s1", "p1", 0.1, (10, 1, 0, 0, 0), d, d + ms(1));
-        insert_session(&dir, "s2", "p1", 0.1, (20, 2, 0, 0, 0), d, d + ms(2));
-        insert_session_model(&dir, "s3", "p1", 0.1, (30, 3, 0, 0, 0), d, d + ms(3),
-            Some("broken"), None);
+        insert_message_model(&dir, "m1", "s1", d + ms(1), None, "zhipuai", 0.1, (10, 1, 0, 0, 0));
+        insert_message_model(&dir, "m2", "s2", d + ms(2), None, "zhipuai", 0.1, (20, 2, 0, 0, 0));
+        let conn = open_readonly_unchecked(&dir);
+        conn.execute(
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) \
+             VALUES ('m-bad','s3',?1,?1,'not-json')",
+            [d + ms(3)],
+        )
+        .unwrap();
+        drop(conn);
         let conn = open_readonly(&dir.join("opencode.db")).unwrap();
         let rows = query_by_day(&conn, 0, d + ms(10)).unwrap();
-        assert_eq!(rows.len(), 1, "NULL model_id 单组聚合");
+        assert_eq!(rows.len(), 1, "NULL model_id 单组聚合（损坏 data 不入组不炸）");
         assert_eq!(rows[0].model_id, None);
-        assert_eq!(rows[0].tokens_input, 60);
+        assert_eq!(rows[0].tokens_input, 30);
     }
 
     #[test]
@@ -1836,6 +2003,10 @@ mod tests {
         insert_session_model(&dir, "s_mock", "p1", 0.0, (999, 999, 0, 999, 0), d, d + ms(1), Some(&mock), None);
         insert_session_model(&dir, "s_real", "p1", 0.1, (100, 20, 0, 30, 0), d, d + ms(2),
             Some(&model_json("glm-5.3", "zhipuai")), None);
+        // §14：message 级同口径 mock 过滤（$.providerID）
+        insert_message_model(&dir, "mm_mock", "s_mock", d + ms(1), Some("probe-model"), "mock",
+            0.0, (999, 999, 0, 999, 0));
+        insert_message(&dir, "mm_real", "s_real", d + ms(2), 0.1, (100, 20, 0, 30, 0));
         let conn = open_readonly(&dir.join("opencode.db")).unwrap();
 
         // by-session：mock 行不出现
@@ -1898,14 +2069,13 @@ mod tests {
         let err = today_stats(&dir, ms(1000)).unwrap_err();
         assert_eq!(err.code, ERR_SCHEMA_MISMATCH);
 
-        // 窗口：只聚合今天 0 点起的行（昨天的行不计）
+        // 窗口：只聚合今天 0 点起的 message（§14：按消息 time_created——昨日
+        // 的 message 即便其 session.time_updated 仍为昨天也不计，反之亦然）
         let dir = make_db("m3-today", CREATE_SESSION);
         let d = chrono_local_midnight(2026, 8, 25);
         let now = d + 10 * 3600 * 1000;
-        insert_session_model(&dir, "s_today", "p1", 0.2, (1000, 200, 50, 3000, 0), now - ms(10), now - ms(5),
-            Some(&model_json("glm-5.3", "zhipuai")), None);
-        insert_session_model(&dir, "s_yesterday", "p1", 9.9, (90000, 900, 0, 0, 0),
-            d - ms(3600), d - ms(1800), Some(&model_json("glm-5.3", "zhipuai")), None);
+        insert_message(&dir, "m_today", "s_today", now - ms(10), 0.2, (1000, 200, 50, 3000, 0));
+        insert_message(&dir, "m_yesterday", "s_yesterday", d - ms(3600), 9.9, (90000, 900, 0, 0, 0));
         let stats = today_stats(&dir, now).unwrap();
         assert_eq!(stats.input, 1000);
         assert_eq!(stats.output, 200);
@@ -1920,12 +2090,13 @@ mod tests {
         let dir = make_db("m3-idle", CREATE_SESSION);
         let d = chrono_local_midnight(2026, 8, 25);
         let now = d + 9 * 3600 * 1000;
-        // 本会话（新鲜有用量）
+        // 本会话（新鲜有用量；session 行供 current_session，message 供今日聚合）
         insert_session_model(&dir, "ses_live", "p1", 0.05, (58_263, 910, 0, 0, 0), now - ms(600), now - ms(2),
             Some(&model_json("glm-5.3", "zhipuai")), None);
+        insert_message(&dir, "m_live", "ses_live", now - ms(600), 0.05, (58_263, 910, 0, 0, 0));
         // 今日另一会话（计入今日累计：in 1M + out 40k + cache 2M）
-        insert_session_model(&dir, "ses_other", "p1", 0.1, (1_000_000, 40_000, 0, 2_000_000, 0),
-            now - ms(7200), now - ms(3600), Some(&model_json("glm-5.3", "zhipuai")), None);
+        insert_message(&dir, "m_other", "ses_other", now - ms(3600), 0.1,
+            (1_000_000, 40_000, 0, 2_000_000, 0));
         let (text, today) = build_idle_report_with_today(&dir, "ses_live", now, 60_000).unwrap();
         assert_eq!(text, "本次会话消耗 token 59.2k");
         // total = in + out + cache_read（reasoning 不计）：1058263 + 40910 + 2000000
@@ -2063,6 +2234,8 @@ mod tests {
             &dir, "s-oc", "p1", 0.1, (100, 10, 0, 0, 0), d, d + ms(100),
             Some(&model_json("glm-5.3", "zhipuai")), None,
         );
+        // §14：day/week/range 走 message 级（session 维仍走 session 表）
+        insert_message(&dir, "m-oc", "s-oc", d + ms(100), 0.1, (100, 10, 0, 0, 0));
         let cc_dir = temp_dir("m5-merge-cc");
         write_cc_session(&cc_dir, "cc-ses-1", d + ms(200), (50, 5));
         let cache = Arc::new(Mutex::new(TranscriptCache::default()));
@@ -2098,6 +2271,7 @@ mod tests {
             &dir, "s-oc", "p1", 0.1, (10, 1, 0, 0, 0), d, d + ms(1),
             Some(&model_json("glm-5.3", "zhipuai")), None,
         );
+        insert_message(&dir, "m-oc", "s-oc", d + ms(1), 0.1, (10, 1, 0, 0, 0));
         let cc_dir = temp_dir("m5-week-cc");
         write_cc_session(&cc_dir, "cc-1", d + 12 * 3600 * 1000, (20, 2)); // 本地午间（防 UTC 跨日）
         let cache = Arc::new(Mutex::new(TranscriptCache::default()));
@@ -2118,6 +2292,7 @@ mod tests {
             &dir, "s-oc", "p1", 0.1, (1000, 100, 0, 3000, 0), now - ms(10), now - ms(5),
             Some(&model_json("glm-5.3", "zhipuai")), None,
         );
+        insert_message(&dir, "m-oc", "s-oc", now - ms(10), 0.1, (1000, 100, 0, 3000, 0));
         let cc_dir = temp_dir("m5-today-cc");
         write_cc_session(&cc_dir, "cc-1", now - ms(60), (500, 50));
         write_cc_session(&cc_dir, "cc-old", d - ms(3600), (99_999, 0)); // 昨天的行不计
@@ -2162,10 +2337,7 @@ mod tests {
         //（今日总量同口径：reasoning 999 不计）——三层数值交叉断言的基础
         let dir = make_db("m6-oc", CREATE_SESSION);
         let d = chrono_local_midnight(2026, 8, 27);
-        insert_session_model(
-            &dir, "s1", "p1", 0.1, (100, 20, 999, 30, 0), d, d + ms(1),
-            Some(&model_json("glm-5.3", "zhipuai")), None,
-        );
+        insert_message(&dir, "m1", "s1", d + ms(1), 0.1, (100, 20, 999, 30, 0));
         let cache = Arc::new(Mutex::new(TranscriptCache::default()));
         let no_cc = temp_dir("m6-oc-cc").join("missing");
         let now = d + 9 * 3600 * 1000;
@@ -2185,10 +2357,7 @@ mod tests {
         // 双源 → 两行、按 total 降序（cc 6000 > oc 150）
         let dir = make_db("m6-oc2", CREATE_SESSION);
         let d = chrono_local_midnight(2026, 8, 27);
-        insert_session_model(
-            &dir, "s1", "p1", 0.1, (100, 20, 0, 30, 0), d, d + ms(1),
-            Some(&model_json("glm-5.3", "zhipuai")), None,
-        );
+        insert_message(&dir, "m1", "s1", d + ms(1), 0.1, (100, 20, 0, 30, 0));
         let cc_dir = temp_dir("m6-cc");
         write_cc_session(&cc_dir, "cc-1", d + ms(3600), (5000, 1000)); // cc total 6000
         let cache = Arc::new(Mutex::new(TranscriptCache::default()));
@@ -2221,14 +2390,9 @@ mod tests {
         //（与今日总量同口径——mock 行在全部查询中过滤，S4）
         let dir = make_db("m6-mock", CREATE_SESSION);
         let d = chrono_local_midnight(2026, 8, 27);
-        insert_session_model(
-            &dir, "s-mock", "p1", 0.0, (700, 0, 0, 0, 0), d, d + ms(1),
-            Some(&model_json("probe-model", "mock")), None,
-        );
-        insert_session_model(
-            &dir, "s-real", "p1", 0.1, (100, 20, 0, 30, 0), d, d + ms(2),
-            Some(&model_json("glm-5.3", "zhipuai")), None,
-        );
+        insert_message_model(&dir, "m-mock", "s-mock", d + ms(1), Some("probe-model"), "mock",
+            0.0, (700, 0, 0, 0, 0));
+        insert_message(&dir, "m-real", "s-real", d + ms(2), 0.1, (100, 20, 0, 30, 0));
         let cache = Arc::new(Mutex::new(TranscriptCache::default()));
         let no_cc = temp_dir("m6-mock-cc").join("missing");
         let t = today_stats_all(&dir, &no_cc, &cache, d + 9 * 3600 * 1000).unwrap();
@@ -2353,8 +2517,7 @@ mod tests {
         let third_cache = Arc::new(Mutex::new(TranscriptCache::default()));
 
         let oc_dir = make_db("p3-3src-oc", CREATE_SESSION);
-        insert_session_model(&oc_dir, "s-oc", "p1", 0.1, (100, 10, 0, 0, 0), d, d + ms(100),
-            Some(&model_json("glm-5.3", "zhipuai")), None);
+        insert_message(&oc_dir, "m-oc", "s-oc", d + ms(100), 0.1, (100, 10, 0, 0, 0));
         let cc_dir = temp_dir("p3-3src-cc");
         write_cc_session(&cc_dir, "cc-1", d + ms(200), (50, 5));
         let third_dir = temp_dir("p3-3src-third"); // 伪造第三源（transcript 形态）
@@ -2391,6 +2554,236 @@ mod tests {
         assert!(res.degraded.is_some(), "主源 Failed × 其余任一源有数据（第三源）→ 横幅");
         assert_eq!(res.rows.len(), 1, "仅第三源行（CC Missing 无行）");
         assert_eq!(res.rows[0].tokens_input, 20);
+    }
+
+    // ---- §14（V2-OPEN-ITEMS，2026-08-29）：跨天会话按消息时间归天 ----
+
+    /// §14 钉①：跨天会话两天各得各的——同一 session 两条 message 不同天 →
+    /// day 维两天各自聚合；today 只计今天的 message（原 session 级行为：
+    /// 整会话累计值全部归 time_updated 所在的最后活跃日，首日贡献消失）。
+    #[test]
+    fn s14_cross_day_session_attributed_by_message_day() {
+        let dir = make_db("s14-crossday", CREATE_SESSION);
+        let day0 = chrono_local_midnight(2026, 8, 28);
+        let day1 = chrono_local_midnight(2026, 8, 29);
+        // session 行（会话累计 300 / time_updated 在第二天）——旧行为的病灶构造
+        insert_session_model(&dir, "s1", "p1", 0.3, (300, 30, 0, 0, 0), day0, day1 + ms(3600),
+            Some(&model_json("glm-5.3", "zhipuai")), None);
+        insert_message(&dir, "m1", "s1", day0 + ms(3600), 0.1, (100, 10, 0, 0, 0));
+        insert_message(&dir, "m2", "s1", day1 + ms(3600), 0.2, (200, 20, 0, 0, 0));
+        let conn = open_readonly(&dir.join("opencode.db")).unwrap();
+
+        let rows = query_by_day(&conn, 0, day1 + ms(86_400)).unwrap();
+        assert_eq!(rows.len(), 2, "跨天会话拆两天（不再整行归最后活跃日）");
+        assert_eq!(rows[0].day.as_deref(), Some("2026-08-29"), "day DESC");
+        assert_eq!(rows[0].tokens_input, 200);
+        assert_eq!(rows[1].day.as_deref(), Some("2026-08-28"));
+        assert_eq!(rows[1].tokens_input, 100, "第一天贡献不再消失");
+
+        // today（第二天 12:00）只计今天的 message（100 不混入）
+        let now = day1 + 12 * 3600 * 1000;
+        let t = query_today_on(&conn, local_today_start_ms(now), now).unwrap();
+        assert_eq!(t.input, 200);
+        assert_eq!(t.output, 20);
+
+        // by-session 视图不变：会话累计语义（§14.3 原则）
+        let sess = query_by_session(&conn, 0, day1 + ms(86_400)).unwrap();
+        assert_eq!(sess.len(), 1);
+        assert_eq!(sess[0].tokens_input, 300);
+    }
+
+    /// §14 钉②：窗口漏计修复——窗口不含最后活跃日时，窗口内天数照常计入
+    ///（原行为：整会话因 time_updated 出窗而完全不计）。
+    #[test]
+    fn s14_window_excluding_last_active_day_counts_earlier_days() {
+        let dir = make_db("s14-window", CREATE_SESSION);
+        let day0 = chrono_local_midnight(2026, 8, 20);
+        let day6 = chrono_local_midnight(2026, 8, 26);
+        // 7d 会话：day0 两条 + day6 一条；窗口 = [day0, day0+86_400]（不含 day6）
+        insert_session_model(&dir, "s1", "p1", 0.3, (300, 0, 0, 0, 0), day0, day6 + ms(60),
+            Some(&model_json("glm-5.3", "zhipuai")), None);
+        insert_message(&dir, "m1", "s1", day0 + ms(3600), 0.1, (100, 0, 0, 0, 0));
+        insert_message(&dir, "m2", "s1", day0 + ms(7200), 0.1, (100, 0, 0, 0, 0));
+        insert_message(&dir, "m3", "s1", day6 + ms(60), 0.1, (100, 0, 0, 0, 0));
+        let conn = open_readonly(&dir.join("opencode.db")).unwrap();
+        let to = day0 + ms(86_400);
+
+        // day：窗口内只有 day0，量 = 两条 message 之和（原行为 0 行——整会话漏计）
+        let rows = query_by_day(&conn, 0, to).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].day.as_deref(), Some("2026-08-20"));
+        assert_eq!(rows[0].tokens_input, 200, "窗口内天数照常计入");
+
+        // range（§14.2 裁定一并下沉）：同窗口按模型聚合，同样计 200
+        let rows = query_by_range(&conn, 0, to).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].tokens_input, 200);
+    }
+
+    /// §14 钉③：message 行筛选——user 行（无 $.tokens，实测 0% 带）不产生
+    /// 零值聚合组；损坏 data 不炸查询不入聚合（json_valid 守卫先例延续）。
+    #[test]
+    fn s14_message_row_filter_user_and_corrupt_rows() {
+        let dir = make_db("s14-rowfilter", CREATE_SESSION);
+        let d = chrono_local_midnight(2026, 8, 27);
+        insert_message(&dir, "m-real", "s1", d + ms(1), 0.1, (100, 0, 0, 0, 0));
+        // user 形态行：data 无 $.tokens（真实库 user 行 1276/1276 无 tokens）
+        let conn = open_readonly_unchecked(&dir);
+        conn.execute(
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) \
+             VALUES ('m-user','s1',?1,?1,?2)",
+            rusqlite::params![
+                d + ms(2),
+                r#"{"role":"user","providerID":"zhipuai","cost":0}"#,
+            ],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) \
+             VALUES ('m-bad','s1',?1,?1,'not-json')",
+            [d + ms(3)],
+        )
+        .unwrap();
+        drop(conn);
+        let conn = open_readonly(&dir.join("opencode.db")).unwrap();
+        let rows = query_by_day(&conn, 0, d + ms(10)).unwrap();
+        assert_eq!(rows.len(), 1, "user 行不成零值组、损坏行不入组");
+        assert_eq!(rows[0].tokens_input, 100);
+        // today 同口径不炸
+        let t = query_today_on(&conn, d, d + ms(10)).unwrap();
+        assert_eq!(t.input, 100);
+    }
+
+    /// §14 钉④：会话中途换模型——message 级 $.modelID 分组（原 session.model
+    /// 末值把全会话归一个模型）。
+    #[test]
+    fn s14_mid_session_model_switch_splits_groups() {
+        let dir = make_db("s14-model", CREATE_SESSION);
+        let d = chrono_local_midnight(2026, 8, 27);
+        insert_message_model(&dir, "m1", "s1", d + ms(1), Some("glm-5.3"), "zhipuai",
+            0.0, (100, 0, 0, 0, 0));
+        insert_message_model(&dir, "m2", "s1", d + ms(2), Some("kimi-k2"), "moonshot",
+            0.0, (50, 0, 0, 0, 0));
+        let conn = open_readonly(&dir.join("opencode.db")).unwrap();
+        let mut rows = query_by_day(&conn, 0, d + ms(10)).unwrap();
+        rows.sort_by(|a, b| a.model_id.cmp(&b.model_id));
+        assert_eq!(rows.len(), 2, "同 session 两个模型两组");
+        assert_eq!(rows[0].model_id.as_deref(), Some("glm-5.3"));
+        assert_eq!(rows[0].tokens_input, 100);
+        assert_eq!(rows[1].model_id.as_deref(), Some("kimi-k2"));
+        assert_eq!(rows[1].tokens_input, 50);
+    }
+
+    /// §14 钉⑤：message 表缺失 → schema-mismatch（§14.2 用户裁定：严格报错
+    /// 提示升级，不静默口径漂移；与 session 列缺失同语义）。
+    #[test]
+    fn s14_message_table_missing_is_schema_mismatch() {
+        let dir = make_db("s14-nomsg", CREATE_SESSION);
+        open_readonly_unchecked(&dir)
+            .execute_batch("DROP TABLE message;")
+            .unwrap();
+        let err = query_stats(&dir, 0, i64::MAX, "day").unwrap_err();
+        assert_eq!(err.code, ERR_SCHEMA_MISMATCH);
+        assert!(err.message.contains("message 表不存在"), "{}", err.message);
+        assert!(err.message.contains("升级 pulse-pet"));
+        // today / current_session / idle 汇报同走 open_checked，全链路拦截
+        let err = today_stats(&dir, ms(1000)).unwrap_err();
+        assert_eq!(err.code, ERR_SCHEMA_MISMATCH);
+        let err = current_session(&dir, "s1").unwrap_err();
+        assert_eq!(err.code, ERR_SCHEMA_MISMATCH);
+        // 缺列同语义：缺 data 列
+        let dir = make_db("s14-nocol", CREATE_SESSION);
+        open_readonly_unchecked(&dir)
+            .execute_batch(
+                "DROP TABLE message; CREATE TABLE message (\
+                 id TEXT PRIMARY KEY, session_id TEXT NOT NULL, time_created INTEGER NOT NULL);",
+            )
+            .unwrap();
+        let err = query_stats(&dir, 0, i64::MAX, "day").unwrap_err();
+        assert_eq!(err.code, ERR_SCHEMA_MISMATCH);
+        assert!(err.message.contains("data"), "缺列提示点名 data：{}", err.message);
+    }
+
+    /// §14 钉⑥（CC 侧）：跨天 jsonl 按 by_day 分桶——day 两天各得各的、today
+    /// 只计今天、窗口不含最后活跃日仍计窗内桶（与 opencode 钉①②对称）。
+    #[test]
+    fn s14_cc_cross_day_session_buckets_by_message_day() {
+        let cc_dir = temp_dir("s14-cc-crossday");
+        let day0 = chrono_local_midnight(2026, 8, 28);
+        let day1 = chrono_local_midnight(2026, 8, 29);
+        // 单文件跨天：user@day0 + m1@day0(100,10) + m2@day1(200,20)
+        //（time_updated = day1 末条——旧行为整行 300 归 day1）
+        write_cc_session_multi(&cc_dir, "cc-cross", &[
+            (day0 + ms(3600), (100, 10)),
+            (day1 + ms(3600), (200, 20)),
+        ]);
+        let cache = Arc::new(Mutex::new(TranscriptCache::default()));
+        let nodb = temp_dir("s14-cc-nodb");
+
+        // day：两天各得各的
+        let res = query_stats_all(&nodb, &cc_dir, &cache, 0, day1 + ms(86_400), "day").unwrap();
+        assert_eq!(res.rows.len(), 2);
+        assert_eq!(res.rows[0].day.as_deref(), Some("2026-08-29"));
+        assert_eq!(res.rows[0].tokens_input, 200);
+        assert_eq!(res.rows[1].day.as_deref(), Some("2026-08-28"));
+        assert_eq!(res.rows[1].tokens_input, 100, "首日贡献不再消失");
+
+        // today（day1 12:00）只计今天的桶
+        let now = day1 + 12 * 3600 * 1000;
+        let t = today_stats_all(&nodb, &cc_dir, &cache, now).unwrap();
+        assert_eq!(t.today.input, 200);
+        assert_eq!(t.today.output, 20);
+
+        // 窗口不含最后活跃日仍计窗内桶（原行为整会话漏计）
+        let res = query_stats_all(&nodb, &cc_dir, &cache, 0, day0 + ms(86_400), "day").unwrap();
+        assert_eq!(res.rows.len(), 1);
+        assert_eq!(res.rows[0].day.as_deref(), Some("2026-08-28"));
+        assert_eq!(res.rows[0].tokens_input, 100);
+
+        // session 视图不变：会话累计 300
+        let res = query_stats_all(&nodb, &cc_dir, &cache, 0, day1 + ms(86_400), "session").unwrap();
+        assert_eq!(res.rows.len(), 1);
+        assert_eq!(res.rows[0].tokens_input, 300);
+    }
+
+    /// §14 CC 多天夹具：user 行锚定首条 ts，之后每元组一条 assistant 行
+    ///（message id 递增，避免去重吃掉不同天）。
+    fn write_cc_session_multi(cc_root: &Path, sid: &str, entries: &[(i64, (i64, i64))]) {
+        use chrono::TimeZone;
+        let proj = cc_root.join("munged-proj");
+        std::fs::create_dir_all(&proj).unwrap();
+        let rfc = |ms: i64| {
+            chrono::Utc
+                .timestamp_millis_opt(ms)
+                .single()
+                .unwrap()
+                .to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+        };
+        let mut lines = Vec::new();
+        lines.push(serde_json::json!({
+            "type": "user", "timestamp": rfc(entries[0].0),
+            "cwd": "/Users/youqi/develop/lab",
+            "message": {"role": "user", "content": "hi"},
+        }));
+        for (i, (ts, tokens)) in entries.iter().enumerate() {
+            lines.push(serde_json::json!({
+                "type": "assistant", "timestamp": rfc(*ts), "uuid": format!("u-{i}"),
+                "message": {
+                    "id": format!("m-{i}"), "model": "deepseek-v4-pro",
+                    "usage": {
+                        "input_tokens": tokens.0, "output_tokens": tokens.1,
+                        "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0,
+                        "output_tokens_details": {"thinking_tokens": 0},
+                    },
+                },
+            }));
+        }
+        let text: String = lines
+            .iter()
+            .map(|l| serde_json::to_string(l).unwrap())
+            .collect::<Vec<_>>()
+            .join("\n");
+        std::fs::write(proj.join(format!("{sid}.jsonl")), format!("{text}\n")).unwrap();
     }
 
     // ---- 真实库对账（TC-TK-06；手动跑：--ignored --nocapture） ----
@@ -2446,21 +2839,22 @@ mod tests {
         // ours：by day / by session
         let day_rows = query_stats(&dir, from, to, "day").unwrap();
         let sess_rows = query_stats(&dir, from, to, "session").unwrap();
-        // reference：直接执行与 M5 实现同口径的原始 SQL（另一条只读连接）——
-        // GROUP BY day, agent, model_id（agent 恒单值 'opencode'，列+分组保持
-        // 形状统一）+ mock 过滤（S4：providerID='mock' 探测行全查询过滤）。
-        //〔v2-m5 移交 TEST_BUG，M6 顺手修：原参考 SQL 仍 DESIGN §4.1 旧口径
-        //   （GROUP BY day,project_id + 全量 session），与 M5 实现不对账。〕
+        // reference：直接执行与实现同口径的原始 SQL（另一条只读连接）。
+        // §14：by day 为 message 级口径——按消息 time_created 归天 + data JSON
+        // 提取 + 行筛选（json_valid 守卫 / $.tokens 存在 / mock 过滤）；by session
+        // 仍为 session 表会话累计口径（M5 起 GROUP BY day,agent,model_id 的
+        // 形状统一与 mock 过滤 S4 延续）。
         let conn = open_readonly(&path).unwrap();
         let (ref_day_cost, ref_day_cnt): (f64, i64) = conn
             .query_row(
                 "SELECT IFNULL(SUM(cost),0), IFNULL(COUNT(*),0) FROM (\
-                 SELECT strftime('%Y-%m-%d', time_updated/1000,'unixepoch','localtime') AS day, \
+                 SELECT strftime('%Y-%m-%d', time_created/1000,'unixepoch','localtime') AS day, \
                  'opencode' AS agent, \
-                 CASE WHEN json_valid(model) THEN json_extract(model,'$.id') END AS model_id, \
-                 SUM(cost) AS cost FROM session \
-                 WHERE time_updated >= ?1 AND time_updated <= ?2 \
-                 AND COALESCE(CASE WHEN json_valid(model) THEN json_extract(model,'$.providerID') END,'') <> 'mock' \
+                 json_extract(data,'$.modelID') AS model_id, \
+                 SUM(COALESCE(json_extract(data,'$.cost'),0.0)) AS cost FROM message \
+                 WHERE time_created >= ?1 AND time_created <= ?2 \
+                 AND CASE WHEN json_valid(data) THEN json_extract(data,'$.tokens') IS NOT NULL \
+                      AND COALESCE(json_extract(data,'$.providerID'),'') <> 'mock' ELSE 0 END \
                  GROUP BY day, agent, model_id)",
                 [from, to],
                 |r| Ok((r.get(0)?, r.get(1)?)),

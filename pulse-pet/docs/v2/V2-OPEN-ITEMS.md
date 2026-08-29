@@ -5,7 +5,7 @@
 > 性质：两项 **Windows 特有缺陷**，根因已定位、修复方案已裁定（R1-R5，见 [§三](#三修复任务清单r1r5统一实施)）。
 > **状态（2026-08-27 闭环）**：R1-R5 **已修复并随 `pulse-pet-v0.2.1` 发布**——实施 commit `6f9e0be`（R1-R4）/ `9e609d6`（R5）/ `acc12b3`（本文件）/ `f2cf13e`（版本 bump 四件套），tag `pulse-pet-v0.2.1`（CI run 33071206433 双矩阵 success，安装包挂 draft Release）。测试基线全绿（`cargo test` 320+3 钉子 / `npm test` 409 / `tsc --noEmit`），committer 评审 APPROVED（P0/P1=0，三条 P3 加固已落地）。**Windows release 实机三场景验证通过（2026-08-27，v0.2.1，§四）**，#19 / #20 可闭环。
 > 共同背景：与 v1 issue #9 同源——Windows 上 WebView2 环境创建异步、主线程泵消息期间页面已加载执行（GUI 子系统 + 控制台子进程交互）的时序盲区；v1 里程碑"Windows 实机验证后移"的欠账在 v2 实机使用中集中显性化。macOS 开发机均无法复现。
-> 构成说明（2026-08-27 补充）：§一~§四为 issue #19/#20 专项记录（**已闭环**）；§五起为 **v2 六里程碑（M1~M6）工作流检查点遗留事项汇总**（supervised-coding 2026-08-27 归档，来源 `.opencode/workflows/task-pulsepet-v2-m1~m6.md`），清偿后回写勾选并注来源任务 ID 与日期；**§十一为 2026-08-28 新增**：宠物大小三档 + 视觉归一化特性（设计 + 实施同日完成，含 en 右键菜单裁剪与 atlas 短缓冲两处存量缺陷清偿，见 §11.5 与 `docs/v2/pet-size.md`）；**§十二为 2026-08-28 二次新增**：v2 收尾用户反馈批次 F1~F16（气泡汇总 / Token 页柱图与文案 / 例程页全宽·notify 徽标·todo 类别列·todo 烟花勾选项·日期时间控件规格·历史统计区移除 / 设置页控件形态·接入卡缩高·命名统一·宠物下拉字样·二轮微调 / Windows 托盘与任务栏图标资产；**2026-08-28 用户批准后同日全部实施**，F16 为实施后目验二轮微调，见 §12.4）；**§十三为 2026-08-28 三次新增**：新增第三 agent 接入成本审计（预研备查——约 12 处老代码必改 + agent registry 收敛机会，是否立项待决策）。
+> 构成说明（2026-08-27 补充）：§一~§四为 issue #19/#20 专项记录（**已闭环**）；§五起为 **v2 六里程碑（M1~M6）工作流检查点遗留事项汇总**（supervised-coding 2026-08-27 归档，来源 `.opencode/workflows/task-pulsepet-v2-m1~m6.md`），清偿后回写勾选并注来源任务 ID 与日期；**§十一为 2026-08-28 新增**：宠物大小三档 + 视觉归一化特性（设计 + 实施同日完成，含 en 右键菜单裁剪与 atlas 短缓冲两处存量缺陷清偿，见 §11.5 与 `docs/v2/pet-size.md`）；**§十二为 2026-08-28 二次新增**：v2 收尾用户反馈批次 F1~F16（气泡汇总 / Token 页柱图与文案 / 例程页全宽·notify 徽标·todo 类别列·todo 烟花勾选项·日期时间控件规格·历史统计区移除 / 设置页控件形态·接入卡缩高·命名统一·宠物下拉字样·二轮微调 / Windows 托盘与任务栏图标资产；**2026-08-28 用户批准后同日全部实施**，F16 为实施后目验二轮微调，见 §12.4）；**§十三为 2026-08-28 三次新增**：新增第三 agent 接入成本审计（预研备查——约 12 处老代码必改 + agent registry 收敛机会，是否立项待决策）；**§十四为 2026-08-29 新增**：token 统计跨天会话归属缺陷（聚合粒度 session 级 → 跨天会话 token 全部归到最后活跃日；修正方案已与用户对齐——day/week/range/today 四类聚合下沉 message 级按消息时间归天，**同日实施完毕**，见 §14.5 实施记录）。
 
 ---
 
@@ -427,6 +427,108 @@ Rust 定义 `AgentSpec { id, short_name, bundled_hook, install/uninstall/status,
 
 ---
 
+## 十四、token 统计跨天会话归属缺陷：聚合粒度 session 级（2026-08-29，**已实施同日**）
+
+> 来源：用户日常使用疑问（2026-08-29）——「跨天会话在第二天有新对话内容时，统计的 token 是整个会话的还是第二天的？」源码级诊断确认：**是整个会话的累计值**。用户判定该行为与「按天统计」预期不符（方案设计问题），修正方案已对齐并获两项裁定（见 §14.2）。
+> 状态：**✅ 已实施（2026-08-29 同日完成）**——三项实施微决策经用户确认（message 行筛选 / CC 桶 model 归属 / ts 缺失兜底，见 §14.5）；基线 `cargo test` **366 passed + 3 ignored**（+9 新钉）/ `npm test` 447（前端零改动原样通过 = IPC 契约不变验证）/ `npx tsc --noEmit` 0 错 / `cargo build` 零警告；本机真实库只读对账通过（by day message 级 vs 参考 SQL：30d 67 行 / $12.2916 双侧零误差）。
+
+### 14.1 问题与根因（源码级证据链）
+
+**症状**：一个会话跨天使用（第一天聊了一部分、第二天继续），第二天的「今日 token」= **整个会话的累计值（含第一天）**；且第一天的统计**完全丢失**该会话的贡献。
+
+**根因：两个数据源的聚合粒度都是 session 行**（累计值 + 单点时间 `time_updated`），没有按 message 时间切片：
+
+| 源 | 证据 |
+|---|---|
+| opencode（SQLite） | `session` 表 `tokens_*`/`cost` 为**会话累计值**（逐 message 增量写入更新该行，TC-TK-11 实测留痕 `token_stats.rs:17-26`）；今日聚合 `query_today_on`（`token_stats.rs:514`）与 day/week/range 共用的 `query_grouped`（`:357`）均 `WHERE time_updated ∈ 窗口` 后 `SUM(tokens_*)` 整行——跨天会话第二天有新对话 → `time_updated` 推进到今天 → 整行进今天 |
+| Claude Code（transcript） | 每个会话 jsonl 聚合为一行 `CcSessionRow`（`transcript.rs:258` finalize 全部 assistant usage 求和）；`today_stats_dual`（`token_stats.rs:847`）与 `cc_group_rows`（`:684`）同样只看 `time_updated` 是否落在窗口，命中整行进桶 |
+
+**衍生影响（同一根因）**：
+
+1. **第一天贡献消失**：day 维度按 `strftime(time_updated)` 分组（`token_stats.rs:329`），整个会话 token 全部归到**最后活跃那天**；
+2. **窗口漏计**：7d/30d/自定义窗口若不含最后活跃日，该会话**完全不计入**；
+3. 气泡「本期会话」数字同理是全会话累计（`format_session_report`）——但该处语义本就是「本会话共消耗」，**不属于缺陷**（保持不动）。
+
+### 14.2 数据源核实与决策记录（2026-08-29）
+
+**两个源都有 message 级明细可用**（本机真实数据只读核实）：
+
+- opencode.db `message` 表：`data` JSON 含 `$.tokens`（input/output/reasoning/cache.read/cache.write）、`$.cost`、`$.modelID`、`$.providerID`，每条带 `time_created`（毫秒）；mock 过滤与模型归并可全部在 message 级完成，**无需 JOIN session**；
+- CC jsonl：每条 assistant 行自带 `timestamp` + `usage` 五维；现有去重键（`message.id` → uuid 兜底，S3 末条覆盖）已具备，按行 timestamp 归天即可；
+- **一致性实测**（2026-08-29，本机真实库抽样 5 个会话）：message 求和与 session 累计值**逐字段完全一致**（input/output/cache_read/cost 全对上）→ message 级聚合与现有口径等价，只是粒度更细，可安全替换。
+
+**用户裁定（2026-08-29）**：
+
+| 项 | 决定 |
+|---|---|
+| 旧版 opencode 无 message 表 / data 缺 tokens 结构 | **严格报错** `schema-mismatch`（提示升级 pulse-pet），与现有 session 列缺失处理一致，不静默口径漂移；现有 opencode 1.18.x 均有 message 表，实际影响极小 |
+| range 视图（自定义跨度按模型聚合） | **一并下沉** message 级（窗口不含最后活跃日时按天只计窗口内消息），与 day/week/today 口径统一 |
+
+### 14.3 修正方案（定稿）
+
+**原则**：day/week/range/today 四类聚合下沉到 message 级，按**消息产生时间**归天；by-session 视图保持会话累计不变（该语义本来正确）。
+
+**1. opencode 源（`token_stats.rs`）**
+
+- 新增 `MESSAGE_REQUIRED_COLUMNS`（id/session_id/time_created/data）+ `check_message_schema`；`open_checked` 同时校验 session、message 两表，message 缺失 → `schema-mismatch`（§14.2 裁定）；
+- `query_grouped`（day/week/range 共用）改：`FROM message`，`strftime(m.time_created/1000,'unixepoch','localtime')` 归天，分组 `day, model_id, agent`；
+- `query_today_on` 改：`WHERE time_created >= 今日0点 AND <= now`；
+- 5 维 tokens/cost 用 `COALESCE(json_extract(data,'$.tokens.X'),0)` 提取（`json_valid` 守卫，损坏 data → 0 保留行，沿 MOCK_FILTER_SQL 同款守卫先例）；mock 过滤用 `$.providerID`、model 归并用 **message 级 `$.modelID`**（会话中途换模型也能分对，较现状 session.model 更准）；
+- **不动**：`query_by_session`、`query_current_session`、气泡链路（`should_report`/`format_session_report`）。
+
+**2. CC 源（`transcript.rs`）**
+
+- `SessionState.usage_by_key` 值扩展为 `(usage5, 该行 timestamp)`（去重语义不变：同 message.id 末条覆盖、只计一次）；finalize 按 `local_day_label(ts)` 分桶，`CcSessionRow` 新增 `by_day` 明细；
+- `today_stats_dual` / `cc_group_rows`：today/day/week/range 改按分桶明细聚合（替换「整行进最后活跃日桶」）；session 视图与 `last_assistant_ts` 护栏不变；
+- 增量解析路径（CacheEntry 方案 α append）同步携带 timestamp。
+
+**3. 不变项（契约与口径）**
+
+- Tauri IPC 契约（命令名/参数/返回体）、`TokenRow`/`TodayStats` 形状、前端代码**全部零改动**（day 标签口径变准而已）；
+- 口径不变：reasoning 不计、CC cost=0、mock 过滤、气泡「本期会话」= 会话累计、前端 30s 缓存；
+- 性能：message 表个人量级（几万行）窗口全扫毫秒级，只读库不建索引。
+
+### 14.4 实施清单与验收
+
+- Rust 测试新增跨天夹具：opencode 同一 session 两条 message 不同天 → 两天各得各的；昨日 message 不进 today；7d 窗口不含最后活跃日仍收到前几天量；mock 过滤（message 级 providerID）/ 损坏 JSON 守卫 / message 表缺失报 schema-mismatch；
+- CC 测试：单 jsonl 跨天两行 assistant → `by_day` 两桶，去重不重复计；现有 `query_by_day_*` 等夹具从 session 行改为 session+message 双插；
+- 前端测试零改动；文档联动：V2-DESIGN §3.2/§5.3 口径修订（day 归属 = 消息产生时间）+ V2-TEST-CASES TC-TK-06/07、TC-M3 增补跨天用例；
+- 验收基线：`cargo test` + `npm test` + `npx tsc --noEmit` 全绿；本机真实库跑修正后聚合 SQL 与现网今日数值对比复核。
+- 工作量预估：Rust ~200 行 + 测试 ~150 行，半天内。
+
+### 14.5 实施记录（2026-08-29）
+
+> 实施前两项校准 + 三项微决策（用户确认按默认）+ 实施偏差留痕。
+
+**实施校准（相对 §14.1/§14.3 文字）**：
+
+1. §14.1 所写 `today_stats_dual`（token_stats.rs:847）已被 registry-P3（2026-08-29 早间合入）泛化为 N 源编排——实施落点为 `today_source_stats` CC 分支（原 :905-935）与 `query_source_rows` CC 分支 + `cc_group_rows`，编排层/MergeAcc/三态判据零改动（**agent-registry 架构未受影响，改动全部收敛于单源实现内部**，见 agent-registry.md 文末补充说明）；
+2. 真实 message 表另有 `time_updated` 列（白名单按定稿只校验 id/session_id/time_created/data）；`$.tokens` 内层为 `{input, output, reasoning, cache: {read, write}}`（cache 嵌套，实施前真实库核实）；
+3. §14.4 文档联动所指「V2-TEST-CASES TC-TK-06/07」——TC-TK-06/07 属 docs/v1 冻结线（AGENTS.md 约定不回改），实际落地为 V2-TEST-CASES **TC-M3-18** 并以「v1 TC-TK-06/07 语义扩展」括注承接（文档维护轮惯例，committer P3-3 澄清）。
+
+**微决策（默认方案获用户认可 2026-08-29）**：
+
+| # | 决策 | 落点 |
+|---|---|---|
+| 1 | message 行筛选 = `json_valid(data) AND $.tokens IS NOT NULL`（实测 assistant 行 100% 带 tokens / user 行 0% 带——等价只取 assistant 行，防 user 行零值组污染图表；损坏 data 沿 json_valid 守卫先例不炸不入聚合） | `MESSAGE_ROW_FILTER_SQL`（CASE WHEN 形态保证求值序） |
+| 2 | CC by_day 桶的 model 归属保持**会话级**（末条 assistant 的 model，同今天）——只改时间归属不改模型归属（§14.3 CC 条目未要求 message 级 model；opencode 侧则为 message 级 `$.modelID`，较定稿更准） | `cc_group_rows` 聚合键用 `r.model_id` |
+| 3 | CC assistant 行缺 timestamp（真实数据不出现）→ 兜底归会话 `time_updated` 日；两者皆无 → 不进 by_day（仍计会话总量） | `finalize_state` 分桶 |
+
+**实施落点**：
+
+- **transcript.rs**：`usage_by_key` 值 `Usage5` → `(Usage5, Option<i64> ts)`（行 ts 在 feed_lines 顶部解析一次复用，顺带消原 assistant 分支的二次 timestamp 解析）；`finalize_state` 按 `local_day_label(ts)` 分桶（BTreeMap 升序确定性）产出 `CcSessionRow.by_day: Vec<CcDayUsage {day, first_ts, 五维}>`；增量路径（方案 α）随值类型扩展自动继承（`alpha_incremental_matches_full_reparse` 逐字段对账自动覆盖 by_day，无需新增增量测试）。
+- **token_stats.rs（CC 消费端）**：`cc_group_rows` 签名改收 `&[CcSessionRow]`，day/week/range 改遍历 by_day 桶（窗口过滤在桶级 `first_ts`——custom 窗口双侧按天对齐故精确；preset 窗口 to=now 下桶内消息时刻不可能晚于已落盘解析时刻、同样精确〔tester P3-2 措辞校准：非笼统"按天对齐"〕；**去掉整行 time_updated 预过滤** = 窗口漏计修复）；today CC 分支改按桶 `day == local_day_label(today_start)` 累加；session 视图与 `build_cc_idle_report` 不动。
+- **token_stats.rs（opencode 源）**：`MESSAGE_REQUIRED_COLUMNS` + `check_message_schema`（与 session 校验共用 `check_table_columns` 助手）入 `open_checked`；`query_grouped` 改 `FROM message` / `time_created` 过滤归天 / 五维+cost 走 `COALESCE(json_extract(data,'$.…'),0)`；`query_today_on` 同款；三个包装函数 day/week 表达式换 `time_created`。`query_by_session`/`query_current_session`/气泡链路（`should_report`/`format_session_report`）零改动。
+- **测试**：夹具 `make_db` 全局补建 message 表 + `insert_message(_model)`/`message_data` 助手（data JSON 照真实形态含嵌套 cache）；既有 grouped/today/dual 系用例改「session+message 双插」或转 message 夹具；新钉 9 枚（token_stats.rs 6〔其中 CC 消费钉 1〕+ transcript.rs 3，清单见 TC-M3-18）；`real_db_reconciliation_manual` 参考 SQL 同步 message 级。
+
+**验证**：cargo 366 passed + 3 ignored / npm 447 原样 / tsc 0 错 / build 零警告；真实库对账 by day 67 行 $12.2916 vs 参考 SQL 零误差、by session 299 行零误差；真实双源冒烟 day 35 行（message 级跨天拆分天数自然多于原 session 级）、today/degraded 正常。**用户目验**（日常使用顺带）：跨天会话次日的「今日 token」不再包含前一日用量；Token 页 day 视图跨天会话逐日拆柱。
+
+**tester 验证轮（2026-08-29）**：**PASS（0 P1 / 0 P2）**——基线 4 项 / TC-M3-18 钉子 9/9 真钉核对 / 白盒 7 项（`effective_ts.unwrap` 安全性、BTreeMap 确定性、week 标签同日不变性含跨年 oracle 实测、CASE 求值序、增量等价、DST 退化路径）/ 真实库只读 4 项（对账零误差、degraded=None、message≤session 三维、mock 零泄漏）；不动项经 diff hunk 核对确认零改动。2 项 P3 当日清偿：**P3-1** `CcDayUsage.first_ts` 取 HashMap 迭代首遇值（值级不确定，未来同日多 ts 夹具会 flake）→ 改取桶内最早消息时刻 + 新钉 `s14_same_day_bucket_first_ts_is_earliest`；**P3-2** 「前端窗口按天对齐」注释表述过宽（仅 custom 双侧成立）→ 措辞收窄（custom 天对齐精确；preset to=now 下桶内时刻不可能晚于解析时刻，同样精确），代码注释 + V2-DESIGN §5.3 + 本节三处同步。清偿后基线 cargo **367 passed + 3 ignored**。**复测轮（同日，task_id 回调）**：2 项 P3 清偿质量合格（min 逻辑/新钉真实/三处文档到位/回归面干净，`alpha` 增量对账在 min 语义下确定性等价）；复测新提 **P3-3**（`first_ts` 字段级文档残留「首条」与笼统「按天对齐」措辞，全仓唯一未收窄处）——当场顺手清偿（transcript.rs:74），最终基线 cargo 367+3 / build 零警告不变。
+
+**committer 审查轮（2026-08-29）**：**APPROVED（0 P1 / 0 P2）**——语义正确性与 §14.3 定稿/三微决策逐条核对一致（含四视图桶级过滤一致性、老行为→新行为逐情形推演无丢量、增量整结构体对账覆盖 by_day、TranscriptCache 纯内存态无跨版本序列化风险）；不动项逐 hunk 核对全零触碰（by-session/气泡链路/N 源编排/IPC 契约与前端）；npm 447 原样 + 形状未动 = 契约不变充分证据。P3×5：**P3-1**（by_day 字段文档「总量=桶和」缺例外括注）/**P3-2**（§14.5「9 枚」括号枚举 6+1+3 表面矛盾）/**P3-3**（§14.4「TC-TK-06/07」计划措辞歧义）三项纯文档当场清偿；**P3-4**（旧库无 message 表时气泡链路 `.ok()?` 吞错静默消失——属「严格报错」裁定接受的边界，面板有升级提示，与 session 白名单吞错同型；如需完备后续可加 plog 留痕）/**P3-5**（进程内 TranscriptCache 缓存 CC 日标签，运行中热切换系统时区会短暂双源不一致、重启自愈；不建议为此改缓存结构）两项**记录备查不改**。交付结论：**可安全合入 develop**；提交边界提醒——工作区另有仓级 `.opencode/` 编排文件改动与 `images/` 未跟踪目录，与本轮 pulse-pet 6 文件须分开提交。
+
+---
+
 ## 附：清偿记录
 
 （清偿后回写：日期 + 来源任务 ID + 去向。已有示例：§6.2-5 TC-M4-18 核心面 2026-08-27 随 v0.2.1 §四场景 2 验证；§7-7 或已随 v0.2.1 R2 顺手消化，打磨轮核对）
@@ -434,3 +536,4 @@ Rust 定义 `AgentSpec { id, short_name, bundled_hook, install/uninstall/status,
 - [x] **§8-1 文档滞后（v2-m6 P3-②）**：✅ 已清偿 2026-08-27（文档维护轮，supervised-coding 执行）——V2-DESIGN §6.0/§6.2/§6.3/§6.4 共 7 处 + V2-TEST-CASES TC-M6-04/TC-M6-06-4 共 4 处对齐"右键菜单子行"口径，修订注记引用 §3.4 后裁定；改动在工作区待入库（与 V2-OPEN-ITEMS 本文件 §五~§十 一并提交）
 - [x] **§十一 宠物大小三档 + 视觉归一化**：✅ 已实施 2026-08-28（同日设计 + 实施）——Rust `pet_size.rs`/`windows.rs::apply_pet_size`/`atlas.rs` idle 度量 + 前端 `pet-scale.ts`/`size-bridge.ts`/档位化渲染/设置页分段控件；公式两处实施修订（帧上限替代全表 bbox，见 pet-size.md §3.4）；附带清偿 §11.5 en 菜单裁剪（文案缩短 + 防御 CSS）与 atlas 兜底短缓冲越界隐患（防御式访问，保持短以维持占位猫降级——committer P2-1 裁定）；基线 cargo 346 passed+3 ignored / npm 433 / tsc 0 错；dev 冒烟通过（large 档窗口 280×280 实测）+ committer 审查 APPROVED（六项审查意见当日落地）。完整留痕：`docs/v2/pet-size.md`；用户目验 TC-SZ-01~09 日常顺带
 - [x] **§十二 v2 收尾用户反馈批次 F1~F15**：✅ 已实施 2026-08-28（用户批准后同日）——F4 标题字号（先行）+ F1 气泡单总量 / F2 柱图三改（补零+柱宽上限+标签居中）/ F3 费用标注 / F5 例程页全宽 / F6 设置页控件形态统一（下拉+卡片行，theme-seg 清退）/ F7 接入卡缩高+备份提示去重 / F8 接入命名按宿主名 / F9 宠物下拉字样 / F10 notify 徽标 🔔 / F11 todo 类别列 / F12 todo 烟花勾选项（含 todoHint 修正）/ F13 datetime-local 控件基线 / F14 历史统计区移除（含 Rust `reminders_stats` 命令清退）/ F15 图标资产重制（紧裁 96% 满幅 + `tauri icon` 全套）。基线 cargo 346+3 ignored / npm 439 / tsc 0 错 / build 通过；逐项落点见 §12.4。用户目验项见 §12.3；F15 任务栏图标需 Windows release 实机。改动在工作区待入库
+- [x] **§十四 token 统计跨天会话归属缺陷**：✅ 已实施 2026-08-29（方案定稿同日）——opencode 源四类聚合下沉 message 级（`MESSAGE_ROW_FILTER_SQL`/`MESSAGE_MODEL_ID_SQL`/`check_message_schema` + `query_grouped`/`query_today_on` 改 `FROM message` 按 `time_created` 归天）+ CC 源 by_day 分桶（`usage_by_key` 值携 ts → `CcSessionRow.by_day` → `cc_group_rows`/today 桶级聚合）；by-session 视图与气泡会话累计语义、agent-registry N 源编排架构均不动。基线 cargo 366 passed+3 ignored（+9 钉）/ npm 447 原样 / tsc 0 错；真实库对账零误差。完整留痕：§14.5；用户目验 = 跨天会话次日「今日 token」不再含前一日用量、day 视图逐日拆柱

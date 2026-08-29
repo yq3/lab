@@ -736,6 +736,8 @@ pub struct TokenRow {
 | 全部查询（含 `query_current_session` idle 汇报链路） | 追加 `AND COALESCE(json_extract(model,'$.providerID'),'') <> 'mock'`（S4 裁定；mock 行 token 本为 0，统一口径防漂移） |
 | `SESSION_REQUIRED_COLUMNS` | + `model`、`title`（缺失 → 既有 schema-mismatch 错误码路径） |
 
+> **§14 修订（2026-08-29，V2-OPEN-ITEMS §十四）**：day/week/range/today 四类聚合已**下沉 message 级**——`FROM message`、按消息 `time_created` 归天/过滤（**day 归属 = 消息产生时间**，跨天会话每天各得各的；原 session 级行为整会话归最后活跃日且首日贡献消失）；五维/cost/model 从 `data` JSON 提取（`$.tokens.{input,output,reasoning,cache.read,cache.write}` / `$.cost` / `$.modelID`，会话中途换模型也能分对）；行筛选 `json_valid(data) AND $.tokens IS NOT NULL`（实测 user 行 0% 带 tokens——等价只取 assistant 行，防零值组）+ mock 过滤（`$.providerID`）。`MESSAGE_REQUIRED_COLUMNS`（id/session_id/time_created/data）入 open_checked 白名单，缺表/缺列 → schema-mismatch（用户裁定：严格报错不静默口径漂移）。by-session 视图与气泡「本期会话」保持 session 表会话累计语义不动。
+
 project 表缺失的场景不做白名单防御（LEFT JOIN 对不存在表直接 SQL 报错 → 既有 query 错误码）；个人工具 opencode 库长期有 project 表，记录于风险 R2。
 
 **新命令 `token_stats_today`**：
@@ -1313,6 +1315,8 @@ parse_session(path) → Option<CcSessionRow>          // 单文件解析（坏�
 | `query_by_range` | CC 侧按 `agent × model_id` 聚合（无 day 维，与 opencode range 行形状一致——P3-6 明示） |
 | `token_stats_today` | 双源合计（opencode SQL 当日聚合 + CC 缓存当日过滤求和）；M3 三层快捷查看（悬停卡/菜单/idle 追加段）自动覆盖 CC 用量 |
 | `build_idle_report` | 不动（opencode 专用）；CC 汇报走新函数（§5.4） |
+
+> **§14 修订（2026-08-29，V2-OPEN-ITEMS §十四）**：CC 侧 day/week/range/today 同步下沉 message 级——`transcript.rs` 的 `SessionState.usage_by_key` 值扩展为 `(usage5, 行 timestamp)`（去重语义不变），`finalize_state` 按 `local_day_label(ts)` 分桶产出 `CcSessionRow.by_day` 明细（ts 缺失兜底归会话 time_updated 日；桶 `first_ts` 取桶内最早消息时刻）；`cc_group_rows` day/week/range 与 today 改按桶聚合（窗口过滤在桶级 first_ts——custom 窗口双侧按天对齐故精确，preset 窗口 to=now 下桶内消息时刻不可能晚于已落盘解析时刻、同样精确；**不再以会话 time_updated 整行进/出窗**，跨天会话首日贡献不再消失/窗口漏计修复）。model 归属保持会话级（末条 assistant 的 model——只改时间归属）；session 视图与 `last_assistant_ts` 护栏不变；增量解析路径（方案 α）随 SessionState 值类型扩展自动继承（`alpha_incremental_matches_full_reparse` 逐字段对账自动覆盖 by_day）。
 
 **前端聚合影响**：M3 的 buckets/KPI 在 grouped 行上 SUM——双源合并后自动是全 agent 合计；模型 chip 来源 distinct(model_id) 自动含 CC 模型（`deepseek-v4-pro` 等双源同模型自然归并——模型维度跨 agent 合法，与 GLM 平台心智一致）。
 
