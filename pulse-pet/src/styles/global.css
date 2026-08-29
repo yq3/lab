@@ -519,6 +519,13 @@ select {
   cursor: wait;
 }
 
+/* §十七（2026-08-29 用户目验）：选择宠物下拉与其下「宠物大小」标签之间原
+ * 间距 0（其他下拉后跟 h2 区块标题自带 26px 上边距，唯此处 select 直贴
+ * label）——兄弟选择器仅命中此一处，加 10px 呼吸感（量级经用户调定） */
+.panel-settings select + .settings-pet-label {
+  margin-top: 10px;
+}
+
 .settings-notice {
   margin-top: 12px;
   padding: 8px 12px;
