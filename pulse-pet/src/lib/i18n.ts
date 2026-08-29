@@ -64,7 +64,9 @@ const zh: Dict = {
   "token.sessions.updated": "更新时间",
   "token.project.global": "全局",
   "token.project.unknown": "（未知项目）",
-  "token.error.noDatabase": "数据库未运行/未初始化：未检测到 opencode 数据库（opencode.db / opencode-canary.db）。",
+  // P3 口径 A′（agent-registry §6.4 规则 2）：硬报错仅当全部源无数据且无一源
+  // Ok——文案 N 源中性化（原「未检测到 opencode 数据库」措辞重写）
+  "token.error.noDatabase": "未检测到任何 agent 用量数据（被监测的 agent 尚未安装或从未使用）。",
   "token.error.legacyStorage": "检测到旧版 opencode 存储格式（storage/session/*.json）：请升级 opencode 后使用。",
   "token.error.schemaMismatch": "opencode.db schema 不兼容（{msg}）",
   "token.error.query": "查询失败：{msg}",
@@ -77,8 +79,9 @@ const zh: Dict = {
   // §十二 F3（2026-08-28）：token.costOpencodeOnly 费用口径标注键清退（用户裁定）
   // v2 M5（TC-M5-07）：例程会话 ⚡ 徽标 title 提示（零 schema 改动）
   "token.taskBadge": "定时任务例程",
-  // v2 M5（C1/N-4）：degraded 细横幅（仅 panel；opencode 源不可用 × CC 有数据）
-  "token.degraded": "opencode 源不可用：仅显示 Claude Code 数据",
+  // P3 口径 A′（agent-registry §6.4 规则 3）：degraded 细横幅收窄为主源 opencode
+  // Failed（在但坏）× 其余源有数据（仅 panel；Missing 不触发——CC-only 干净）
+  "token.degraded": "opencode 数据源异常：仅显示其它 agent 数据",
   "token.hoverAgent": "今日 agent 分布",
 
   // ---- 提醒页 ----
@@ -422,8 +425,10 @@ const en: Dict = {
   "token.sessions.updated": "Updated",
   "token.project.global": "Global",
   "token.project.unknown": "(unknown project)",
+  // P3 口径 A′（agent-registry §6.4 规则 2）：硬报错仅当全部源无数据且无一源
+  // Ok——wording kept source-neutral (was opencode-specific)
   "token.error.noDatabase":
-    "opencode database not running/initialized: opencode.db / opencode-canary.db not found.",
+    "No agent usage data detected (monitored agents not installed or never used).",
   "token.error.legacyStorage":
     "Legacy opencode storage detected (storage/session/*.json): please upgrade opencode.",
   "token.error.schemaMismatch": "opencode.db schema incompatible ({msg})",
@@ -436,8 +441,9 @@ const en: Dict = {
   // §十二 F3（2026-08-28）：token.costOpencodeOnly 费用口径标注键清退（用户裁定）
   // v2 M5（TC-M5-07）：例程会话 ⚡ 徽标 title 提示（零 schema 改动）
   "token.taskBadge": "Scheduled routine",
-  // v2 M5（C1/N-4）：degraded 细横幅（仅 panel；opencode 源不可用 × CC 有数据）
-  "token.degraded": "opencode source unavailable: showing Claude Code data only",
+  // P3 口径 A′（agent-registry §6.4 规则 3）：degraded banner narrowed to primary
+  // source opencode Failed × other sources have data (panel only; Missing silent)
+  "token.degraded": "opencode data source error: showing other agents' data only",
   "token.hoverAgent": "Today's tokens by agent",
 
   "reminders.needApp": "Reminders are only available inside the PulsePet app (Tauri)",
