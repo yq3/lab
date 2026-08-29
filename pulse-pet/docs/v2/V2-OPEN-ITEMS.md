@@ -5,7 +5,7 @@
 > 性质：两项 **Windows 特有缺陷**，根因已定位、修复方案已裁定（R1-R5，见 [§三](#三修复任务清单r1r5统一实施)）。
 > **状态（2026-08-27 闭环）**：R1-R5 **已修复并随 `pulse-pet-v0.2.1` 发布**——实施 commit `6f9e0be`（R1-R4）/ `9e609d6`（R5）/ `acc12b3`（本文件）/ `f2cf13e`（版本 bump 四件套），tag `pulse-pet-v0.2.1`（CI run 33071206433 双矩阵 success，安装包挂 draft Release）。测试基线全绿（`cargo test` 320+3 钉子 / `npm test` 409 / `tsc --noEmit`），committer 评审 APPROVED（P0/P1=0，三条 P3 加固已落地）。**Windows release 实机三场景验证通过（2026-08-27，v0.2.1，§四）**，#19 / #20 可闭环。
 > 共同背景：与 v1 issue #9 同源——Windows 上 WebView2 环境创建异步、主线程泵消息期间页面已加载执行（GUI 子系统 + 控制台子进程交互）的时序盲区；v1 里程碑"Windows 实机验证后移"的欠账在 v2 实机使用中集中显性化。macOS 开发机均无法复现。
-> 构成说明（2026-08-27 补充）：§一~§四为 issue #19/#20 专项记录（**已闭环**）；§五起为 **v2 六里程碑（M1~M6）工作流检查点遗留事项汇总**（supervised-coding 2026-08-27 归档，来源 `.opencode/workflows/task-pulsepet-v2-m1~m6.md`），清偿后回写勾选并注来源任务 ID 与日期；**§十一为 2026-08-28 新增**：宠物大小三档 + 视觉归一化特性（设计 + 实施同日完成，含 en 右键菜单裁剪与 atlas 短缓冲两处存量缺陷清偿，见 §11.5 与 `docs/v2/pet-size.md`）；**§十二为 2026-08-28 二次新增**：v2 收尾用户反馈批次 F1~F16（气泡汇总 / Token 页柱图与文案 / 例程页全宽·notify 徽标·todo 类别列·todo 烟花勾选项·日期时间控件规格·历史统计区移除 / 设置页控件形态·接入卡缩高·命名统一·宠物下拉字样·二轮微调 / Windows 托盘与任务栏图标资产；**2026-08-28 用户批准后同日全部实施**，F16 为实施后目验二轮微调，见 §12.4）；**§十三为 2026-08-28 三次新增**：新增第三 agent 接入成本审计（预研备查——约 12 处老代码必改 + agent registry 收敛机会，是否立项待决策）；**§十四为 2026-08-29 新增**：token 统计跨天会话归属缺陷（聚合粒度 session 级 → 跨天会话 token 全部归到最后活跃日；修正方案已与用户对齐——day/week/range/today 四类聚合下沉 message 级按消息时间归天，**同日实施完毕**，见 §14.5 实施记录）。
+> 构成说明（2026-08-27 补充）：§一~§四为 issue #19/#20 专项记录（**已闭环**）；§五起为 **v2 六里程碑（M1~M6）工作流检查点遗留事项汇总**（supervised-coding 2026-08-27 归档，来源 `.opencode/workflows/task-pulsepet-v2-m1~m6.md`），清偿后回写勾选并注来源任务 ID 与日期；**§十一为 2026-08-28 新增**：宠物大小三档 + 视觉归一化特性（设计 + 实施同日完成，含 en 右键菜单裁剪与 atlas 短缓冲两处存量缺陷清偿，见 §11.5 与 `docs/v2/pet-size.md`）；**§十二为 2026-08-28 二次新增**：v2 收尾用户反馈批次 F1~F16（气泡汇总 / Token 页柱图与文案 / 例程页全宽·notify 徽标·todo 类别列·todo 烟花勾选项·日期时间控件规格·历史统计区移除 / 设置页控件形态·接入卡缩高·命名统一·宠物下拉字样·二轮微调 / Windows 托盘与任务栏图标资产；**2026-08-28 用户批准后同日全部实施**，F16 为实施后目验二轮微调，见 §12.4）；**§十三为 2026-08-28 三次新增**：新增第三 agent 接入成本审计（预研备查——约 12 处老代码必改 + agent registry 收敛机会，是否立项待决策）；**§十四为 2026-08-29 新增**：token 统计跨天会话归属缺陷（聚合粒度 session 级 → 跨天会话 token 全部归到最后活跃日；修正方案已与用户对齐——day/week/range/today 四类聚合下沉 message 级按消息时间归天，**同日实施完毕**，见 §14.5 实施记录）；**§十五为 2026-08-29 四次新增**：Windows 托盘/任务栏图标 tile 化（F15 后续——复刻 macOS dock 系统合成底观感，tile 只上 Windows 侧资产 + tray.rs 平台分叉，**同日实施完毕**，见 §十五）。
 
 ---
 
@@ -529,6 +529,26 @@ Rust 定义 `AgentSpec { id, short_name, bundled_hook, install/uninstall/status,
 
 ---
 
+## 十五、Windows 托盘/任务栏图标 tile 化（F15 后续，2026-08-29，**已实施**）
+
+> 来源：F15 实施后用户 Windows 实机复验反馈——猫占比提升后仍嫌小，想要 Mac dock 栏的观感（"猫大小合适 + 底色圆角方块"）。
+
+**根因定位**：Mac dock 的"底"不是图标资产的一部分——macOS 26 对 App 图标自动合成 Liquid Glass 圆角底（浅灰玻璃质感），Windows 任务栏/托盘**无此机制**、按像素原样显示。唯一杠杆 = 把 tile 直接画进 **Windows 侧**图标资产。
+
+**实测口径（2026-08-29 dock 截屏逐像素取样）**：系统 tile = 浅灰垂直渐变 `#e1e1e1`(顶)→`#c0c0c0`(底) + 玻璃描边 rim ~1.2% 宽（顶 `#f2f3f5`/侧 `#e2e4e7`/底 `#d2d4d6`，顶亮底暗 = 立体感来源）+ 圆角 ~22%；图标画布以 ~97.5% 贴入 tile（猫深色轮廓 bbox = tile 的 67%×79%，与源图轮廓 bbox 69%×81% 换算一致 → 即"画布原样贴入"而非"猫居中缩小"）。
+
+**决策记录（与用户逐轮对齐）**：
+1. **tile 只上 Windows 侧资产**（`icon.ico` + `Square*Logo` 全套 + `StoreLogo` + 托盘专用 `tray-tile.png`）；macOS/Linux 侧（`icon.icns`/`icon.png`/`32x32.png`/`64x64.png`/`128x128*`）**零改动**——icns 若换 tile，macOS 系统合成底会"方块套方块"。
+2. **底色裁定**：初版出两档粉色预览（耳粉 `#f4a8b8` / 玫瑰 `#e0719f`），用户均不满意并指出 Mac 实际观感是**浅灰**而非粉 → 改为按 dock 实测取色复刻（取色截图存 `images/`，复刻 vs 实拍对比图逐像素核对：猫 bbox 67%×79% 双向一致）。
+3. **托盘也换 tile**（用户选定"任务栏 + 托盘都换"；已知代价：16~24px 下猫占比稀释，粉/灰底整块醒目度补偿），macOS 菜单栏保持紧裁猫 → `tray.rs` `#[cfg(windows)]` 资产分叉（唯一代码改动）。
+4. 底板 4x 超采样抗锯齿（圆角/描边平滑），像素猫最后 NEAREST 贴上保锐利。
+
+**实施落点**：`src-tauri/icons/` 11 文件更新（ico + Square* 9 + StoreLogo）+ `tray-tile.png` 新增（32px，PIL LANCZOS）；`tray.rs:106` 附近 cfg 分叉。生成链路：PIL 脚本合成 1024 master（脚本口径见本节"实测口径"，参数化可重出）→ `tauri icon` 输出临时目录 → 只拷 Windows 侧回 `icons/`（android/ios 产物弃置）。
+
+**验证**：基线 cargo 367 passed + 3 ignored / npm 447 / tsc 0 错 / build 通过；macOS 侧资产零改动（菜单栏托盘/dock 观感不变，git status 核对无触碰）。**Windows 目验口径**：托盘 tile 可 Windows dev/release 目验；**任务栏 exe 图标需 release 打包后目验**（走 CI tag 流程，同 F15 口径）。
+
+---
+
 ## 附：清偿记录
 
 （清偿后回写：日期 + 来源任务 ID + 去向。已有示例：§6.2-5 TC-M4-18 核心面 2026-08-27 随 v0.2.1 §四场景 2 验证；§7-7 或已随 v0.2.1 R2 顺手消化，打磨轮核对）
@@ -537,3 +557,4 @@ Rust 定义 `AgentSpec { id, short_name, bundled_hook, install/uninstall/status,
 - [x] **§十一 宠物大小三档 + 视觉归一化**：✅ 已实施 2026-08-28（同日设计 + 实施）——Rust `pet_size.rs`/`windows.rs::apply_pet_size`/`atlas.rs` idle 度量 + 前端 `pet-scale.ts`/`size-bridge.ts`/档位化渲染/设置页分段控件；公式两处实施修订（帧上限替代全表 bbox，见 pet-size.md §3.4）；附带清偿 §11.5 en 菜单裁剪（文案缩短 + 防御 CSS）与 atlas 兜底短缓冲越界隐患（防御式访问，保持短以维持占位猫降级——committer P2-1 裁定）；基线 cargo 346 passed+3 ignored / npm 433 / tsc 0 错；dev 冒烟通过（large 档窗口 280×280 实测）+ committer 审查 APPROVED（六项审查意见当日落地）。完整留痕：`docs/v2/pet-size.md`；用户目验 TC-SZ-01~09 日常顺带
 - [x] **§十二 v2 收尾用户反馈批次 F1~F15**：✅ 已实施 2026-08-28（用户批准后同日）——F4 标题字号（先行）+ F1 气泡单总量 / F2 柱图三改（补零+柱宽上限+标签居中）/ F3 费用标注 / F5 例程页全宽 / F6 设置页控件形态统一（下拉+卡片行，theme-seg 清退）/ F7 接入卡缩高+备份提示去重 / F8 接入命名按宿主名 / F9 宠物下拉字样 / F10 notify 徽标 🔔 / F11 todo 类别列 / F12 todo 烟花勾选项（含 todoHint 修正）/ F13 datetime-local 控件基线 / F14 历史统计区移除（含 Rust `reminders_stats` 命令清退）/ F15 图标资产重制（紧裁 96% 满幅 + `tauri icon` 全套）。基线 cargo 346+3 ignored / npm 439 / tsc 0 错 / build 通过；逐项落点见 §12.4。用户目验项见 §12.3；F15 任务栏图标需 Windows release 实机。改动在工作区待入库
 - [x] **§十四 token 统计跨天会话归属缺陷**：✅ 已实施 2026-08-29（方案定稿同日）——opencode 源四类聚合下沉 message 级（`MESSAGE_ROW_FILTER_SQL`/`MESSAGE_MODEL_ID_SQL`/`check_message_schema` + `query_grouped`/`query_today_on` 改 `FROM message` 按 `time_created` 归天）+ CC 源 by_day 分桶（`usage_by_key` 值携 ts → `CcSessionRow.by_day` → `cc_group_rows`/today 桶级聚合）；by-session 视图与气泡会话累计语义、agent-registry N 源编排架构均不动。基线 cargo 366 passed+3 ignored（+9 钉）/ npm 447 原样 / tsc 0 错；真实库对账零误差。完整留痕：§14.5；用户目验 = 跨天会话次日「今日 token」不再含前一日用量、day 视图逐日拆柱
+- [x] **§十五 Windows 托盘/任务栏图标 tile 化**：✅ 已实施 2026-08-29（F15 后续，同日）——Windows 侧资产换"灰底玻璃 tile + 猫"（`icon.ico`/`Square*Logo` 9 件/`StoreLogo` 更新 + `tray-tile.png` 新增）+ `tray.rs` cfg 平台分叉（唯一代码改动）；macOS/Linux 侧资产零改动。底色经 dock 实测取色复刻（粉稿两版被否 → 浅灰玻璃），猫 bbox 与 dock 逐像素对齐（67%×79%）。基线 cargo 367+3 / npm 447 / tsc 0 错 / build 通过；Windows 任务栏 exe 图标待 release 实机（同 F15 口径）。完整留痕：§十五
