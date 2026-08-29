@@ -58,10 +58,11 @@ export interface TodayStats {
 }
 
 /**
- * v2 M5（C1/N-4）：双源查询返回体包装——`degraded` 仅在 opencode 源报错而
- * CC 源有数据时为非空（原始错误 "code: message"）；CC 缺席时 rows 与 M3
- * 原样一致、degraded=null（单源场景行为不变）。degraded 横幅仅 panel；
- * pet 侧（菜单/idle 追加段）静默消费合计数值、不呈现 degraded。
+ * v2 M5（C1/N-4）→ P3 口径 A′（agent-registry §6.4）：N 源查询返回体包装——
+ * `degraded` 仅在**主源 opencode Failed（在但坏）× 其余源有数据**时非空
+ * （原始错误 "code: message"）；其余源缺席时 rows 与 M3 原样一致、
+ * degraded=null。degraded 横幅仅 panel；pet 侧（菜单/idle 追加段）静默消费
+ * 合计数值、不呈现 degraded。
  */
 export interface TokenQueryResult {
   rows: TokenRow[];
@@ -149,10 +150,11 @@ export async function fetchTokenRows(
 
 /**
  * v2 M3（§3.2/§3.4）：今日 token 聚合（`token_stats_today`——from=本地今天 0 点、
- * mock 过滤、reasoning 不计均在 Rust 侧）。v2 M5：双源合计，返回体
+ * mock 过滤、reasoning 不计均在 Rust 侧）。v2 M5 双源合计 → P3 N 源合计，返回体
  * `{today, degraded}`；pet 侧消费方只取 today（静默呈现 CC-only 数值、
  * 不呈现 degraded——宠物不打扰原则）。错误经 parseStatsError 结构化透传
- * （no-database 等，菜单「—」态的来源；双源全缺才走错误路径）。
+ * （P3 口径 A′：全部源无数据且无一源 Ok 才走错误路径，文案 N 源中性化——
+ * 菜单「—」态的来源）。
  */
 export async function fetchTodayStats(): Promise<TodayQueryResult> {
   if (!isTauriRuntime()) {

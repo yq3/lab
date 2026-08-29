@@ -1,6 +1,6 @@
 # PulsePet 多 agent 接入与注册表收敛设计（agent-registry）
 
-> 状态：**方案定稿、已立项（2026-08-28 用户拍板三项决策，见 §8.0）——应用户指示暂不实施，启动待指令**
+> 状态：**已实施（P1/P2/P3 全部落地，2026-08-29）——P1/P2 见 task-pulsepet-v2-registry R1（合入 develop，PR #22 / merge 4857f81），P3 见 task-pulsepet-v2-registry-p3 R1（§8.3 实施记录）**
 > 来源：`V2-OPEN-ITEMS.md` §十三（2026-08-28 第三 agent 接入成本审计预研）+ 同日独立源码复核（基线 HEAD `e7d58ed`，v0.2.2）+ 同日**实证对照**（v2 接入第二家 Claude Code 的 M1/M5/M6 commit diff 校验清单，见 §10）+ 同日**方案讨论定稿**（总体方案 → P3/degraded 与数据源概念澄清 → 双链独立接入确认 → 三项决策 → degraded 边界场景发现与口径 A′，见 §10）+ 同日**评审轮**（reviewer subagent：NEEDS_CHANGES，2 P1 + 8 P2 + 5 P3 + 4 澄清项 → 用户裁定按评审意见修改，当日全部落档，原文收录 §11）+ 同日**测试覆盖核定**（既有测试网覆盖面核实 + 待补钉清单，§8.7）。用户判断：**以后可能对接很多个 agent**——收敛价值从"可选重构"升级为"多 agent 路线上的结构性前置"。
 > 术语约定：本文"agent"指被 PulsePet 监测的 coding agent 宿主（opencode / Claude Code / 未来的 codex 等），与 PulsePet 开发流程中的 subagent（coder/tester 等）无关。
 
@@ -14,7 +14,7 @@
 - TS 1 份：`AGENT_*` 常量 + switch（token-stats.ts）及 TokenStats / Settings 内散点三元；
 - i18n 键一组（zh/en 成对，键集合一致性测试强制同步）。
 
-其中 2 处是**静默错误级**（新 agent 被错误当作 claude-code / oc 处理，功能"看起来能跑"但数据是错的，见 §5）。多 agent 已定为长期方向，registry 收敛**已立项**：方案见 §6（定稿）、实施计划见 §8（文件级，未启动）。收敛后新增 agent 回归纯新增形态：**一个 hook 脚本 + 一套函数 + 一行注册 + i18n 键**；新 agent 接入的"事件链 / 统计链"双链切分方法论见 §7。
+其中 2 处是**静默错误级**（新 agent 被错误当作 claude-code / oc 处理，功能"看起来能跑"但数据是错的，见 §5）。多 agent 已定为长期方向，registry 收敛**已实施完毕**：方案见 §6（定稿）、实施记录见 §8（P1/P2/P3 已实施，2026-08-29）。收敛后新增 agent 回归纯新增形态：**一个 hook 脚本 + 一套函数 + 一行注册 + i18n 键**；新 agent 接入的"事件链 / 统计链"双链切分方法论见 §7。
 
 ## 2. 零改动面（已数据驱动，2026-08-28 复核确认）
 
@@ -73,7 +73,7 @@
 
 若选择"直接照清单硬改"路线，实施时这两处必须列为 P1 级验证点（新 agent id 在 doctor 与徽标两处均不得落 else）；收敛路线则由 §6.2 的查表 + 显式兜底策略根治，并以"未知 id"钉子测试把守。
 
-## 6. registry 收敛方案（2026-08-28 定稿；实施未启动）
+## 6. registry 收敛方案（2026-08-28 定稿；P1/P2/P3 已实施，见 §8 实施记录）
 
 一句话定位：把散落在 Rust 3 份 + 前端 1 份 + i18n 键里的 agent 微型注册表，收敛为**两端各一份单一事实源注册表**，14 处硬编码分支全部变查表——**纯重构、行为零变化**（P3 的 N 源化除外，其语义扩展见 §6.4），为"每接一家 = 一个脚本 + 一套函数 + 一行注册"铺路。
 
@@ -252,7 +252,7 @@ P1/P2 收敛（先行——两链的必改点大部分被注册表吸收）
 
 最大好处：**统计链的调研不确定性与 P3 的 degraded 决策都不阻塞事件链上线**——codex 能不能拿到 token 数据慢慢查，宠物先动起来。
 
-## 8. 实施计划（文件级，2026-08-28 定稿；**未启动——应用户指示暂不实施**）
+## 8. 实施计划（文件级，2026-08-28 定稿；P1/P2/P3 已实施，各节附实施记录）
 
 ### 8.0 决策记录（2026-08-28 用户拍板）
 
@@ -262,7 +262,7 @@ P1/P2 收敛（先行——两链的必改点大部分被注册表吸收）
 | 2 | degraded / 报错口径 | **A′（三态收窄版，同日二轮裁定）**：源分 Ok / Missing / Failed——报错仅当全部源无数据；横幅仅主源 Failed × 其余有数据（保留）；Missing 静默（§6.4） |
 | 3 | 分发形态 | **函数指针表**（不上 trait object；统计源 enum dispatch，§6.1） |
 | 附 | 本轮明确不动 | killswitch 粒度（§9-7 悬置）、codex 接入本身（P4 另立项，数据源调研可并行启动） |
-| 附 | 实施状态 | 方案落档即止，**启动实施待用户后续指令** |
+| 附 | 实施状态 | 方案落档即止 → **已实施**：P1/P2（task-pulsepet-v2-registry R1，2026-08-29，合入 develop）+ P3（task-pulsepet-v2-registry-p3 R1，2026-08-29）——见 §8.1/§8.2/§8.3 实施记录 |
 
 ### 8.1 P1：Rust `agents.rs` 注册表（行为零变化，~400 行净变动，多为删分支）
 
@@ -308,6 +308,8 @@ tempdir 注入单测（install_cc / install_opencode 内层函数）签名不动
 - 消费点全覆盖（评审 P2-5 补漏）：`token_stats.rs:944/:973` 两命令层、by_agent 合并、**`:894/:921` `build_cc_idle_report` 今日段**（CC idle 汇报气泡 today 段——degraded 语义沿用现状 `.ok()` 吞错静默省略，TC-M3-09-3 既有口径不变）；
 - 性能口径（评审 P2-8）：维持单 `spawn_blocking` 内**串行**逐源查询（现状 dual 即串行：SQL → transcript 扫描），源数个位数下每源 ms~几十 ms、延迟线性增长可接受——标注为已知取舍，源数上双位数再考虑 per-source 并行/缓存；
 - 测试：`m5_degraded_opencode_error_with_cc_data_degrades`（:1742，现用"无 db"构造 degraded）改用**伪造 schema 错误**构造 Failed 场景，另补 **db 文件在但打不开/损坏** 的 Failed 用例（P1-2——防"文件在但坏"误判 Missing）；补三组新钉子：Missing × 有数据 = 无横幅、oc Missing × CC Ok-0行 = 空态、oc Failed × CC Ok-0行 = 空态（P1-1）；`m5_degraded_both_missing_error_passthrough`（:1787，构造 = 无 db × CC 无目录）**语义不变仍 Err**；TC-M5-08/09 预期口径同步；i18n `token.degraded` / `token.error.noDatabase` 两文案联动；其余双源用例语义不变；新增三源用例——第三源注入形态实施时二选一：a) tempdir 伪造 transcript 源（贴真实，优先）b) `#[cfg(test)]` 假源变体。（P3 **必须新增用例而非纯回归**——三处行为变更靠新钉证明；覆盖核定与完整清单见 §8.7。）
+
+> **实施记录（P3，2026-08-29，task-pulsepet-v2-registry-p3 R1）**：已实施。cargo 基线实测 352 passed + 3 ignored → 实施后 **357 passed + 3 ignored**（§8.7.2 P3 六枚钉 = 新测试函数 ×5〔三组行为变更钉 `p3_cc_only_opencode_missing_silent` / `p3_opencode_missing_cc_ok_zero_rows_empty_state` / `p3_opencode_failed_cc_ok_zero_rows_empty_state` + "db 在但坏"钉 `p3_opencode_db_corrupt_file_failed_banner_kept` + 三源合成钉 `p3_three_source_merge_with_fake_third_transcript_source`〕+ `m5_degraded_opencode_error_with_cc_data_degrades` 改写〔改伪造 schema 错构造，非新增不计增量〕；`m5_degraded_both_missing_error_passthrough` 回归确认仍 Err 并补 legacy-storage 透传断言）；`cargo build` 零警告；npm **447 passed**（键集合不变，两文案原地重写）/ `npx tsc --noEmit` / `npm run build` 全绿。`AgentSpec` 增 `is_primary`（仅 opencode true，全表恰一个——agents.rs 自测钉住）；`query_stats_dual`/`today_stats_dual` 更名 `query_stats_all`/`today_stats_all`，N 源核心 factored 为 `query_stats_sources`/`today_stats_sources`（源清单注入）；消费点全覆盖（两命令层 / by_agent 合并 / `build_cc_idle_report` 今日段沿用 `.ok()` 吞错）。实施微调与澄清五处：① **§8.7.2 括注澄清**——「m5 改写（预期从 degraded=Some 变 None）」与 §6.4 规则 3 / TC-M5-09 预期 5 冲突：schema 错构造 = detect Some × 错 = **Failed** × CC 有数据 → 横幅保留 degraded=**Some**（按错误码判成 Missing 恰是评审 P1-2 修掉的 bug）；「Some→None」属旧「无 db」（= Missing）构造，由行为变更钉 ① 钉住——实施按 §6.4/TC-M5-09 落地。② Missing 态携带缺失原因错误（legacy-storage / no-database）供硬报错透传——TC-TK-04「请升级 opencode」可行动提示不因三态化丢失（dual 层原无钉，both_missing 用例补 legacy 断言）。③ 三源用例采形态 a（tempdir 伪造 transcript 源）经源清单注入构造；两个 transcript 源**各配独立 cache**——`TranscriptCache::plan_refresh` 的 retain 以单目录扫描为前提，共享一 cache 会互相驱逐条目（生产路径一个 CcTranscript spec 无此形态；P4 出现第二个 transcript 形态源时需 per-source cache，已在源码注记）。④ i18n `token.error.noDatabase` zh/en 重写为 N 源中性措辞、`token.degraded` 重写不再点名 Claude Code；`m6_today_by_agent_degraded_cc_only_single_row` 随行为变更 ① 更名 `m6_today_by_agent_cc_only_single_row`（degraded 断言翻转为 None）。⑤ 移交事项处置：② TokenStats `agentBadgeOf`/`agentLabel` 内联查表 → `specOf` 单次查表（text 走 `badgeOf`，P2 钉 1 覆盖消费点）；③ lib.rs「§6.1 决策 4」引用修正为「§6.1 注入式签名冻结」；⑤ 构建产物时间戳 stat 落档本轮起执行；④ V2-OPEN-ITEMS.md 按用户指示本轮不动（继续移交）。
 
 ### 8.4 收尾（随各阶段）
 

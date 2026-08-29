@@ -50,6 +50,12 @@ pub struct AgentSpec {
     /// （N 源化编排的 by_agent 归并）——同 StateEvent.project 先例定点豁免。
     #[allow(dead_code)]
     pub short_name: &'static str,
+    /// 主源标记（P3，§6.4 口径 A′ 规则 3）：degraded 横幅仅主源 **Failed**
+    /// （在但坏）× 其余有数据触发（Missing 不触发）；硬报错（全部源无数据且
+    /// 无一源 Ok）透传主源错误。当前仅 opencode true——「主源」是历史语义位
+    /// （M3/M5 时代 opencode 是唯一源），非重要性排序；全表恰一个主源
+    /// （find_known_ids_hit 钉住）。
+    pub is_primary: bool,
     /// 本地安装物形态（None = 无接入管理卡，§9-6 预留）。
     pub integration: Option<IntegrationSpec>,
     /// 统计源（idle 分流 + P3 编排的分发键）。
@@ -88,6 +94,7 @@ pub static AGENTS: &[AgentSpec] = &[
     AgentSpec {
         id: ID_OPENCODE,
         short_name: "oc",
+        is_primary: true,
         integration: Some(IntegrationSpec {
             install: install_oc,
             uninstall: uninstall_oc,
@@ -101,6 +108,7 @@ pub static AGENTS: &[AgentSpec] = &[
     AgentSpec {
         id: ID_CLAUDE_CODE,
         short_name: "cc",
+        is_primary: false,
         integration: Some(IntegrationSpec {
             install: install_cc_hook,
             uninstall: uninstall_cc_hook,
@@ -188,6 +196,15 @@ mod tests {
         let oc_intg = oc.integration.as_ref().expect("oc 有接入管理卡");
         assert!(!oc_intg.needs_node_probe);
         assert!(!oc_intg.install_hint);
+        // P3（§6.4 口径 A′）：主源标记——opencode 是唯一主源（degraded 横幅与
+        // 硬报错透传的锚点），全表恰一个。
+        assert!(oc.is_primary, "opencode 为主源（is_primary）");
+        assert!(!cc.is_primary, "claude-code 非主源");
+        assert_eq!(
+            AGENTS.iter().filter(|s| s.is_primary).count(),
+            1,
+            "全表必须恰一个主源（§6.4 规则 3 的锚）"
+        );
     }
 
     /// P1 钉 2：未知 id → None（白名单校验 / idle 分流 / doctor 查表的共同
@@ -217,14 +234,17 @@ mod tests {
     /// register_states 功能钉（TC-M5-02-1 精神随接线组收敛迁入）：CC 源
     /// 注册后 TranscriptCache 可经 app.state 取（未 manage 时 state() 直接
     /// panic——本测试即钉「manage 真的发生了」）；并钉指针表确实挂的是它
-    /// （时序钉在 lib.rs order_nails）。
+    /// （时序钉在 lib.rs order_nails）。指针等值比较用 `fn_addr_eq`（`==`
+    /// 对函数指针地址唯一性无保证，test 构建告警——P3 顺手根治）。
     #[test]
     fn register_states_manages_transcript_cache() {
         assert!(
-            find(ID_CLAUDE_CODE)
-                .expect("cc 必注册")
-                .register_state
-                == register_cc_cache as fn(&tauri::AppHandle),
+            std::ptr::fn_addr_eq(
+                find(ID_CLAUDE_CODE)
+                    .expect("cc 必注册")
+                    .register_state,
+                register_cc_cache as fn(&tauri::AppHandle),
+            ),
             "CC spec 的 register_state 须指向 register_cc_cache"
         );
         let app = tauri::test::mock_app();

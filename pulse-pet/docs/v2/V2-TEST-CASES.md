@@ -725,6 +725,8 @@
 
 > 安全修订（2026-08-27，INC-20260827-1033 事故整改）：原步骤「临时改名 / 删除 `~/.claude/projects`」属破坏性 live rename——`~/.claude` 与 `~/.local/share/opencode` 同为 agent 运行时依赖目录，**agent（tester/coder）禁触这两个目录的改名 / 删除 / 写入**。改名与恢复由**用户人工执行**（或后续引入沙箱 HOME 方案），agent 仅在安全窗口内做观察断言。
 
+> 口径 A′ 注记（2026-08-29，agent-registry P3 / §6.4）：CC Missing（目录不在）不触发横幅、opencode Ok 正常展示——与本用例预期一致，**行为不变**。
+
 - **步骤**：**用户人工**临时改名 `~/.claude/projects`（模拟 CC 未安装）→ 告知 agent → agent 打开 Token 页观察断言 → **用户人工**恢复原状。agent 全程不执行任何针对该目录的文件系统变更命令。
 - **预期**：安静回退 opencode-only——无错误横幅、无 degraded 字段（`rows` 原样 + `degraded=None`，**单源场景行为与 M3 单测钉住的原样一致**——N-4 兼容口径回归）。
 
@@ -732,16 +734,19 @@
 
 > 安全修订（2026-08-27，INC-20260827-1033 事故整改）：`~/.local/share/opencode/opencode.db` **同时是正在运行的 opencode 自身（含 tester/coder/supervised-coding 全部会话）的实时存储**——R2 测试轮 tester 按原步骤执行 `mv opencode.db` 导致全部会话崩溃 + 约 72s 会话数据永久丢失（实证）。**agent 禁触该文件的改名 / 删除 / 写入**；改名与恢复由**用户人工执行**（完全退出 opencode 后操作更安全），agent 仅在安全窗口内做观察断言；单测路径（预期 5）不涉及真实文件操作，不受影响。
 
+> 口径 A′ 修订（2026-08-29，agent-registry P3 / §6.4）：源状态三态化 **Ok / Missing / Failed**——degraded 横幅收窄为「**主源 opencode Failed（在但坏）× 其余有数据**」；**Missing（未装/未用）不再触发横幅**（CC-only 用户从此干净）；全部源无数据且无一源 Ok → 硬报错，文案 N 源中性化。
+
 - **步骤**：
-  1. **用户人工**临时改名 opencode.db（模拟 opencode 源缺席，CC 有数据）→ 告知 agent → agent 打开 Token 页 / 右键菜单观察；
+  1. **用户人工**临时改名 opencode.db（模拟 opencode **Missing**，CC 有数据）→ 告知 agent → agent 打开 Token 页 / 右键菜单观察；
   2. **用户人工**恢复 opencode.db；
-  3. 双源全缺（两库都缺席，同样用户人工操作）。
+  3. 双源全缺（两库都缺席，同样用户人工操作）；
+  4. （可选，Failed 实机验证）**用户人工**将 opencode.db 内容替换为垃圾字节（模拟「在但坏」；同样完全退出 opencode 后操作、agent 禁触）→ 观察 → 恢复。
 - **预期**：
-  1. Token 页显示 **CC-only 数据 + 「opencode 源不可用」细横幅**（仅 panel 顶部，不遮蔽内容）；返回体包装 `{rows, degraded}` / `{today, degraded}`；
-  2. **pet 三层（悬停卡 / 菜单 / 追加段）静默显示 CC-only 数值、不呈现 degraded**（宠物不打扰原则）；
-  3. 恢复后正常（双源齐全、横幅消失）；
-  4. 双源全缺 → 走既有错误路径（M3「无库 → —」语义保留给全缺态）；
-  5. 单测：opencode 错 × CC 有数据 → `Ok(CC-only) + degraded=Some`；CC 缺席 → rows 原样 + None（M3 回归）；双源全缺 → 既有错误码透传。
+  1. Token 页 **CC-only 数据静默正常展示——无横幅、无 degraded 字段**（`degraded=None`）【口径 A′ 行为变更：原「opencode 源不可用」横幅取消】；
+  2. **pet 三层（悬停卡 / 菜单 / 追加段）静默显示 CC-only 数值**（宠物不打扰原则，不变）；
+  3. 恢复后正常（双源齐全）；
+  4. 双源全缺 → 硬报错路径（M3「无库 → —」语义保留给全缺态；**文案 N 源中性化**，`token.error.noDatabase` 新措辞以实施落稿为准，如「未检测到任何 agent 用量数据」）；
+  5. 单测（全部 tempdir / 隔离路径构造，禁触真实目录）：oc **Missing**（无 db）× CC 有数据 → `Ok(CC-only) + degraded=None`【变更：原 Some】；oc **Failed**（伪造 schema 错 / db 文件在但打不开、损坏）× CC 有数据 → `Ok(CC-only) + degraded=Some`；CC 缺席 → rows 原样 + None（M3 回归）；oc Missing / oc Failed × CC **Ok-0行**（目录在、无 transcript）→ **空态「暂无数据」**【变更：原 Err】；双源全缺 → 既有错误码透传（不变，文案中性化）。
 
 ### TC-M5-10 主题与双语目验（实机）
 

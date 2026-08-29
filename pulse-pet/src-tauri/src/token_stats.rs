@@ -33,6 +33,7 @@ use std::sync::{Arc, Mutex};
 use rusqlite::{Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
 
+use crate::agents;
 use crate::transcript::{self, TranscriptCache};
 
 /// agent 常量（v2 M5，V2-DESIGN §5.3）：opencode 恒单值；CC 行由 transcript 解析注入。
@@ -126,17 +127,17 @@ pub struct AgentTodayTotal {
     pub total: i64,
 }
 
-/// M5 双源查询返回体（C1/N-4 承载定案）：
-/// `degraded=Some` 仅在 opencode 源报错而 CC 源有数据时出现（原始错误
-/// "code: message" 供前端 title 提示）；CC 缺席时 rows 与 M3 原样一致、
-/// degraded=None（单源场景行为不变）。
+/// M5 双源查询返回体（C1/N-4 承载定案；P3 起为 N 源编排返回体，§8.3）：
+/// `degraded=Some` 仅在**主源 opencode Failed（在但坏）× 其余源有数据**时出现
+/// （口径 A′，§6.4 规则 3——Missing 不触发，原始错误 "code: message" 供前端
+/// title 提示）；其余源缺席时 rows 与 M3 原样一致、degraded=None。
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct QueryResponse {
     pub rows: Vec<TokenRow>,
     pub degraded: Option<String>,
 }
 
-/// M5 今日聚合返回体（同上语义）。
+/// M5 今日聚合返回体（同上语义；P3 起 by_agent 为 N 源合并）。
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct TodayResponse {
     pub today: TodayStats,
@@ -510,7 +511,7 @@ pub fn local_today_start_ms(now_ms: i64) -> i64 {
 
 /// 今日聚合核心（已开连接上执行；含 mock 过滤）。
 /// v2 M6（§6.2）：`by_agent` 填 opencode 单行（total>0 才有行；CC 行由
-/// `today_stats_dual` 合并时追加——opencode 源在 SQL 里 agent 恒单值）。
+/// `today_stats_all` 合并时追加——opencode 源在 SQL 里 agent 恒单值）。
 pub fn query_today_on(
     conn: &Connection,
     from_ms: i64,
@@ -771,18 +772,271 @@ fn cc_group_rows(rows: &[TokenRow], group_by: &str, from_ms: i64, to_ms: i64) ->
     }
 }
 
-/// 双源查询编排（C1/N-4 容错）：
-/// - opencode 正常 → 双源合并（session 维时间倒序统一排序；day/week/range 两源
-///   concat）+ degraded=None；
-/// - opencode 报错 × CC 有数据 → 降级返回 CC-only + degraded=Some（部分源错误
-///   不整体遮蔽）；
-/// - 双源全缺（opencode 错 × CC 无数据）→ 既有错误路径透传（M3「无库→—」语义
-///   保留给全缺态）；
-/// - CC 缺席 → rows 与 M3 单测钉住的原样一致 + degraded=None（单源场景行为不变）。
-pub fn query_stats_dual(
-    data_dir: &Path,
-    cc_dir: &Path,
-    cache: &Arc<Mutex<TranscriptCache>>,
+// ---------------------------------------------------------------------------
+// v2 P3（agent-registry §8.3）：N 源编排 + degraded/报错口径 A′（§6.4）
+// ---------------------------------------------------------------------------
+
+/// 参与一次编排的统计源描述。生产路径由 `agents::AGENTS` 派生
+/// （`sources_from_agents`）；测试直接构造注入（三源合成用例——伪造第三源
+/// tempdir transcript，§8.7.2 P3）。enum dispatch，无 trait object（§6.1 决策 1）。
+struct SourceSpec<'a> {
+    /// 主源标记（§6.4 规则 3）：degraded 横幅仅主源 Failed × 其余有数据触发；
+    /// 硬报错透传主源错误。
+    is_primary: bool,
+    kind: SourceKind<'a>,
+}
+
+enum SourceKind<'a> {
+    OpenencodeDb { data_dir: &'a Path },
+    CcTranscript {
+        cc_dir: &'a Path,
+        cache: &'a Arc<Mutex<TranscriptCache>>,
+    },
+}
+
+/// 源结果三态（口径 A′，§6.4）。判据按**文件存在性两段式**、与错误码解耦
+/// （评审 P1-2——"db 文件在但打不开（损坏/WAL 缺失/权限）"同样报
+/// no-database 码，按码判会把典型 Failed 场景误静默成 Missing，恰好杀掉
+/// 拍板保留的 Failed 横幅）：
+enum SourceState<T> {
+    /// 查询成功（**可含 0 行**——「装了没用过」，规则 4 空态的来源）。
+    Ok(T),
+    /// 库/目录不存在 = 该 agent 未安装未使用（opencode：`detect_db_path`
+    /// None；CC：目录不存在）。携带缺失原因错误供硬报错透传（opencode 区分
+    /// legacy-storage / no-database——TC-TK-04 可行动提示在 N 源层保留）。
+    Missing(StatsError),
+    /// 源**在但坏了**（opencode：detect Some × 后续任何错——open 失败 /
+    /// schema-mismatch / query；CC 侧 P3 为空集：目录在即 Ok，坏行静默跳过
+    /// 是既定健壮行为，不新建解析失败探测，评审 P2-1）。携带原始错误
+    /// （degraded 横幅 title / 硬报错透传）。
+    Failed(StatsError),
+}
+
+/// query 路径的单源产物。
+struct SourceRows {
+    /// 窗口内分组行（合并进响应 rows）。
+    rows: Vec<TokenRow>,
+    /// 该源是否有数据（degraded 判据「其余有数据」；CC = transcript 全量
+    /// 非空——沿用 M5 的全量口径，非窗口行数）。
+    has_data: bool,
+}
+
+/// today 路径的单源产物。
+struct SourceToday {
+    today: TodayStats,
+    /// 同 SourceRows.has_data（CC = transcript 全量非空）。
+    has_data: bool,
+}
+
+/// opencode 源 Missing 的原因错误（硬报错透传用）：legacy-storage 优先
+/// （「请升级 opencode」可行动提示，TC-TK-04），否则 no-database（前端文案
+/// N 源中性化，`token.error.noDatabase`）。
+fn missing_reason(data_dir: &Path) -> StatsError {
+    if detect_legacy_storage(data_dir) {
+        StatsError::new(
+            ERR_LEGACY_STORAGE,
+            "检测到旧版 opencode 存储格式（storage/session/*.json），请升级 opencode",
+        )
+    } else {
+        StatsError::new(ERR_NO_DATABASE, "数据库未运行/未初始化")
+    }
+}
+
+/// query 路径单源三态查询（判据见 [`SourceState`]）。
+fn query_source_rows(
+    spec: &SourceSpec<'_>,
+    from_ms: i64,
+    to_ms: i64,
+    group_by: &str,
+) -> SourceState<SourceRows> {
+    match &spec.kind {
+        SourceKind::OpenencodeDb { data_dir } => {
+            // 两段式第一段：db 文件不存在 = Missing（未安装未使用）
+            if detect_db_path(data_dir).is_none() {
+                return SourceState::Missing(missing_reason(data_dir));
+            }
+            // 第二段：文件在 × 后续任何错（open/schema/query）= Failed
+            match query_stats(data_dir, from_ms, to_ms, group_by) {
+                Ok(rows) => SourceState::Ok(SourceRows {
+                    has_data: !rows.is_empty(),
+                    rows,
+                }),
+                Err(e) => SourceState::Failed(e),
+            }
+        }
+        SourceKind::CcTranscript { cc_dir, cache } => {
+            // CC 判据（评审 P2-1）：目录不存在 = Missing；目录在 = Ok
+            //（坏行静默跳过，Failed 对 CC 为空集）
+            if !cc_dir.is_dir() {
+                return SourceState::Missing(StatsError::new(
+                    ERR_NO_DATABASE,
+                    "未检测到 claude-code 会话数据目录",
+                ));
+            }
+            // 方案 α（task-pulsepet-v2-polish #11）：锁内只做轻量判定与写回，
+            // I/O 与解析（增量：append 只读尾部）在锁外。
+            let cc_rows_all = transcript::refresh_unlocked(cc_dir, cache);
+            let has_data = !cc_rows_all.is_empty();
+            let tokens: Vec<TokenRow> = cc_rows_all.iter().map(cc_to_token_row).collect();
+            SourceState::Ok(SourceRows {
+                rows: cc_group_rows(&tokens, group_by, from_ms, to_ms),
+                has_data,
+            })
+        }
+    }
+}
+
+/// today 路径单源三态查询（判据同 query 路径）。
+fn today_source_stats(spec: &SourceSpec<'_>, now_ms: i64) -> SourceState<SourceToday> {
+    match &spec.kind {
+        SourceKind::OpenencodeDb { data_dir } => {
+            if detect_db_path(data_dir).is_none() {
+                return SourceState::Missing(missing_reason(data_dir));
+            }
+            match today_stats(data_dir, now_ms) {
+                Ok(today) => {
+                    let has_data =
+                        today.input + today.output + today.cache_read > 0 || today.cost > 0.0;
+                    SourceState::Ok(SourceToday { today, has_data })
+                }
+                Err(e) => SourceState::Failed(e),
+            }
+        }
+        SourceKind::CcTranscript { cc_dir, cache } => {
+            if !cc_dir.is_dir() {
+                return SourceState::Missing(StatsError::new(
+                    ERR_NO_DATABASE,
+                    "未检测到 claude-code 会话数据目录",
+                ));
+            }
+            let from = local_today_start_ms(now_ms);
+            let cc_rows_all = transcript::refresh_unlocked(cc_dir, cache);
+            let has_data = !cc_rows_all.is_empty();
+            let mut today = TodayStats {
+                input: 0,
+                output: 0,
+                cache_read: 0,
+                cost: 0.0,
+                by_agent: Vec::new(),
+            };
+            for r in cc_rows_all.iter() {
+                if let Some(t) = r.time_updated {
+                    if t >= from && t <= now_ms {
+                        today.input += r.tokens_input;
+                        today.output += r.tokens_output;
+                        today.cache_read += r.tokens_cache_read;
+                        // cost 恒 0（S4）
+                    }
+                }
+            }
+            // v2 M6（§6.2）：CC 分布行（今日同口径；>0 才有行）
+            today.by_agent = agent_today_rows(AGENT_CLAUDE_CODE, &today);
+            SourceState::Ok(SourceToday { today, has_data })
+        }
+    }
+}
+
+/// N 源编排判定骨架（口径 A′ 四条规则，§6.4）：query 与 today 共用同一
+/// 决策序——
+/// - 规则 1（展示）：所有 Ok 源合并，只要有任一源有数据 → 正常展示，绝不报错；
+/// - 规则 2（硬报错）：仅当全部源无数据（全 Missing/Failed，**无一源 Ok**）
+///   → 报错，透传**主源**错误（主源必非 Ok；文案由前端 N 源中性化）；
+/// - 规则 3（横幅收窄）：仅主源 **Failed**（在但坏）× 其余有数据 → Some；
+///   Missing 不触发（CC-only 用户从此干净）；非主源 Failed 静默（口径 A 原则）；
+/// - 规则 4（空态）：有源 Ok 但 0 行（装了没用过）→「暂无数据」，非报错。
+struct MergeAcc {
+    any_ok: bool,
+    /// 主源 Failed 的错误（规则 3 触发位）。
+    primary_failed: Option<StatsError>,
+    /// 主源错误（Missing 或 Failed——规则 2 透传位）。
+    primary_error: Option<StatsError>,
+    /// 首个非 Ok 错误（无主源注入形态的兜底透传位）。
+    first_error: Option<StatsError>,
+    others_have_data: bool,
+}
+
+impl MergeAcc {
+    fn new() -> Self {
+        Self {
+            any_ok: false,
+            primary_failed: None,
+            primary_error: None,
+            first_error: None,
+            others_have_data: false,
+        }
+    }
+
+    fn note_ok(&mut self, is_primary: bool, has_data: bool) {
+        self.any_ok = true;
+        if !is_primary && has_data {
+            self.others_have_data = true;
+        }
+    }
+
+    fn note_missing(&mut self, is_primary: bool, e: StatsError) {
+        if self.first_error.is_none() {
+            self.first_error = Some(e.clone());
+        }
+        if is_primary {
+            self.primary_error = Some(e);
+        }
+    }
+
+    fn note_failed(&mut self, is_primary: bool, e: StatsError) {
+        if self.first_error.is_none() {
+            self.first_error = Some(e.clone());
+        }
+        if is_primary {
+            self.primary_failed = Some(e.clone());
+            self.primary_error = Some(e);
+        }
+    }
+
+    /// 规则 2/3 落定：硬报错错误 或 degraded 串。
+    fn decide(self) -> Result<Option<String>, StatsError> {
+        if !self.any_ok {
+            // 规则 2：全部源无数据且无一源 Ok → 主源错误透传（主源必非 Ok）；
+            // 无主源注入形态退化为首个非 Ok 错误，再兜底中性文案。
+            return Err(self
+                .primary_error
+                .or(self.first_error)
+                .unwrap_or_else(|| StatsError::new(ERR_NO_DATABASE, "未检测到任何 agent 用量数据")));
+        }
+        // 规则 3：主源 Failed × 其余有数据 → 横幅；其余无数据（Ok-0行）→ None
+        let degraded = match self.primary_failed {
+            Some(e) if self.others_have_data => Some(e.to_string()),
+            _ => None,
+        };
+        Ok(degraded)
+    }
+}
+
+/// 生产源清单：`agents::AGENTS` 派生（stats None 的 spec 无统计源，不参与）。
+fn sources_from_agents<'a>(
+    data_dir: &'a Path,
+    cc_dir: &'a Path,
+    cache: &'a Arc<Mutex<TranscriptCache>>,
+) -> Vec<SourceSpec<'a>> {
+    agents::AGENTS
+        .iter()
+        .filter(|spec| !matches!(spec.stats, agents::StatsSource::None))
+        .map(|spec| SourceSpec {
+            is_primary: spec.is_primary,
+            kind: match spec.stats {
+                agents::StatsSource::OpenencodeDb => SourceKind::OpenencodeDb { data_dir },
+                agents::StatsSource::CcTranscript => SourceKind::CcTranscript { cc_dir, cache },
+                agents::StatsSource::None => unreachable!("stats None 已在上游过滤"),
+            },
+        })
+        .collect()
+}
+
+/// N 源查询编排（`query_stats_dual` 的 P3 泛化，评审 P2-4 更名避开了现存
+/// 单源函数 `query_stats`）：遍历源清单逐源三态查询合并。性能口径（评审
+/// P2-8）：维持单 `spawn_blocking` 内**串行**逐源（源数个位数下延迟线性
+/// 可接受——已知取舍，源数上双位数再议并行/缓存）。
+fn query_stats_sources(
+    sources: &[SourceSpec<'_>],
     from_ms: i64,
     to_ms: i64,
     group_by: &str,
@@ -793,94 +1047,81 @@ pub fn query_stats_dual(
             format!("invalid group_by: {group_by}（应为 session/day/week/range）"),
         ));
     }
-    // 方案 α（task-pulsepet-v2-polish #11）：锁内只做轻量判定与写回，I/O 与
-    // 解析（增量：append 只读尾部）在锁外——不再于 Mutex 持有期全量解析。
-    let cc_rows_all = transcript::refresh_unlocked(cc_dir, cache);
-    let cc_has_data = !cc_rows_all.is_empty();
-    let cc_tokens: Vec<TokenRow> = cc_rows_all.iter().map(cc_to_token_row).collect();
-    let cc_grouped = cc_group_rows(&cc_tokens, group_by, from_ms, to_ms);
-
-    match query_stats(data_dir, from_ms, to_ms, group_by) {
-        Ok(mut rows) => {
-            rows.extend(cc_grouped);
-            if group_by == "session" {
-                // 双源统一时间倒序（TC-M5-03-5）
-                rows.sort_by(|a, b| b.time_updated.cmp(&a.time_updated));
+    let mut acc = MergeAcc::new();
+    let mut rows: Vec<TokenRow> = Vec::new();
+    for spec in sources {
+        let is_primary = spec.is_primary;
+        match query_source_rows(spec, from_ms, to_ms, group_by) {
+            SourceState::Ok(r) => {
+                acc.note_ok(is_primary, r.has_data);
+                rows.extend(r.rows);
             }
-            Ok(QueryResponse {
-                rows,
-                degraded: None,
-            })
-        }
-        Err(e) => {
-            if cc_has_data {
-                Ok(QueryResponse {
-                    rows: cc_grouped,
-                    degraded: Some(e.to_string()),
-                })
-            } else {
-                Err(e)
-            }
+            SourceState::Missing(e) => acc.note_missing(is_primary, e),
+            SourceState::Failed(e) => acc.note_failed(is_primary, e),
         }
     }
+    let degraded = acc.decide()?;
+    if group_by == "session" {
+        // 多源统一时间倒序（TC-M5-03-5）
+        rows.sort_by(|a, b| b.time_updated.cmp(&a.time_updated));
+    }
+    Ok(QueryResponse { rows, degraded })
 }
 
-/// 今日双源聚合（M3 三层快捷查看自动覆盖 CC，TC-M5-03-6）：
-/// opencode SQL 当日聚合 + CC 缓存当日过滤求和；容错语义同 query_stats_dual。
-pub fn today_stats_dual(
-    data_dir: &Path,
-    cc_dir: &Path,
-    cache: &Arc<Mutex<TranscriptCache>>,
+/// N 源今日聚合（`today_stats_dual` 的 P3 泛化；容错语义同 query_stats_sources）。
+fn today_stats_sources(
+    sources: &[SourceSpec<'_>],
     now_ms: i64,
 ) -> Result<TodayResponse, StatsError> {
-    let from = local_today_start_ms(now_ms);
-    // 方案 α：锁外增量刷新（同 query_stats_dual）
-    let cc_rows_all = transcript::refresh_unlocked(cc_dir, cache);
-    let cc_has_data = !cc_rows_all.is_empty();
-    let mut cc_today = TodayStats {
+    let mut acc = MergeAcc::new();
+    let mut today = TodayStats {
         input: 0,
         output: 0,
         cache_read: 0,
         cost: 0.0,
         by_agent: Vec::new(),
     };
-    for r in cc_rows_all.iter() {
-        if let Some(t) = r.time_updated {
-            if t >= from && t <= now_ms {
-                cc_today.input += r.tokens_input;
-                cc_today.output += r.tokens_output;
-                cc_today.cache_read += r.tokens_cache_read;
-                // cost 恒 0（S4）
+    for spec in sources {
+        let is_primary = spec.is_primary;
+        match today_source_stats(spec, now_ms) {
+            SourceState::Ok(SourceToday { today: t, has_data }) => {
+                acc.note_ok(is_primary, has_data);
+                today.input += t.input;
+                today.output += t.output;
+                today.cache_read += t.cache_read;
+                today.cost += t.cost;
+                // v2 M6：by_agent = 各 Ok 源分布行拼接后按 total 降序
+                //（query_today_on 已填 opencode 行；CC-only 场景同理仅 CC 行）
+                today.by_agent = merge_by_agent(std::mem::take(&mut today.by_agent), t.by_agent);
             }
+            SourceState::Missing(e) => acc.note_missing(is_primary, e),
+            SourceState::Failed(e) => acc.note_failed(is_primary, e),
         }
     }
-    // v2 M6（§6.2）：CC 分布行（今日同口径；>0 才有行）
-    let cc_by_agent = agent_today_rows(AGENT_CLAUDE_CODE, &cc_today);
-    match today_stats(data_dir, now_ms) {
-        Ok(mut t) => {
-            t.input += cc_today.input;
-            t.output += cc_today.output;
-            t.cache_read += cc_today.cache_read;
-            // v2 M6：by_agent = opencode 行 + CC 行，按 total 降序（query_today_on
-            // 已填 opencode 行；degraded 场景下同理仅 CC 行）
-            t.by_agent = merge_by_agent(std::mem::take(&mut t.by_agent), cc_by_agent);
-            Ok(TodayResponse {
-                today: t,
-                degraded: None,
-            })
-        }
-        Err(e) => {
-            if cc_has_data {
-                cc_today.by_agent = cc_by_agent;
-                Ok(TodayResponse {
-                    today: cc_today,
-                    degraded: Some(e.to_string()),
-                })
-            } else {
-                Err(e)
-            }
-        }
-    }
+    let degraded = acc.decide()?;
+    Ok(TodayResponse { today, degraded })
+}
+
+/// N 源查询编排生产入口（命令层消费；三源测试注入走 `query_stats_sources`）。
+pub fn query_stats_all(
+    data_dir: &Path,
+    cc_dir: &Path,
+    cache: &Arc<Mutex<TranscriptCache>>,
+    from_ms: i64,
+    to_ms: i64,
+    group_by: &str,
+) -> Result<QueryResponse, StatsError> {
+    query_stats_sources(&sources_from_agents(data_dir, cc_dir, cache), from_ms, to_ms, group_by)
+}
+
+/// N 源今日聚合生产入口（同上）。
+pub fn today_stats_all(
+    data_dir: &Path,
+    cc_dir: &Path,
+    cache: &Arc<Mutex<TranscriptCache>>,
+    now_ms: i64,
+) -> Result<TodayResponse, StatsError> {
+    today_stats_sources(&sources_from_agents(data_dir, cc_dir, cache), now_ms)
 }
 
 /// M5 CC 会话汇报（V2-DESIGN §5.4，TC-M5-05）：
@@ -890,7 +1131,8 @@ pub fn today_stats_dual(
 ///   opencode「最后 message 写入时间」语义）；
 /// - 五维有非零用量才出气泡（全零静默，TC-TK-12 口径）；
 /// - 文案 = 单总量模板（§十二 F1；原 S4「CC 无 cost 段」双模板已收敛）；
-///   今日段 = today_stats_dual 双源合计（失败 → None 静默省略，同 opencode）。
+///   今日段 = today_stats_all N 源合计（degraded 语义沿用现状 `.ok()` 吞错
+///   静默省略——TC-M3-09-3 既有口径不变，agent-registry §8.3 评审 P2-5）。
 pub fn build_cc_idle_report(
     cache: &Arc<Mutex<TranscriptCache>>,
     data_dir: &Path,
@@ -918,7 +1160,7 @@ pub fn build_cc_idle_report(
     // reasoning 不计）——原 CC 无 cost 双模板（S4）随统一收敛退役
     let total = row.tokens_input + row.tokens_output + row.tokens_cache_read;
     let text = crate::i18n::current().token_report(&format_tokens_k(total));
-    let today = today_stats_dual(data_dir, cc_dir, cache, now_ms)
+    let today = today_stats_all(data_dir, cc_dir, cache, now_ms)
         .ok()
         .map(|t| t.today.input + t.today.output + t.today.cache_read);
     Some((text, today))
@@ -937,9 +1179,10 @@ pub fn token_stats_opencode_path() -> Result<Option<PathBuf>, String> {
 }
 
 /// 聚合查询（group_by: session/day/week/range；错误序列化为 "code: message"）。
-/// M5：双源化（opencode SQL + CC transcript 缓存）→ 返回体 `{rows, degraded}`
-/// （C1/N-4）；async fn + spawn_blocking（扫描/解析与 SQL 均不承主线程，
-/// IPC 契约不变——同命令名同参数）。
+/// M5 双源化 → P3 N 源化（agents::AGENTS 逐源三态合并，§8.3）→ 返回体
+/// `{rows, degraded}`（口径 A′：degraded 仅主源 Failed × 其余有数据）；
+/// async fn + spawn_blocking（扫描/解析与 SQL 均不承主线程，IPC 契约不变
+/// ——同命令名同参数）。
 #[tauri::command]
 pub async fn token_stats_query(
     from_ms: i64,
@@ -951,7 +1194,7 @@ pub async fn token_stats_query(
     let cc_dir = transcript::cc_projects_dir();
     let cache = cache.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        query_stats_dual(&data_dir, &cc_dir, &cache, from_ms, to_ms, &group_by)
+        query_stats_all(&data_dir, &cc_dir, &cache, from_ms, to_ms, &group_by)
     })
     .await
     .map_err(|e| format!("join: {e}"))?
@@ -965,10 +1208,10 @@ pub fn token_stats_current_session(session_id: String) -> Result<Option<TokenRow
 }
 
 /// 今日 token 聚合（M3 §3.2；悬停卡/右键菜单/面板今日 preset 三层共享）。
-/// M5：双源合计（opencode SQL 当日聚合 + CC 缓存当日过滤求和）→ 返回体
+/// M5 双源合计 → P3 N 源合计（agents::AGENTS 逐源三态合并）→ 返回体
 /// `{today, degraded}`；async fn + spawn_blocking（沿 M1 §1.5 线程纪律）；
-/// 错误序列化 "code: message"（双源全缺时 no-database/legacy-storage/
-/// schema-mismatch 原样透传）。
+/// 错误序列化 "code: message"（口径 A′：全部源无数据且无一源 Ok 才走错误
+/// 路径，no-database/legacy-storage/schema-mismatch 原样透传主源错误）。
 #[tauri::command]
 pub async fn token_stats_today(
     cache: tauri::State<'_, Arc<Mutex<TranscriptCache>>>,
@@ -976,7 +1219,7 @@ pub async fn token_stats_today(
     let data_dir = opencode_data_dir();
     let cc_dir = transcript::cc_projects_dir();
     let cache = cache.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || today_stats_dual(&data_dir, &cc_dir, &cache, now_ms()))
+    tauri::async_runtime::spawn_blocking(move || today_stats_all(&data_dir, &cc_dir, &cache, now_ms()))
         .await
         .map_err(|e| format!("join: {e}"))?
         .map_err(|e| e.to_string())
@@ -1704,7 +1947,7 @@ mod tests {
         assert_eq!(build_idle_report_with_today(&nodir, "x", now, 60_000), None);
     }
 
-    // ---- M5：双源查询与容错（TC-M5-03/05/09） ----
+    // ---- M5：双源查询与容错（TC-M5-03/05/09）+ P3 口径 A′ 联动（TC-M5-08/09）----
 
     /// 写一个 CC transcript 会话文件（双源测试 fixture；model=deepseek-v4-pro）。
     fn write_cc_session(cc_root: &Path, sid: &str, ts_ms: i64, tokens: (i64, i64)) {
@@ -1740,21 +1983,27 @@ mod tests {
 
     #[test]
     fn m5_degraded_opencode_error_with_cc_data_degrades() {
-        // opencode 源缺失（无 db）× CC 有数据 → Ok(CC-only) + degraded=Some
+        // P3 改写（§8.3，口径 A′）：原构造「无 db」（= Missing）在 A′ 下不再
+        // 触发横幅（CC-only 静默化，p3_cc_only_opencode_missing_silent 钉）；
+        // 本用例改用**伪造 schema 错误**构造主源 **Failed**（detect Some ×
+        // 后续错，两段式判据第二段）× CC 有数据 → 降级 CC-only +
+        // degraded=Some（横幅保留——2026-08-28 用户拍板，§6.4 规则 3）。
         let cc_dir = temp_dir("m5-cc");
         let d = chrono_local_midnight(2026, 8, 25);
         write_cc_session(&cc_dir, "cc-ses-1", d + ms(3600), (1000, 200));
-        let nodb = temp_dir("m5-nodb");
+        let bad_schema = make_db("m5-schema-err", CREATE_SESSION_OLD); // db 在、列缺
         let cache = Arc::new(Mutex::new(TranscriptCache::default()));
-        let res = query_stats_dual(&nodb, &cc_dir, &cache, 0, d + ms(86_400), "session").unwrap();
-        assert!(res.degraded.is_some(), "opencode 错 × CC 有数据 → degraded=Some");
+        let res = query_stats_all(&bad_schema, &cc_dir, &cache, 0, d + ms(86_400), "session").unwrap();
+        assert!(res.degraded.is_some(), "主源 Failed（schema 错）× CC 有数据 → degraded=Some");
+        assert!(res.degraded.as_deref().unwrap_or("").starts_with(ERR_SCHEMA_MISMATCH),
+            "degraded 串携带原始错误（title 提示用）：{:?}", res.degraded);
         assert_eq!(res.rows.len(), 1);
         assert_eq!(res.rows[0].agent, AGENT_CLAUDE_CODE);
         assert_eq!(res.rows[0].tokens_input, 1000);
         assert_eq!(res.rows[0].cost, 0.0, "CC cost 恒 0（S4）");
         // today 同语义（pet 侧静默消费 CC-only 数值）
         let now = d + 9 * 3600 * 1000;
-        let t = today_stats_dual(&nodb, &cc_dir, &cache, now).unwrap();
+        let t = today_stats_all(&bad_schema, &cc_dir, &cache, now).unwrap();
         assert!(t.degraded.is_some());
         assert_eq!(t.today.input, 1000);
         assert_eq!(t.today.output, 200);
@@ -1763,7 +2012,8 @@ mod tests {
 
     #[test]
     fn m5_degraded_cc_absent_rows_unchanged_m3_regression() {
-        // CC 目录缺席 × opencode 正常 → rows 原样 + degraded=None（N-4 兼容口径回归）
+        // CC 目录缺席 × opencode 正常 → rows 原样 + degraded=None（N-4 兼容口径回归；
+        // A′ 下 CC Missing 不触发任何降级——TC-M5-08 行为不变）
         let dir = make_db("m5-nocc", CREATE_SESSION);
         let d = chrono_local_midnight(2026, 8, 25);
         insert_session_model(
@@ -1773,26 +2023,36 @@ mod tests {
         let cache = Arc::new(Mutex::new(TranscriptCache::default()));
         let no_cc = temp_dir("m5-nocc-cc").join("missing"); // 不存在的目录
         let expect = query_stats(&dir, 0, d + ms(10), "session").unwrap();
-        let res = query_stats_dual(&dir, &no_cc, &cache, 0, d + ms(10), "session").unwrap();
+        let res = query_stats_all(&dir, &no_cc, &cache, 0, d + ms(10), "session").unwrap();
         assert_eq!(res.degraded, None, "CC 缺席 → 无 degraded（M3 行为原样）");
         assert_eq!(res.rows, expect, "CC 缺席 → rows 与 M3 钉住的原样一致");
         // today 同语义
         let now = d + 9 * 3600 * 1000;
-        let t = today_stats_dual(&dir, &no_cc, &cache, now).unwrap();
+        let t = today_stats_all(&dir, &no_cc, &cache, now).unwrap();
         assert_eq!(t.degraded, None);
         assert_eq!(t.today, today_stats(&dir, now).unwrap());
     }
 
     #[test]
     fn m5_degraded_both_missing_error_passthrough() {
-        // 双源全缺 → 既有错误码透传（M3「无库→—」语义保留给全缺态）
+        // 双源全缺（oc Missing × CC Missing）→ 硬报错透传主源错误（口径 A′
+        // 规则 2；M3「无库→—」语义保留给全缺态，**语义不变仍 Err**，§8.3）
         let nodb = temp_dir("m5-both-nodb");
         let no_cc = temp_dir("m5-both-nocc").join("missing");
         let cache = Arc::new(Mutex::new(TranscriptCache::default()));
-        let err = query_stats_dual(&nodb, &no_cc, &cache, 0, 1, "session").unwrap_err();
+        let err = query_stats_all(&nodb, &no_cc, &cache, 0, 1, "session").unwrap_err();
         assert_eq!(err.code, ERR_NO_DATABASE);
-        let err = today_stats_dual(&nodb, &no_cc, &cache, ms(1000)).unwrap_err();
+        let err = today_stats_all(&nodb, &no_cc, &cache, ms(1000)).unwrap_err();
         assert_eq!(err.code, ERR_NO_DATABASE);
+        // 主源 Missing 的原因错误在 N 源层保留：legacy-storage（TC-TK-04 可行动
+        // 提示「请升级 opencode」不因三态化丢失——Missing 携带原因透传）
+        let legacy = temp_dir("m5-both-legacy");
+        let s = legacy.join("storage").join("session");
+        std::fs::create_dir_all(&s).unwrap();
+        std::fs::write(s.join("ses_x.json"), b"{}").unwrap();
+        let err = query_stats_all(&legacy, &no_cc, &cache, 0, 1, "day").unwrap_err();
+        assert_eq!(err.code, ERR_LEGACY_STORAGE);
+        assert!(err.message.contains("升级 opencode"));
     }
 
     #[test]
@@ -1807,7 +2067,7 @@ mod tests {
         write_cc_session(&cc_dir, "cc-ses-1", d + ms(200), (50, 5));
         let cache = Arc::new(Mutex::new(TranscriptCache::default()));
         // day 维：两源各一行（agent 维度拆分），同日不拆柱
-        let res = query_stats_dual(&dir, &cc_dir, &cache, 0, d + ms(86_400), "day").unwrap();
+        let res = query_stats_all(&dir, &cc_dir, &cache, 0, d + ms(86_400), "day").unwrap();
         assert_eq!(res.degraded, None);
         assert_eq!(res.rows.len(), 2);
         let oc = res.rows.iter().find(|r| r.agent == AGENT_OPENCODE).unwrap();
@@ -1817,12 +2077,12 @@ mod tests {
         assert_eq!(cc.tokens_input, 50);
         assert_eq!(cc.model_id.as_deref(), Some("deepseek-v4-pro"));
         // session 维：CC 行 time_updated 更晚 → 时间倒序统一排序（CC 在前）
-        let res = query_stats_dual(&dir, &cc_dir, &cache, 0, d + ms(86_400), "session").unwrap();
+        let res = query_stats_all(&dir, &cc_dir, &cache, 0, d + ms(86_400), "session").unwrap();
         assert_eq!(res.rows[0].session_id.as_deref(), Some("cc-ses-1"));
         assert_eq!(res.rows[1].session_id.as_deref(), Some("s-oc"));
         assert_eq!(res.rows[1].agent, AGENT_OPENCODE);
         // range 维：CC 按 agent×model_id 聚合（day=None）
-        let res = query_stats_dual(&dir, &cc_dir, &cache, 0, d + ms(86_400), "range").unwrap();
+        let res = query_stats_all(&dir, &cc_dir, &cache, 0, d + ms(86_400), "range").unwrap();
         assert_eq!(res.rows.len(), 2);
         for r in &res.rows {
             assert_eq!(r.day, None, "range 行无 day 维");
@@ -1841,7 +2101,7 @@ mod tests {
         let cc_dir = temp_dir("m5-week-cc");
         write_cc_session(&cc_dir, "cc-1", d + 12 * 3600 * 1000, (20, 2)); // 本地午间（防 UTC 跨日）
         let cache = Arc::new(Mutex::new(TranscriptCache::default()));
-        let res = query_stats_dual(&dir, &cc_dir, &cache, 0, d + ms(86_400), "week").unwrap();
+        let res = query_stats_all(&dir, &cc_dir, &cache, 0, d + ms(86_400), "week").unwrap();
         let oc = res.rows.iter().find(|r| r.agent == AGENT_OPENCODE).unwrap();
         let cc = res.rows.iter().find(|r| r.agent == AGENT_CLAUDE_CODE).unwrap();
         assert_eq!(oc.day.as_deref(), Some("2026-W32"));
@@ -1862,7 +2122,7 @@ mod tests {
         write_cc_session(&cc_dir, "cc-1", now - ms(60), (500, 50));
         write_cc_session(&cc_dir, "cc-old", d - ms(3600), (99_999, 0)); // 昨天的行不计
         let cache = Arc::new(Mutex::new(TranscriptCache::default()));
-        let t = today_stats_dual(&dir, &cc_dir, &cache, now).unwrap();
+        let t = today_stats_all(&dir, &cc_dir, &cache, now).unwrap();
         assert_eq!(t.degraded, None);
         assert_eq!(t.today.input, 1500);
         assert_eq!(t.today.output, 150);
@@ -1909,7 +2169,7 @@ mod tests {
         let cache = Arc::new(Mutex::new(TranscriptCache::default()));
         let no_cc = temp_dir("m6-oc-cc").join("missing");
         let now = d + 9 * 3600 * 1000;
-        let t = today_stats_dual(&dir, &no_cc, &cache, now).unwrap();
+        let t = today_stats_all(&dir, &no_cc, &cache, now).unwrap();
         assert_eq!(
             t.today.by_agent,
             vec![AgentTodayTotal { agent: AGENT_OPENCODE.into(), total: 150 }],
@@ -1933,7 +2193,7 @@ mod tests {
         write_cc_session(&cc_dir, "cc-1", d + ms(3600), (5000, 1000)); // cc total 6000
         let cache = Arc::new(Mutex::new(TranscriptCache::default()));
         let now = d + 9 * 3600 * 1000;
-        let t = today_stats_dual(&dir, &cc_dir, &cache, now).unwrap();
+        let t = today_stats_all(&dir, &cc_dir, &cache, now).unwrap();
         assert_eq!(
             t.today.by_agent,
             vec![
@@ -1951,7 +2211,7 @@ mod tests {
         let cache = Arc::new(Mutex::new(TranscriptCache::default()));
         let no_cc = temp_dir("m6-zero-cc").join("missing");
         let d = chrono_local_midnight(2026, 8, 27);
-        let t = today_stats_dual(&dir, &no_cc, &cache, d + 9 * 3600 * 1000).unwrap();
+        let t = today_stats_all(&dir, &no_cc, &cache, d + 9 * 3600 * 1000).unwrap();
         assert!(t.today.by_agent.is_empty(), "零数据 → by_agent 省略");
     }
 
@@ -1971,7 +2231,7 @@ mod tests {
         );
         let cache = Arc::new(Mutex::new(TranscriptCache::default()));
         let no_cc = temp_dir("m6-mock-cc").join("missing");
-        let t = today_stats_dual(&dir, &no_cc, &cache, d + 9 * 3600 * 1000).unwrap();
+        let t = today_stats_all(&dir, &no_cc, &cache, d + 9 * 3600 * 1000).unwrap();
         assert_eq!(
             t.today.by_agent,
             vec![AgentTodayTotal { agent: AGENT_OPENCODE.into(), total: 150 }],
@@ -1980,21 +2240,157 @@ mod tests {
     }
 
     #[test]
-    fn m6_today_by_agent_degraded_cc_only_single_row() {
-        // degraded（opencode 源错误 × CC 有数据）→ by_agent 仅 cc 单行
-        //（降级返回 CC-only 的分布也一致；pet 侧静默消费）
+    fn m6_today_by_agent_cc_only_single_row() {
+        // CC-only（oc Missing × CC 有数据）→ by_agent 仅 cc 单行；P3 口径 A′
+        // 行为变更 ①：degraded 从 Some 改 **None**（CC-only 静默化，§6.4）
         let cc_dir = temp_dir("m6-deg-cc");
         let d = chrono_local_midnight(2026, 8, 27);
         write_cc_session(&cc_dir, "cc-1", d + ms(3600), (1000, 200)); // 1200
         let nodb = temp_dir("m6-deg-nodb");
         let cache = Arc::new(Mutex::new(TranscriptCache::default()));
-        let t = today_stats_dual(&nodb, &cc_dir, &cache, d + 9 * 3600 * 1000).unwrap();
-        assert!(t.degraded.is_some());
+        let t = today_stats_all(&nodb, &cc_dir, &cache, d + 9 * 3600 * 1000).unwrap();
+        assert_eq!(t.degraded, None, "oc Missing 不触发横幅（A′ 规则 3，CC-only 静默）");
         assert_eq!(
             t.today.by_agent,
             vec![AgentTodayTotal { agent: AGENT_CLAUDE_CODE.into(), total: 1200 }],
-            "degraded CC-only → 单行 cc"
+            "CC-only → 单行 cc（pet 侧静默消费）"
         );
+    }
+
+    // ---- v2 P3（agent-registry §8.3/§8.7.2）：口径 A′ 三态行为新钉 ----
+    // 全部 tempdir/隔离路径构造（2026-08-29 用户指示：禁触真实用户数据目录）。
+
+    /// P3 钉 ①（行为变更：CC-only 静默化）：oc **Missing**（无 db）× CC 有数据
+    /// → 正常展示 CC-only、degraded=**None**（原常驻横幅取消——未装 opencode
+    /// 的用户从此干净，§6.4 差异表第 1 行）。
+    #[test]
+    fn p3_cc_only_opencode_missing_silent() {
+        let cc_dir = temp_dir("p3-cconly-cc");
+        let d = chrono_local_midnight(2026, 8, 27);
+        write_cc_session(&cc_dir, "cc-1", d + ms(3600), (1000, 200));
+        let nodb = temp_dir("p3-cconly-nodb");
+        let cache = Arc::new(Mutex::new(TranscriptCache::default()));
+        let res = query_stats_all(&nodb, &cc_dir, &cache, 0, d + ms(86_400), "session").unwrap();
+        assert_eq!(res.degraded, None, "oc Missing 不触发横幅（A′ 规则 3）");
+        assert_eq!(res.rows.len(), 1, "CC-only 数据正常展示（绝不报错，规则 1）");
+        assert_eq!(res.rows[0].agent, AGENT_CLAUDE_CODE);
+        // today 同语义：数值照常（pet 三层静默消费），by_agent 仅 cc 行
+        let t = today_stats_all(&nodb, &cc_dir, &cache, d + 9 * 3600 * 1000).unwrap();
+        assert_eq!(t.degraded, None);
+        assert_eq!(t.today.input, 1000);
+        assert_eq!(
+            t.today.by_agent,
+            vec![AgentTodayTotal { agent: AGENT_CLAUDE_CODE.into(), total: 1200 }]
+        );
+    }
+
+    /// P3 钉 ②（行为变更：Err → 空态）：oc **Missing**（无 db）× CC **Ok 但
+    /// 0 行**（目录在、无 transcript）→ `Ok(空 rows)` 空态「暂无数据」
+    /// （原 Err 透传；规则 4——有源 Ok 即不算全缺，§6.4 差异表第 5 行）。
+    #[test]
+    fn p3_opencode_missing_cc_ok_zero_rows_empty_state() {
+        let cc_empty = temp_dir("p3-ok0-cc"); // 目录在、无 transcript（≠ 目录缺失）
+        let nodb = temp_dir("p3-ok0-nodb");
+        let cache = Arc::new(Mutex::new(TranscriptCache::default()));
+        let res = query_stats_all(&nodb, &cc_empty, &cache, 0, ms(86_400), "session").unwrap();
+        assert_eq!(res.degraded, None);
+        assert!(res.rows.is_empty(), "空态：CC Ok-0行 → 空 rows 而非 Err");
+        let t = today_stats_all(&nodb, &cc_empty, &cache, ms(1000)).unwrap();
+        assert_eq!(t.degraded, None);
+        assert_eq!(t.today.input + t.today.output + t.today.cache_read, 0);
+        assert!(t.today.by_agent.is_empty());
+    }
+
+    /// P3 钉 ③（行为变更：Err → 空态）：oc **Failed**（schema 错）× CC
+    /// **Ok 但 0 行** → 空态且**非横幅**（CC 无数据不满足横幅触发条件，
+    /// §6.4 差异表第 6 行）。
+    #[test]
+    fn p3_opencode_failed_cc_ok_zero_rows_empty_state() {
+        let bad_schema = make_db("p3-f-ok0", CREATE_SESSION_OLD); // db 在、列缺 → Failed
+        let cc_empty = temp_dir("p3-f-ok0-cc");
+        let cache = Arc::new(Mutex::new(TranscriptCache::default()));
+        let res = query_stats_all(&bad_schema, &cc_empty, &cache, 0, ms(86_400), "session").unwrap();
+        assert_eq!(res.degraded, None, "Failed × Ok-0行 → 空态非横幅（规则 3/4）");
+        assert!(res.rows.is_empty());
+        let t = today_stats_all(&bad_schema, &cc_empty, &cache, ms(1000)).unwrap();
+        assert_eq!(t.degraded, None);
+        assert!(t.today.by_agent.is_empty());
+    }
+
+    /// P3 钉 ④（评审 P1-2 反例）：db **文件在但打不开/损坏**（垃圾字节）×
+    /// CC 有数据 → Failed（两段式判据第二段：detect Some × 后续任何错）→
+    /// 横幅**保留**。防"文件在但坏"被误判 Missing 而静默——按错误码判会
+    /// 恰好杀掉拍板保留的横幅（损坏文件同样报 no-database 码）。
+    #[test]
+    fn p3_opencode_db_corrupt_file_failed_banner_kept() {
+        let corrupt = temp_dir("p3-corrupt");
+        std::fs::write(corrupt.join("opencode.db"), b"this is not a sqlite db at all").unwrap();
+        let cc_dir = temp_dir("p3-corrupt-cc");
+        let d = chrono_local_midnight(2026, 8, 27);
+        write_cc_session(&cc_dir, "cc-1", d + ms(3600), (1000, 200));
+        let cache = Arc::new(Mutex::new(TranscriptCache::default()));
+        let res = query_stats_all(&corrupt, &cc_dir, &cache, 0, d + ms(86_400), "session").unwrap();
+        assert!(res.degraded.is_some(), "db 在但坏 = Failed（非 Missing）→ 横幅保留");
+        assert_eq!(res.rows.len(), 1, "CC-only 降级数据");
+        let t = today_stats_all(&corrupt, &cc_dir, &cache, d + 9 * 3600 * 1000).unwrap();
+        assert!(t.degraded.is_some());
+        assert_eq!(t.today.input, 1000);
+    }
+
+    /// P3 钉 ⑥（三源合成，§8.3）：注入形态 a——tempdir 伪造 transcript 源。
+    /// 编排核心（query_stats_sources/today_stats_sources）接受源清单注入，
+    /// 证明 N>2 时遍历合并与三态判据仍成立：
+    /// - 三源 Ok → 全量合并（「其余有数据」是 N 元判据，非特指 CC）；
+    /// - 主源 Failed × CC Missing × 第三源有数据 → 横幅保留。
+    /// 注：两个 transcript 源各配独立 cache——TranscriptCache 以单目录扫描
+    /// 为前提（plan_refresh 的 retain 会驱逐非本目录条目），生产路径一个
+    /// CcTranscript spec 共享一缓存无此形态。
+    #[test]
+    fn p3_three_source_merge_with_fake_third_transcript_source() {
+        let d = chrono_local_midnight(2026, 8, 27);
+        let now = d + 9 * 3600 * 1000;
+        let cache = Arc::new(Mutex::new(TranscriptCache::default()));
+        let third_cache = Arc::new(Mutex::new(TranscriptCache::default()));
+
+        let oc_dir = make_db("p3-3src-oc", CREATE_SESSION);
+        insert_session_model(&oc_dir, "s-oc", "p1", 0.1, (100, 10, 0, 0, 0), d, d + ms(100),
+            Some(&model_json("glm-5.3", "zhipuai")), None);
+        let cc_dir = temp_dir("p3-3src-cc");
+        write_cc_session(&cc_dir, "cc-1", d + ms(200), (50, 5));
+        let third_dir = temp_dir("p3-3src-third"); // 伪造第三源（transcript 形态）
+        write_cc_session(&third_dir, "cc-x", d + ms(300), (20, 2));
+
+        let sources = vec![
+            SourceSpec { is_primary: true, kind: SourceKind::OpenencodeDb { data_dir: &oc_dir } },
+            SourceSpec { is_primary: false, kind: SourceKind::CcTranscript { cc_dir: &cc_dir, cache: &cache } },
+            SourceSpec { is_primary: false, kind: SourceKind::CcTranscript { cc_dir: &third_dir, cache: &third_cache } },
+        ];
+        // range 维：三源各一行 concat（oc 100 + cc 50 + 第三源 20）
+        let res = query_stats_sources(&sources, 0, d + ms(86_400), "range").unwrap();
+        assert_eq!(res.degraded, None);
+        assert_eq!(res.rows.len(), 3, "三源各一行（N 源 concat 合并）");
+        assert_eq!(res.rows.iter().map(|r| r.tokens_input).sum::<i64>(), 170);
+        // today：三源合计；by_agent 分布行总量 == 今日总量（TC-M6-04-2 交叉
+        // 断言对 N 源成立——两个 transcript 源同标 claude-code，按行合并计）
+        let t = today_stats_sources(&sources, now).unwrap();
+        assert_eq!(t.degraded, None);
+        assert_eq!(t.today.input, 170);
+        let total = t.today.input + t.today.output + t.today.cache_read;
+        assert_eq!(t.today.by_agent.iter().map(|r| r.total).sum::<i64>(), total);
+
+        // 三态 N 元判据：主源 Failed（schema 错）× CC Missing × 第三源有数据
+        // → 横幅触发（「其余有数据」由第三源满足）
+        let bad = make_db("p3-3src-bad", CREATE_SESSION_OLD);
+        let no_cc = temp_dir("p3-3src-nocc").join("missing");
+        let sources = vec![
+            SourceSpec { is_primary: true, kind: SourceKind::OpenencodeDb { data_dir: &bad } },
+            SourceSpec { is_primary: false, kind: SourceKind::CcTranscript { cc_dir: &no_cc, cache: &cache } },
+            SourceSpec { is_primary: false, kind: SourceKind::CcTranscript { cc_dir: &third_dir, cache: &third_cache } },
+        ];
+        let res = query_stats_sources(&sources, 0, d + ms(86_400), "session").unwrap();
+        assert!(res.degraded.is_some(), "主源 Failed × 其余任一源有数据（第三源）→ 横幅");
+        assert_eq!(res.rows.len(), 1, "仅第三源行（CC Missing 无行）");
+        assert_eq!(res.rows[0].tokens_input, 20);
     }
 
     // ---- 真实库对账（TC-TK-06；手动跑：--ignored --nocapture） ----
@@ -2009,7 +2405,7 @@ mod tests {
         let now = now_ms();
         let from = now - 7 * 24 * 3600 * 1000;
         for g in ["session", "day", "week", "range"] {
-            let res = query_stats_dual(&dir, &cc_dir, &cache, from, now, g).unwrap();
+            let res = query_stats_all(&dir, &cc_dir, &cache, from, now, g).unwrap();
             let cc = res
                 .rows
                 .iter()
@@ -2027,7 +2423,7 @@ mod tests {
                 );
             }
         }
-        let t = today_stats_dual(&dir, &cc_dir, &cache, now).unwrap();
+        let t = today_stats_all(&dir, &cc_dir, &cache, now).unwrap();
         println!(
             "[dual] today: input={} output={} cache_read={} cost={:.4} degraded={:?}",
             t.today.input, t.today.output, t.today.cache_read, t.today.cost, t.degraded

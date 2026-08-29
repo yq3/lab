@@ -12,7 +12,7 @@ import {
   type StatsError,
   type TokenRow,
 } from "../lib/token-stats";
-import { AGENTS, hasCostOf } from "../lib/agents";
+import { badgeOf, hasCostOf, specOf } from "../lib/agents";
 import {
   agentsWithRows,
   computeModelChips,
@@ -80,17 +80,16 @@ function isRoutineSession(s: TokenRow): boolean {
 
 /** v2 registry（agent-registry §6.2）：会话行 agent 徽标查表——**未知 id
  *  显原名**（消静默错误 ②：原三元 else→oc 会把新 agent 会话行错标 oc）；
- *  title 走 i18n 全名，未知 id 原名兜底。 */
+ *  text 走 badgeOf（P2 钉 1 直接覆盖消费点）、title 走 i18n 全名，
+ *  未知 id 原名兜底。 */
 function agentBadgeOf(s: TokenRow): { text: string; title: string } {
-  const spec = AGENTS.find((a) => a.id === s.agent);
-  return spec
-    ? { text: spec.short, title: t(spec.labelKey) }
-    : { text: s.agent, title: s.agent };
+  const spec = specOf(s.agent);
+  return { text: badgeOf(s.agent), title: spec ? t(spec.labelKey) : s.agent };
 }
 
 /** v2 M5 R2（TC-M5-04-1）：agent tab 显示名（i18n 全名；未知 agent 原样）。 */
 function agentLabel(agent: string): string {
-  const spec = AGENTS.find((a) => a.id === agent);
+  const spec = specOf(agent);
   return spec ? t(spec.labelKey) : agent;
 }
 
@@ -124,7 +123,11 @@ export default function TokenStats() {
    * 替代 R1 的 agent 复选框第二组（维度混杂偏差修正）。作用域仅柱图。
    */
   const [agentTab, setAgentTab] = useState<string | null>(null);
-  /** v2 M5（C1/N-4）：opencode 源报错 × CC 有数据的降级标记（仅 panel 细横幅）。 */
+  /**
+   * v2 M5（C1/N-4）→ P3 口径 A′（agent-registry §6.4）：degraded 细横幅收窄为
+   * 「主源 opencode **Failed**（在但坏）× 其余源有数据」（Missing 不触发），
+   * 仅 panel 顶部细条提示。
+   */
   const [degraded, setDegraded] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -328,8 +331,9 @@ export default function TokenStats() {
       {/* 错误态（TC-TK-03/04/13：不崩溃，给出可行动提示） */}
       {error && <div className="token-error">{errorHint(error)}</div>}
 
-      {/* v2 M5（C1/N-4）：degraded 细横幅——opencode 源报错 × CC 有数据时
-          仅 panel 顶部细条提示，不遮蔽内容；pet 侧三层不呈现（宠物不打扰） */}
+      {/* v2 M5（C1/N-4）→ P3 口径 A′：degraded 细横幅——主源 opencode Failed
+          （在但坏）× 其余源有数据时仅 panel 顶部细条提示，不遮蔽内容；
+          pet 侧三层不呈现（宠物不打扰） */}
       {!error && degraded && (
         <div className="token-degraded" title={degraded}>
           {t("token.degraded")}

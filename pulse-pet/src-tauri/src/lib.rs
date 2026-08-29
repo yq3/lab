@@ -96,8 +96,8 @@ fn get_display_state(state: tauri::State<'_, Arc<Mutex<SessionStateMachine>>>) -
 /// 全部在后台线程完成（不 join 回 http 线程，N-3）。
 ///
 /// 查询与气泡下发以闭包注入（`idle_hook_body` 单测断言 CC idle 零 opencode 查询；
-/// **注入式签名冻结不变**——§6.1 决策 4，P4 接第三家带统计源的 agent 时再做
-/// 第二波泛化）。v2 M6（V2-DESIGN §6.2，TC-M6-03-1）：`emit_bubble` 签名
+/// **注入式签名冻结不变**——§6.1「注入式签名冻结」，P4 接第三家带统计源的
+/// agent 时再做第二波泛化）。v2 M6（V2-DESIGN §6.2，TC-M6-03-1）：`emit_bubble` 签名
 /// `(agent, text)`——`pulsepet://bubble` payload 补 `agent` 字段（opencode→[oc] /
 /// CC→[cc] 徽标数据源；同版本锁步发布，前端旧解析只读既有字段向后兼容）。
 ///
