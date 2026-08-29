@@ -140,6 +140,8 @@ cd pulse-pet/opencode-plugin
 
 只移除带 `--pulse-pet-managed` 标记的项 + 删除插件文件；你自己的其它 plugin 项保留。
 
+> **卸载应用前先卸插件**：插件装在用户配置目录（如 `~/.config/opencode/`、`~/.claude/`），卸载 PulsePet 应用本身（macOS 拖废纸篓 / Windows 卸载器）**不会**自动移除它们——请先在「设置 → 接入管理」卸载各接入，或执行上方卸载命令。残留插件对 agent 无功能影响（上报失败静默），只会留下孤儿文件。
+
 ---
 
 ## 自定义宠物导入

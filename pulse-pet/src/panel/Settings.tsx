@@ -555,9 +555,6 @@ export default function Settings() {
 
       {/* v2 M1：接入管理（V2-DESIGN §1.7，TC-INT-09） */}
       <h2>{t("integrations.title")}</h2>
-      {/* §十二 F7：备份提示区级一处；二轮续：文案点明同目录 + 移至标题下（照
-          功能管理 hint 位形态，卡片列表上方） */}
-      <p className="settings-current">{t("integrations.backupNote")}</p>
       {intgErrors.__load && <p className="settings-error">⚠️ {intgErrors.__load}</p>}
       <div className="intg-list">
         {(intg ?? []).map((s) => {
@@ -608,6 +605,11 @@ export default function Settings() {
           );
         })}
       </div>
+      {/* §十八（2026-08-29 用户问询 + 二轮裁定）：接入列表下方单条脚注 = 备份
+          提示（原标题下，backupNote 键已并入）+ 卸载提示合一句——插件装在
+          用户配置目录，App 卸载不会自动清理，先卸接入再卸应用（README 卸载
+          插件节同款提示） */}
+      <p className="settings-current">{t("integrations.uninstallHint")}</p>
     </section>
   );
 }
