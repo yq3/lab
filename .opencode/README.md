@@ -1014,3 +1014,34 @@ D31 落地后切换到任一 agent 即报错：`Agent Supervised-Coding's config
 **命名说明**：reviewer 之名曾在 D24 改名为 committer（代码审查者）；本 reviewer 是**新角色**（方案文档审查），非回归——角色名与动作/状态分离原则（D24）不变。
 
 **接入面**：supervised-coding / coder / tester / committer 的 task 权限均不放开（他们不调用 Reviewer）；opencode.json 不改。未来若要进工作流（如 spec 确认后强制方案审查），再走决策记录修订。
+
+### D43. tester 图像选型修订：原生读图优先，Vision 子代理降备胎（2026-08-28）
+
+**背景**：08-27 14:13 tester 模型 deepseek-v4-flash → glm-5.3-flash（工作区未提交改动），但 D38/D39 的【图像识别选型】未同步——决策树只有 DOM→OCR→委派 Vision 三条路，无"自己读图"选项。事后研究（opencode.db 只读查询）证实：glm-5.3-flash 三个 Tester 会话（v2-m6/polish/pet-size）**原生读图 0 次、Vision 调用 0 次**，多模态能力全程闲置；期间 m6 派工词还因 m5 Vision 流卡死事故显式禁用了 Vision 子代理，语义判断通道实际为空。
+
+**修订**（tester.md【图像识别选型】两处）：
+
+- 语义判断 → 优先 read 截图自判（若当前模型支持图片输入），结论须写明依据、高风险断言与 OCR/DOM 双通道互证
+- Vision 子代理降为备胎：模型读不出图时才委派；优先级变为 DOM > 钩子 > OCR > 直接读图 > Vision
+
+**理由**（三代实证）：A 时代纯脚本管线环境敏感（v1-M1 无头假阴性损失 2 轮+人工介入）；B 时代 Vision 有语义价值但工程代价高（37.6s/次延迟、5.1k token/次无状态重复上下文、1 次幻觉需交叉核验、2 次流卡死）；C 时代 DOM/OCR 确定性通道成熟后图像验证需求本身萎缩（m6 图像类 bash 命令 17 次 vs m4 403 次）。文案不硬编码模型名（用"若当前模型支持图片输入"自描述），避免下次换模型再产生同样的提示词滞后。
+
+**边界**：OCR 行不动（"文字存在"仍走 OCR，确定性+坐标）；vision.md 与 frontmatter `"Vision": allow` 保留（备胎）；coder.md 不改（glm-5.3 多模态可用性未验证，观察后再定）；原生多模态端到端链路（zhipuai-coding-plan 经 opencode read 传图）未实测，首次真实任务自然验证——读不出图时按备胎条款降级，指引自洽。
+
+### D44. Vision 权限补全：depth-2 零 ask 不变量，修嵌套委派挂死（2026-08-30，D38/D40 修正）
+
+**问题**（实跑复现）：Coder/Tester/Committer 委派 Vision 读**其他工作区**的图片（不在仓库内、也不在 D37 放行的临时目录）时流程永久挂死。根因：vision.md 权限只有 `edit: deny` + `bash: deny`，无 `external_directory` 规则 → Vision 的 read 触发工作区外默认 `ask`；而 ask 能否冒泡到 TUI 取决于嵌套深度——depth-1 正常（coder 的 `git push*` ask 即依赖此机制），**depth-2 的权限申请用户不可见** → Task 调用无限等待。D40 附带发现已记录同类风险（当时结论"截图放仓库内或已放行目录"只是规避，未修根因），D43 提及的 m5 Vision 流卡死事故即此坑首次显形；D43 将 Vision 降为备胎后仍会触发——glm-5.3-flash 读不出图才委派，此时图片路径不受控。
+
+**修订**（vision.md frontmatter 权限补全，确立不变量：**depth-2 agent 零 ask、零用户交互，潜在阻塞一律 fail-fast**）：
+
+- `external_directory: {"*": allow}`：读任意工作区外路径不再触发 ask。风险评估：Vision 纯只读（edit/bash 全禁、task 因 D40 挂载闸不挂载），最坏情况是读了不该读的文件，与 D32/D37"防误操作、非防对抗"哲学一致
+- `question` / `webfetch` / `websearch`（flat deny）：杜绝其余可能在 depth-2 等待用户的工具，触发即工具报错而非静默挂死；Vision 本用不到，零功能损失
+- prompt 正文不动（"路径不可读时直接报告"条款继续覆盖 macOS TCC 等非权限类失败）；tester/coder/committer/reviewer 不动（depth-1 ask 正常冒泡）；`subagent_depth: 2` 不动
+
+**验证记录**（2026-08-30 实测，headless `opencode run` 全新进程，测试图放 /var/folders 工作区外）：
+
+1. build→Vision（depth-1）读工作区外截图：正常返回 5 小节结构化分析（修复前 headless 遇 ask 必挂死，D40）
+2. build→Committer→Vision（depth-2，生产等价链路——deepseek 无多模态必须委派）：同样无阻塞完整回传，曾经的挂死组合（嵌套 Vision + 工作区外路径 + 无头）已消除
+3. 委派 Vision 自报工具清单：`glob, grep, read, skill`——question/webfetch/websearch 已从工具列表移除（deny 真实生效，排除 frontmatter 未知字段被静默路由进 options 的假阳性）；bash/edit/write/task 亦不在列，只读面干净
+
+**边界说明**：Vision 不可 `opencode run --agent Vision` 直调（subagent 非 primary，CLI 回退 build），验证一律走委派路径；外部读放行后，D40"截图放仓库内或已放行目录"的规避条款不再必要，委派时截图可放任意绝对路径。
