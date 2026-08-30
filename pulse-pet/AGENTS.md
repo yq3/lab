@@ -4,12 +4,12 @@
 
 ## 这是什么
 
-PulsePet 是一个桌面宠物 App（Tauri 2 + React + TS + Vite），监听 opencode agent 状态并用像素小猫动画呈现。v1 仅支持 opencode，架构上预留多 agent 扩展。
+PulsePet 是一个桌面宠物 App（Tauri 2 + React + TS + Vite），监听 coding agent（opencode / Claude Code）状态并用像素小猫动画呈现。v1 仅 opencode；v2 起多 agent 注册表收敛（见下「新增 agent」条），接入新 agent 见 `docs/v2/agent-onboarding.md`。
 
 ## 文档地图（2026-08-22 起按版本归档于 `docs/`）
 
 - `docs/v1/`——**0.1.x 发版线**文档：`DESIGN.md`（技术方案）、`TEST-CASES.md`（验收用例）、`DECISIONS.md`（v1 范围决策）、`V1-OPEN-ITEMS.md`（v1 遗留清单，**§八 = v0.1.3 维护版计划**）、`DESIGN-REVIEW.md` / `TEST-CASES-REVIEW.md`（历史评审，留档原貌）、`desktop-pet-research.md`（调研）。0.1.x 线的维护性文档修订（如 v0.1.3 改 TEST-CASES 措辞）仍落此处。
-- `docs/v2/`——**v2** 范围与设计：`V2-SCOPE.md`（v2 主体 M1~M6）；后续 `V2-DESIGN.md` 等落此目录，**不回改 docs/v1/ 文档**。
+- `docs/v2/`——**v2** 范围与设计：`V2-SCOPE.md`（v2 主体 M1~M6）、`V2-OPEN-ITEMS.md`（v2 运行时问题 / 反馈批次 / 追加特性，§一~§二十一）、`agent-registry.md`（多 agent 注册表设计与实施记录）、`agent-onboarding.md`（新 agent 接入操作手册）、`pet-size.md`（宠物大小档位与归一化）；后续新文档落此目录，**不回改 docs/v1/ 文档**。
 - 正文中的 `DESIGN §x` / `TEST-CASES §x` 等纯文字引用均指 `docs/v1/` 下同名文件。
 
 ## 本目录技术栈与命令
@@ -39,7 +39,7 @@ PulsePet 是一个桌面宠物 App（Tauri 2 + React + TS + Vite），监听 ope
 - **不读 opencode 原生 todo 表**：opencode 的 `todo` 表语义是"会话内子任务"，与用户日常待办无关。
 - **事件来源**：M2 起由 opencode 插件经本地 HTTP（127.0.0.1 + token）上报；M1 阶段状态由前端 store 手动驱动（点击宠物循环切换）。
 - **git 约定**：默认分支 `develop`，除非明确要求否则不 commit/push；push 用 SSH。
-- **新增 agent（v2 registry）**：agent 注册的事实源是两端注册表——Rust `src-tauri/src/agents.rs` 的 `AGENTS` 表 + 前端 `src/lib/agents.ts` 的 `AGENTS` 表（include_str! 测试互钉 id/short 一致）；新增 agent 指南见 `docs/v2/agent-registry.md`（一行注册 + hook 脚本三件套 + i18n 键，勿再散落 if/switch/三元分支）。
+- **新增 agent（v2 registry）**：agent 注册的事实源是两端注册表——Rust `src-tauri/src/agents.rs` 的 `AGENTS` 表 + 前端 `src/lib/agents.ts` 的 `AGENTS` 表（include_str! 测试互钉 id/short 一致）；**接入操作手册见 `docs/v2/agent-onboarding.md`**（双链清单 + checklist，v0.2.3 基线；两端各一行注册 + hook 脚本三件套 + i18n 键 + 接 codex 时 7 处既有拒绝钉翻转，勿再散落 if/switch/三元分支），设计依据与实施记录见 `docs/v2/agent-registry.md`。
 
 ## 里程碑速览（DESIGN §10）
 

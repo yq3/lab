@@ -1,8 +1,8 @@
 # PulsePet
 
-桌面宠物 App：监听 opencode agent 工作状态，用一只像素小猫实时呈现（9 行姿态 atlas 动画），配 token 本地统计、喝水/休息提醒（气泡 + 烟花）、轻量 todo 插件（派生提醒 / 完成联动庆祝）。
+桌面宠物 App：监听 opencode / Claude Code agent 工作状态，用一只像素小猫实时呈现（9 行姿态 atlas 动画），配 token 本地统计（多 agent 维度）、喝水/休息提醒（气泡 + 烟花）、轻量 todo 插件（派生提醒 / 完成联动庆祝）。
 
-> POC 阶段，效果验证通过后可能拆仓独立演进。设计与范围见 [docs/v1/DESIGN.md](./docs/v1/DESIGN.md)、[docs/v1/DECISIONS.md](./docs/v1/DECISIONS.md)，验收依据见 [docs/v1/TEST-CASES.md](./docs/v1/TEST-CASES.md)；v1 遗留与 v0.1.3 维护版计划见 [docs/v1/V1-OPEN-ITEMS.md](./docs/v1/V1-OPEN-ITEMS.md)，v2 范围见 [docs/v2/V2-SCOPE.md](./docs/v2/V2-SCOPE.md)。
+> POC 阶段，效果验证通过后可能拆仓独立演进。设计与范围见 [docs/v1/DESIGN.md](./docs/v1/DESIGN.md)、[docs/v1/DECISIONS.md](./docs/v1/DECISIONS.md)，验收依据见 [docs/v1/TEST-CASES.md](./docs/v1/TEST-CASES.md)；v1 遗留与 v0.1.3 维护版计划见 [docs/v1/V1-OPEN-ITEMS.md](./docs/v1/V1-OPEN-ITEMS.md)，v2 范围见 [docs/v2/V2-SCOPE.md](./docs/v2/V2-SCOPE.md)；多 agent 注册设计与新 agent 接入手册见 [docs/v2/agent-registry.md](./docs/v2/agent-registry.md) / [docs/v2/agent-onboarding.md](./docs/v2/agent-onboarding.md)（开发者向）。
 
 ## 技术栈
 
@@ -52,6 +52,8 @@ src-tauri/target/release/bundle/dmg/PulsePet_<version>_aarch64.dmg
 ## 连接 opencode（事件链路）
 
 PulsePet 通过一个 **opencode 插件**感知 agent 状态：插件监听 opencode 的官方 hooks / 事件总线 → 归一化为 9 种状态 → POST 到本机 `127.0.0.1` 的 PulsePet HTTP 端点 → 宠物动画切换。全程本机回环，无需任何外网。
+
+> v2 起同样支持 **Claude Code**（官方 hooks 机制：每事件 spawn hook 脚本，stdin JSON → POST 同一端点）。两家接入都可在 App 内「设置 → 接入管理」一键安装/卸载/查看状态；本节脚本是 opencode 接入的等价手动方式。
 
 ### 安装插件
 
@@ -267,7 +269,7 @@ cp -r <下载解压出的宠物目录> ~/.codex/pets/<宠物id>
 
 ### Token 统计（面板「Token」页）
 
-- 数据源：只读查询 opencode 本地数据库（`~/.local/share/opencode/opencode.db`），不联网、不上传；
+- 数据源（本地只读，不联网、不上传）：opencode 本地数据库（`~/.local/share/opencode/opencode.db`）+ Claude Code 会话记录（`~/.claude/projects/` 下 JSONL，解析后本地缓存）；Token 页按 agent 分 tab / 徽标，未知 agent 原名兜底；
 - 时间窗：近 7 天 / 近 30 天 / 自定义日期区间（含当天）；
 - 维度：按天 / 按周 / 整段汇总；会话列表按用量排序可展开明细（input/output/reasoning/cache/cost）；
 - 项目分布饼图 + KPI 卡（input / output / cache read / cost，USD）；
@@ -382,11 +384,11 @@ pulse-pet/
 │   ├── migrations/           # 001-init.sql / 002-m7-todo.sql
 │   ├── capabilities/default.json  # M8 收敛：仅 core:event:default
 │   └── Cargo.toml
-├── opencode-plugin/          # opencode 插件（install.sh / install.ps1 + hook，详见其 README）
+├── opencode-plugin/          # 接入 hook 脚本（opencode 插件 + claude-code hook + 安装脚本，详见其 README）
 ├── scripts/gen-assets.mjs    # 生成内置精灵素材 + 图标源
 ├── docs/                     # 文档（按版本划分：v1 = 0.1.x 线设计/验收/遗留，v2 = v2 范围）
 │   ├── v1/                   # DESIGN / TEST-CASES / DECISIONS / V1-OPEN-ITEMS（含 v0.1.3 计划 §八）等
-│   └── v2/                   # V2-SCOPE 等
+│   └── v2/                   # V2-SCOPE / V2-OPEN-ITEMS / agent-registry / agent-onboarding / pet-size
 └── README.md
 ```
 
