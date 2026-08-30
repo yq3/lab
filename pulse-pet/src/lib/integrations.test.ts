@@ -21,6 +21,8 @@ function st(over: Partial<IntegrationStatus> = {}): IntegrationStatus {
     lastEventAt: null,
     message: "",
     error: null,
+    // §二十（V2-OPEN-ITEMS）：统计源状态行默认健康值
+    stats: { state: "ok", path: null, detail: null },
     ...over,
   };
 }

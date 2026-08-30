@@ -7,6 +7,7 @@ import { initThemeBridge } from "../lib/theme";
 import { PANEL_TAB_EVENT, normalizeTab } from "../lib/interaction";
 import { isTauriRuntime } from "../lib/token-stats";
 import { t, useLangStore } from "../lib/i18n";
+import { specOf } from "../lib/agents";
 
 /**
  * 控制面板（v2 M2 面板壳，V2-DESIGN §2.4/§2.5；2026-08-24 修订）：
@@ -76,7 +77,15 @@ export default function Panel() {
   // 状态芯片文案：agent 空（sessions 全空）→ 优雅降级只显示 kind（TC-UI-03-4）；
   // v2 M4（N4/TC-M4-10-5）：伪 session 的 agent=="task" → 显示「定时任务」
   //（panel.agentTask）——技术字面量 task 对用户不可读。
-  const agentText = agent === "task" ? t("panel.agentTask") : (agent ?? "");
+  // §二十一（2026-08-30）：已注册 agent 品牌名查表（opencode→OpenCode /
+  // claude-code→Claude Code，走 labelKey）；未知 agent 原名兜底不变。
+  const agentSpec = agent && agent !== "task" ? specOf(agent) : undefined;
+  const agentText =
+    agent === "task"
+      ? t("panel.agentTask")
+      : agentSpec
+        ? t(agentSpec.labelKey)
+        : (agent ?? "");
   const statusText = agent ? `${agentText} · ${kind}` : kind;
 
   return (

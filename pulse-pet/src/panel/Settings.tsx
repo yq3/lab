@@ -65,6 +65,15 @@ const INTG_STATE_KEYS: Record<IntegrationUiState, string> = {
   error: "integrations.error",
 };
 
+/** §二十（V2-OPEN-ITEMS）：统计源状态行四态 → 文案键（wire state 字符串
+ * 映射；未知值兜底 statsNone——Rust 侧字符串枚举防漂移）。 */
+const STATS_STATE_KEYS: Record<string, string> = {
+  ok: "integrations.statsOk",
+  missing: "integrations.statsMissing",
+  failed: "integrations.statsFailed",
+  none: "integrations.statsNone",
+};
+
 export default function Settings() {
   const [options, setOptions] = useState<PetOption[] | null>(null);
   const [current, setCurrent] = useState<AtlasMeta | null>(null);
@@ -609,6 +618,18 @@ export default function Settings() {
               </div>
               <p className="intg-path">{s.configPath}</p>
               <p className="intg-message">{s.message}</p>
+              {/* §二十（V2-OPEN-ITEMS）：统计源状态行——统计链被动发现式读取的
+                  三态呈现（正常 / 未检测到数据 / 异常 / 无统计源）；hover title =
+                  路径 + Missing 原因 / Failed 错误摘要（Rust stats_status_of 组装）。
+                  与 Token 页 sourceNote 脚注互为闭环。 */}
+              <p
+                className="intg-message"
+                title={[s.stats?.path, s.stats?.detail].filter(Boolean).join(" · ") || undefined}
+              >
+                {t("integrations.statsRow", {
+                  state: t(STATS_STATE_KEYS[s.stats?.state ?? "none"] ?? "integrations.statsNone"),
+                })}
+              </p>
               {actionNotice && (
                 <p className="intg-row-notice">✅ {actionNotice}</p>
               )}

@@ -30,6 +30,18 @@ export interface IntegrationStatus {
   message: string;
   /** 检测/操作失败原因（非 null → UI「错误」态）。 */
   error: string | null;
+  /** §二十（V2-OPEN-ITEMS）：统计源状态行（被动发现式读取的三态呈现）。 */
+  stats: StatsSourceStatus;
+}
+
+/** §二十：统计源探测 wire 形态（Rust StatsSourceStatus camelCase 序列化；
+ * state 四态——前端文案键映射见 Settings 的 STATS_STATE_KEYS）。 */
+export interface StatsSourceStatus {
+  state: "ok" | "missing" | "failed" | "none";
+  /** 数据源路径（Ok/Missing hover title）。 */
+  path: string | null;
+  /** Missing 原因 / Failed 错误摘要（hover title 追加段）。 */
+  detail: string | null;
 }
 
 // v2 registry（agent-registry §6.2）：IntegrationId 联合类型改由 agents.ts

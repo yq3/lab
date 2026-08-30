@@ -67,12 +67,12 @@ const zh: Dict = {
   // P3 口径 A′（agent-registry §6.4 规则 2）：硬报错仅当全部源无数据且无一源
   // Ok——文案 N 源中性化（原「未检测到 opencode 数据库」措辞重写）
   "token.error.noDatabase": "未检测到任何 agent 用量数据（被监测的 agent 尚未安装或从未使用）。",
-  "token.error.legacyStorage": "检测到旧版 opencode 存储格式（storage/session/*.json）：请升级 opencode 后使用。",
+  "token.error.legacyStorage": "检测到旧版 OpenCode 存储格式（storage/session/*.json）：请升级 OpenCode 后使用。",
   "token.error.schemaMismatch": "opencode.db schema 不兼容（{msg}）",
   "token.error.query": "查询失败：{msg}",
   "token.needApp": "Token 统计需要在 PulsePet App（Tauri）内查看",
   // v2 M5（§5.6，TC-M5-04/10）：agent 筛选 chip + 会话列表徽标全名
-  "token.agent.opencode": "opencode",
+  "token.agent.opencode": "OpenCode",
   "token.agent.claudeCode": "Claude Code",
   // v2 M5 R2（TC-M5-04-1）：agent tab「全部」项（恒显，默认选中）
   "token.agent.all": "全部",
@@ -81,7 +81,12 @@ const zh: Dict = {
   "token.taskBadge": "定时任务例程",
   // P3 口径 A′（agent-registry §6.4 规则 3）：degraded 细横幅收窄为主源 opencode
   // Failed（在但坏）× 其余源有数据（仅 panel；Missing 不触发——CC-only 干净）
-  "token.degraded": "opencode 数据源异常：仅显示其它 agent 数据",
+  "token.degraded": "OpenCode 数据源异常：仅显示其它 agent 数据",
+  // §二十（V2-OPEN-ITEMS）：Token 页底部被动性质说明（文案 2026-08-30 用户
+  // 逐轮裁定逐字定稿——统计链自动发现/被动读取/无需安装/暂不支持管理 +
+  // 状态查看入口导向接入卡）
+  "token.sourceNote":
+    "说明：Token 统计为被动读取——自动发现各 agent 本地产生的用量记录，无需安装，暂不支持在应用内开关或管理；某 agent 未显示数据时，可到设置 → 接入管理查看统计源状态。",
   "token.hoverAgent": "今日 agent 分布",
 
   // ---- 提醒页 ----
@@ -190,7 +195,7 @@ const zh: Dict = {
   "tasks.form.cwd": "工作目录（可选）",
   "tasks.form.timeout": "超时（分钟，1-120）",
   "tasks.form.instruction": "指令",
-  "tasks.tpl.title": "opencode 例程",
+  "tasks.tpl.title": "OpenCode 例程",
   "tasks.tpl.hint": "一键填充：opencode run --title \"pulsepet 例程: <任务名>\" \"<指令>\"（可再改）",
   "tasks.tpl.auto": "自动放行权限（--auto，危险）",
   "tasks.tpl.autoHint": "勾选后例程的权限请求自动放行——无人值守执行副作用命令，请谨慎",
@@ -358,8 +363,15 @@ const zh: Dict = {
   "integrations.lastEvent": "事件正常",
   "integrations.noEvent": "最近无事件",
   "integrations.notes": "接入说明：\n1.安装/卸载前会自动备份配置文件至同目录\n2.安装/卸载之后重开会话才会生效，已运行中的会话保持原样\n3.卸载 PulsePet 前请先在此卸载各接入，卸载应用不会自动移除插件文件",
-  "integrations.opencodeDesc": "opencode",
+  "integrations.opencodeDesc": "OpenCode",
   "integrations.claudeDesc": "Claude Code",
+  // §二十（V2-OPEN-ITEMS）：接入卡统计源状态行（被动发现式读取的三态呈现；
+  // statsRow 的 {state} 由 STATS_STATE_KEYS 查表子键填充）
+  "integrations.statsRow": "统计源：{state}",
+  "integrations.statsOk": "正常",
+  "integrations.statsMissing": "未检测到数据",
+  "integrations.statsFailed": "异常",
+  "integrations.statsNone": "无统计源（仅事件接入）",
   "integrations.fail": "操作失败：{msg}",
   "integrations.actionDone": "操作完成：",
 
@@ -431,12 +443,12 @@ const en: Dict = {
   "token.error.noDatabase":
     "No agent usage data detected (monitored agents not installed or never used).",
   "token.error.legacyStorage":
-    "Legacy opencode storage detected (storage/session/*.json): please upgrade opencode.",
+    "Legacy OpenCode storage detected (storage/session/*.json): please upgrade OpenCode.",
   "token.error.schemaMismatch": "opencode.db schema incompatible ({msg})",
   "token.error.query": "Query failed: {msg}",
   "token.needApp": "Token stats are only available inside the PulsePet app (Tauri)",
   // v2 M5（§5.6，TC-M5-04/10）：agent 筛选 chip + 会话列表徽标全名
-  "token.agent.opencode": "opencode",
+  "token.agent.opencode": "OpenCode",
   "token.agent.claudeCode": "Claude Code",
   "token.agent.all": "All",
   // §十二 F3（2026-08-28）：token.costOpencodeOnly 费用口径标注键清退（用户裁定）
@@ -444,7 +456,10 @@ const en: Dict = {
   "token.taskBadge": "Scheduled routine",
   // P3 口径 A′（agent-registry §6.4 规则 3）：degraded banner narrowed to primary
   // source opencode Failed × other sources have data (panel only; Missing silent)
-  "token.degraded": "opencode data source error: showing other agents' data only",
+  "token.degraded": "OpenCode data source error: showing other agents' data only",
+  // §二十（V2-OPEN-ITEMS）：Token 页底部被动性质说明（与 zh 同一定稿口径）
+  "token.sourceNote":
+    "Note: token stats are read passively — PulsePet auto-discovers each agent's local usage records. No setup is needed, and sources cannot be toggled in-app. If an agent shows no data, check its source status in Settings → Integrations.",
   "token.hoverAgent": "Today's tokens by agent",
 
   "reminders.needApp": "Reminders are only available inside the PulsePet app (Tauri)",
@@ -553,7 +568,7 @@ const en: Dict = {
   "tasks.form.cwd": "Working directory (optional)",
   "tasks.form.timeout": "Timeout (minutes, 1-120)",
   "tasks.form.instruction": "Instruction",
-  "tasks.tpl.title": "opencode routine",
+  "tasks.tpl.title": "OpenCode routine",
   "tasks.tpl.hint": "One-click fill: opencode run --title \"pulsepet 例程: <task name>\" \"<instruction>\" (editable)",
   "tasks.tpl.auto": "Auto-approve permissions (--auto, dangerous)",
   "tasks.tpl.autoHint": "Permission requests are auto-approved — unattended side-effect commands, use with care",
@@ -717,8 +732,15 @@ const en: Dict = {
   "integrations.lastEvent": "Receiving events",
   "integrations.noEvent": "No recent events",
   "integrations.notes": "Notes:\n1. Config files are backed up automatically to the same directory before install/uninstall\n2. Changes take effect in newly started sessions only — running sessions keep the previous plugin\n3. Uninstall integrations here before uninstalling PulsePet; uninstalling the app does not remove plugin files",
-  "integrations.opencodeDesc": "opencode",
+  "integrations.opencodeDesc": "OpenCode",
   "integrations.claudeDesc": "Claude Code",
+  // §二十（V2-OPEN-ITEMS）：接入卡统计源状态行（与 zh 键集合一致，
+  // i18n.test.ts 完备性测试把守）
+  "integrations.statsRow": "Stats source: {state}",
+  "integrations.statsOk": "OK",
+  "integrations.statsMissing": "no data detected",
+  "integrations.statsFailed": "error",
+  "integrations.statsNone": "none (events only)",
   "integrations.fail": "Operation failed: {msg}",
   "integrations.actionDone": "Done: ",
 

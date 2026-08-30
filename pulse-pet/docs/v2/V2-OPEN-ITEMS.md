@@ -583,6 +583,48 @@ Rust 定义 `AgentSpec { id, short_name, bundled_hook, install/uninstall/status,
 
 ---
 
+## 二十、接入管理卡补统计源状态行 + Token 页被动读取脚注（2026-08-30，**已实施同日**）
+
+> 来源：用户问询（2026-08-30）——"设置页的接入管理是事件接入管理，是否有必要加一个统计接入管理？"同日二轮追加 Token 页底部说明脚注。
+
+**事实口径**：现有接入管理卡 = 事件链管理（hook 安装/卸载/doctor/last_event_at）；统计链无任何 UI——被动发现式读取（opencode.db / CC transcript），无安装物无卸载物，故**不存在对称的"管理"语义**；源状态三态（Ok/Missing/Failed，口径 A′）仅经 Token 页隐性呈现（Failed 横幅 hover / 硬报错文案，Missing 已随口径 A′ 静默）。
+
+**裁定（2026-08-30 讨论定稿）**：不做独立"统计接入管理"区块，也不做控制型开关（开关读取撞 agent-registry §9-7 killswitch 粒度同款问题且无真实诉求）——两个落点：① **现有接入卡内补一行"统计源状态"**（正常 / 未检测到数据〔路径 hover〕/ 异常〔错误摘要〕/ 无统计源〔`StatsSource::None` 形态，与 §7.1 概念自洽〕）：卡语义即"该 agent 与 PulsePet 的连接健康度"，事件链 + 统计链各占一行自然对称；② **Token 页底部脚注**说明统计链被动性质并将状态查看入口导向接入卡（互为闭环）。
+
+**实施落点**：
+
+1. Rust `token_stats.rs`：抽 `probe_source_states()`（遍历 sources_from_agents 逐源只判三态、不跑查询聚合）。**量级利好（2026-08-30 核实）**：`open_checked`（:518）本身就是完整三态判据载体——`detect_db_path` None→Missing（含 legacy 区分）/ Some×open 或 schema 失败→Failed / 成功→Ok；CC 侧 = `cc_projects_dir()` 目录存在性——无需新写判据，只消费既有判据；
+2. Rust `integrations/mod.rs`：`integrations_status` 返回体扩展（`IntegrationStatus` 加 `stats_state`/`stats_path` 字段，**复用现有命令不新开 IPC**；Ok 态会真连 db，沿用命令层既有 blocking 纪律）——在 P1 注册表分发框架内加法扩展，非改分支逻辑；
+3. 前端 `Settings.tsx`：接入卡加一行状态渲染（hover 路径/错误摘要）；
+4. 前端 `TokenStats.tsx`：会话列表区块后、组件根 div 收尾前加脚注，复用 `settings-current` 小字模式；i18n 新键 `token.sourceNote`（zh/en 成对），**文案逐字定稿（2026-08-30 用户逐轮裁定：紧凑版 + 追加状态查看入口句）**：
+   - zh：`说明：Token 统计为被动读取——自动发现各 agent 本地产生的用量记录，无需安装，暂不支持在应用内开关或管理；某 agent 未显示数据时，可到设置 → 接入管理查看统计源状态。`
+   - en：`Note: token stats are read passively — PulsePet auto-discovers each agent's local usage records. No setup is needed, and sources cannot be toggled in-app. If an agent shows no data, check its source status in Settings → Integrations.`
+5. 测试：Rust 钉（每源三态 + `StatsSource::None` 形态"无统计源"）+ V2-TEST-CASES 一条用例 + i18n 键集合完备性（既有测试自动把守）。
+
+**量级评估（2026-08-30）**：约 140~200 行净变动、3~4 个代码文件 + i18n——半天量级小任务（约为 §十八脚注的 6~8 倍、P3 的 1/4），适合作为 P4 接第三家的顺手项（届时新源判据自动进卡）。**对 agent-registry 已实施内容零影响**（2026-08-30 逐项对账）：AGENTS 表/StatsSource enum/双端互钉/N 源编排/MergeAcc/口径 A′ 判据/P1-P3 全部钉子/idle 分流/register_states 均不动；有交集的 `integrations/mod.rs` 与 `Settings.tsx` 均在 registry 建立的查表/派生框架内做加法；`StatsSource::None` 显示"无统计源"正是 registry 为"仅事件链 agent"预留形态（§7.1）的自然呈现。
+
+**关联悬置项**：实施时与 agent-registry.md §9-6（新 agent 是否都进接入管理卡）一并拍板。
+
+**实施记录（2026-08-30）**：已实施（工作区改动，未 commit）。① Rust `token_stats.rs` §20 探测区块：`ProbeState`（Ok/Missing/Failed/NoSource 四态）+ `probe_one`（路径注入，判据复刻 `query_source_rows` 两段式——第二段以 `open_checked` 为 Failed/Ok 判定）+ 生产壳 `probe_spec`；② Rust `integrations/mod.rs`：`StatsSourceStatus` wire 结构（camelCase：state/path/detail）+ `stats_status_of` 转换 + `IntegrationStatus.stats` 字段（4 构造点填 placeholder）+ **status_for 尾部覆盖**（install/uninstall/spawn_status 刷新路径自动携带真值，无需逐命令改）+ `integrations_status` 循环覆盖；③ 前端 `Settings.tsx` 接入卡行（`intg-message` 类复用，CSS 零改动；hover title = 路径 + 原因/错误摘要；`STATS_STATE_KEYS` 查表 + 未知值兜底 statsNone）；④ 前端 `TokenStats.tsx` 底部脚注（`settings-current` 模式）+ `integrations.ts` 类型扩展；⑤ i18n 新键 6 ×zh/en：`integrations.statsRow`（{state} 参数）/ statsOk / statsMissing / statsFailed / statsNone / `token.sourceNote`（文案逐字按前述定稿）。测试：Rust 新钉 3 枚（`s20_probe_opencode_three_states` / `s20_probe_cc_dir_presence_and_none_form` / `s20_probe_schema_error_is_failed_not_missing`——第三枚对照 s14 钉⑤同款 DROP TABLE 构造，钉「探测与 query 判据不漂移」）；V2-TEST-CASES 增 TC-INT-14；integrations.test.ts fixture 补 stats 默认值。验证：cargo test **370 passed + 3 ignored**（367 基线 + 3 新钉）/ `cargo build` 零警告 / npm test **447 passed** 原样全绿（键集合不变）/ `npx tsc --noEmit` 0 错 / `npm run build` 通过。对 agent-registry 已实施内容零影响（AGENTS 表/enum/互钉/编排/钉子均未触碰——probe 纯消费既有判据）。实机目验（TC-INT-14 步骤 3/4）：接入卡状态行与 Token 页脚注随交付自然目验。
+
+---
+
+## 二十一、品牌名显示 "opencode" → "OpenCode" 全显示层统一（2026-08-30，**已实施同日**）
+
+> 来源：用户问询（2026-08-30）——接入管理卡里的 "opencode" 改为 "OpenCode"；二轮裁定"理论上所有地方都需要改"（从两键扩为全显示层）。
+
+**事实口径（2026-08-30 两轮盘点）**：品牌名指代与**技术字面量**必须区分——后者不改：`opencode run` CLI 命令（tasks.tpl.hint 及测试断言）、`opencode.db` 数据库文件名（schemaMismatch 文案指向真实文件）、`opencode_auto` 任务字段名、agent id `"opencode"`（wire 值/注册表主键，两链锁死约定）、shortName "oc"、代码注释（历史注记按惯例不回改）。**id 层全不动，仅显示层**。
+
+**裁定（2026-08-30 二轮）**：所有**用户可见的品牌名指代**统一 "OpenCode"。改动面三类：
+
+1. i18n 值 5 键 ×zh/en 共 10 处：`token.agent.opencode`（Token 页 tab/徽标 title）、`integrations.opencodeDesc`（接入卡名称）、`token.error.legacyStorage`（两处品牌指代）、`token.degraded`（主源名）、`tasks.tpl.title`（模板块标题——不碰例程识别逻辑，识别走 "pulsepet 例程:" 前缀与 `opencode run` 命令串均字面量不变）；
+2. Rust `token_stats.rs` legacy-storage 错误消息两处（:525/:918，用户可见——硬报错透传 + 横幅 tooltip）+ 断言两处同步（:1645/:2304 `contains("升级 OpenCode")`——断言行号为 §二十 实施后现状，原 :1567/:2226 随 §20 区块插入漂移 +76；终审观察④更正 2026-08-30）；
+3. **`Panel.tsx` 状态芯片品牌化（行为变更）**：原直显 wire id（"opencode"/"claude-code"）→ 查表 `specOf(agent)` + `t(labelKey)`（OpenCode / Claude Code）；task 特例与未知 agent 原名兜底不变（agent-registry §2 兜底口径一致）。
+
+**实施记录（2026-08-30）**：已实施（工作区改动，未 commit）。验证：npm test **447 passed（32 文件）** 原样全绿（键集合不变、无文案值断言）/ `npx tsc --noEmit` 0 错 / cargo test **367 passed + 3 ignored** 零净增全绿（纯文案替换 + 断言同步，无新钉）/ `cargo build` 零警告。en/zh 词典 zh 侧 5 处 + en 侧 5 处；残扫确认 i18n 值与组件渲染层无品牌名 "opencode" 残留（注释除外）。zh/en 品牌名同值（技术名不翻译约定，大小写统一 OpenCode）。
+
+---
+
 ## 附：清偿记录
 
 （清偿后回写：日期 + 来源任务 ID + 去向。已有示例：§6.2-5 TC-M4-18 核心面 2026-08-27 随 v0.2.1 §四场景 2 验证；§7-7 或已随 v0.2.1 R2 顺手消化，打磨轮核对）

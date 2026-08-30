@@ -168,6 +168,16 @@
   3. killswitch 不依赖 shell 包装，脚本自身启动即查 `hooks-disabled`，同样生效；
   4. 脚本缺席时 `node <missing>` 向 CC stderr 报一次错（已知边界，openpets 等价行为，doctor 钉住缺席态；实机验证挂观察项，与 V1-OPEN-ITEMS 一.2 同批）。
 
+### TC-INT-14 接入卡统计源状态行 + Token 页被动说明脚注〔**§二十 增补 2026-08-30**，单测 + 目验〕
+
+> 来源：V2-OPEN-ITEMS §二十。统计链为被动发现式读取（无安装物/卸载物），本用例钉其三态呈现与文案闭环。Rust 侧已落地钉子：`s20_probe_opencode_three_states` / `s20_probe_cc_dir_presence_and_none_form` / `s20_probe_schema_error_is_failed_not_missing`（token_stats.rs；判据与 query 编排 [`SourceState`] 逐字同款——两入口不漂移）。
+
+- **步骤/预期**：
+  1. **opencode 三态**（tempdir）：无 db → `missing`（detail 透传 missing_reason——legacy-storage / no-database）；合法 db（session+message schema）→ `ok`；垃圾 db 文件（在但坏）→ `failed`（两段式判据，不按错误码误判——与 `p3_opencode_db_corrupt_file_failed_banner_kept` 同源）；缺 message 表（§14）→ `failed`（对照 s14 钉⑤同款构造）；
+  2. **CC 目录存在性**：无 `~/.claude/projects` → `missing`；目录在（含空目录 = 空态）→ `ok`；`StatsSource::None` 形态 → `none`（无统计源，仅事件链）；
+  3. **接入卡行**（实机目验）：设置页每卡 message 下新增「统计源：正常 / 未检测到数据 / 异常 / 无统计源（仅事件接入）」（`integrations.statsRow` + 状态子键）；hover title = 数据源路径 + Missing 原因 / Failed 错误摘要；install/uninstall 刷新后行值随动（status_for 覆盖路径）；
+  4. **Token 页脚注**（实机目验）：页面底部 `token.sourceNote` 小字（settings-current 模式）——被动读取说明 + 状态查看入口导向设置 → 接入管理（与 3 互为闭环）；i18n zh/en 双侧（键集合完备性测试把守）。
+
 ---
 
 ## 二、TC-UI 前端 UI 基础（M2）

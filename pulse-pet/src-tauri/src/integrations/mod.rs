@@ -752,6 +752,55 @@ pub struct IntegrationStatus {
     pub message: String,
     /// 检测/操作失败原因（None = 检测成功；Some → UI「错误」态）。
     pub error: Option<String>,
+    /// §二十（V2-OPEN-ITEMS）：统计源状态行（被动发现式读取的三态呈现）。
+    /// 构造点先填 [`StatsSourceStatus::placeholder`]，真值由 status_for /
+    /// integrations_status 覆盖（`stats_status_of` → `token_stats::probe_spec`）。
+    pub stats: StatsSourceStatus,
+}
+
+/// §二十：统计源探测结果的 wire 形态（serde camelCase；state 为字符串枚举
+/// ——"ok" / "missing" / "failed" / "none"，前端查表文案键）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StatsSourceStatus {
+    /// "ok" | "missing" | "failed" | "none"（none = 无统计源，仅事件链形态）。
+    pub state: String,
+    /// 数据源路径（Ok/Missing 态 hover title）。
+    pub path: Option<String>,
+    /// Missing 原因 / Failed 错误摘要（hover title 追加段）。
+    pub detail: Option<String>,
+}
+
+impl StatsSourceStatus {
+    /// 构造点占位（IntegrationStatus 字段必填）；真值经 stats_status_of 覆盖。
+    pub fn placeholder() -> Self {
+        Self {
+            state: "none".to_string(),
+            path: None,
+            detail: None,
+        }
+    }
+}
+
+/// §二十：probe → wire（消费 `token_stats::probe_spec`——阻塞 I/O，调用方
+/// 须在 spawn_blocking 内；判据与 query 编排同源，见 token_stats §20 区块）。
+fn stats_status_of(stats: crate::agents::StatsSource) -> StatsSourceStatus {
+    let p = crate::token_stats::probe_spec(stats);
+    StatsSourceStatus {
+        state: match p.state {
+            crate::token_stats::ProbeState::Ok => "ok",
+            crate::token_stats::ProbeState::Missing(_) => "missing",
+            crate::token_stats::ProbeState::Failed(_) => "failed",
+            crate::token_stats::ProbeState::NoSource => "none",
+        }
+        .to_string(),
+        path: p.path,
+        detail: match p.state {
+            crate::token_stats::ProbeState::Missing(m)
+            | crate::token_stats::ProbeState::Failed(m) => Some(m),
+            _ => None,
+        },
+    }
 }
 
 /// 状态组装输入（探测结果注入，纯函数可单测）。
@@ -834,6 +883,7 @@ pub fn build_status(id: &str, inputs: StatusInputs, lang: Lang, now_ms: u64) -> 
             now_ms,
         ),
         error: None,
+        stats: StatsSourceStatus::placeholder(),
     }
 }
 
@@ -888,7 +938,11 @@ pub fn status_for(
     let Some(integ) = spec.integration.as_ref() else {
         return Err(format!("agent {id} 无本地接入形态"));
     };
-    Ok(probe_status(integ, activity_last, lang))
+    let mut st = probe_status(integ, activity_last, lang);
+    // §二十：统计源状态行（spawn_status / install / uninstall 刷新路径均经
+    // 此处，自动携带真值；阻塞 I/O——调用方须在 spawn_blocking 内）
+    st.stats = stats_status_of(spec.stats);
+    Ok(st)
 }
 
 /// 查表探测分发：按 IntegrationSpec 执行——node 现测仅 `needs_node_probe`
@@ -937,6 +991,7 @@ pub fn status_opencode(
                 last_event_at: activity_last,
                 message: lang.intg_error(&e),
                 error: Some(e),
+                stats: StatsSourceStatus::placeholder(),
             };
         }
     };
@@ -958,6 +1013,7 @@ pub fn status_opencode(
                 last_event_at: activity_last,
                 message: lang.intg_error(&e),
                 error: Some(e),
+                stats: StatsSourceStatus::placeholder(),
             };
         }
     };
@@ -1045,6 +1101,7 @@ pub fn status_cc(
                 last_event_at: activity_last,
                 message: lang.intg_error(&e),
                 error: Some(e),
+                stats: StatsSourceStatus::placeholder(),
             }
         }
     }
@@ -1070,7 +1127,12 @@ pub async fn integrations_status(
                 continue;
             };
             let last = read_activity_last_event(&activity, spec.id);
-            out.push(probe_status(integ, last, lang));
+            // §二十：统计源状态行（阻塞 I/O——Ok 态真连 db 做 schema 校验，
+            // 与 doctor 探测同款 blocking 纪律；无接入形态的 agent 不出卡，
+            // 其源探测跳过）
+            let mut st = probe_status(integ, last, lang);
+            st.stats = stats_status_of(spec.stats);
+            out.push(st);
         }
         out
     })

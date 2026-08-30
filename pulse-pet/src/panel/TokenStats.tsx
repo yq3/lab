@@ -534,6 +534,10 @@ export default function TokenStats() {
           </ul>
         </section>
       )}
+      {/* §二十（V2-OPEN-ITEMS）：Token 页底部统计链被动性质说明 + 状态查看
+          入口导向接入卡（与接入卡统计源状态行互为闭环；文案 2026-08-30
+          用户逐轮裁定逐字定稿）。 */}
+      <p className="settings-current">{t("token.sourceNote")}</p>
     </div>
   );
 }

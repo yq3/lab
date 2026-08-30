@@ -522,7 +522,7 @@ pub fn open_checked(data_dir: &Path) -> Result<Connection, StatsError> {
             return Err(if detect_legacy_storage(data_dir) {
                 StatsError::new(
                     ERR_LEGACY_STORAGE,
-                    "检测到旧版 opencode 存储格式（storage/session/*.json），请升级 opencode",
+                    "检测到旧版 OpenCode 存储格式（storage/session/*.json），请升级 OpenCode",
                 )
             } else {
                 StatsError::new(ERR_NO_DATABASE, "数据库未运行/未初始化")
@@ -915,7 +915,7 @@ fn missing_reason(data_dir: &Path) -> StatsError {
     if detect_legacy_storage(data_dir) {
         StatsError::new(
             ERR_LEGACY_STORAGE,
-            "检测到旧版 opencode 存储格式（storage/session/*.json），请升级 opencode",
+            "检测到旧版 OpenCode 存储格式（storage/session/*.json），请升级 OpenCode",
         )
     } else {
         StatsError::new(ERR_NO_DATABASE, "数据库未运行/未初始化")
@@ -1112,6 +1112,84 @@ fn sources_from_agents<'a>(
             },
         })
         .collect()
+}
+
+// ---------------------------------------------------------------------------
+// §二十（V2-OPEN-ITEMS）：统计源三态探测（设置页接入卡「统计源」行）
+// ---------------------------------------------------------------------------
+
+/// 探测态：口径 A′ 三态 + 「无统计源」形态。判据与 query/today 路径的
+/// [`SourceState`] **逐字同款**（文件存在性两段式 / CC 目录存在性）——探测
+/// 只是不跑查询聚合的轻量只读版（open_checked 即完整判据载体），两入口
+/// 永不漂移（§20 落档量级利好）。
+#[derive(Debug, Clone, PartialEq)]
+pub enum ProbeState {
+    /// 源可达（db 可开且 session+message schema 合法；不含行数信息——
+    /// 空态与有数据同为 Ok，口径 A′ 规则 4）。
+    Ok,
+    /// 未安装未使用（opencode：无 db；CC：无目录）。携带原因 message
+    /// （opencode 经 `missing_reason` 区分 legacy-storage / no-database）。
+    Missing(String),
+    /// 在但坏（db 在 × open/schema 失败——与 degraded 横幅的 Failed 同源，
+    /// 含「文件在但打不开/损坏」，评审 P1-2）。携带原始错误 message。
+    Failed(String),
+    /// `StatsSource::None`——仅事件链接入形态（agent-registry §7.1）。
+    NoSource,
+}
+
+/// 单源探测结果（态 + hover 展示信息）。
+#[derive(Debug, Clone)]
+pub struct SourceProbe {
+    pub state: ProbeState,
+    /// 数据源路径（Ok/Missing hover 展示；NoSource 无）。
+    pub path: Option<String>,
+}
+
+/// 单源探测（路径注入供 tempdir 测试；判据复刻 [`query_source_rows`]
+/// 两段式，第二段以 `open_checked`（open + schema 校验，不跑查询）为
+/// Failed/Ok 判定）。
+fn probe_one(stats: agents::StatsSource, data_dir: &Path, cc_dir: &Path) -> SourceProbe {
+    match stats {
+        agents::StatsSource::OpenencodeDb => {
+            let state = match detect_db_path(data_dir) {
+                // 两段式第一段：无 db = Missing（legacy 原因优先）
+                None => ProbeState::Missing(missing_reason(data_dir).message),
+                // 第二段：文件在 × 后续任何错（open/schema）= Failed
+                Some(_) => match open_checked(data_dir) {
+                    Ok(_) => ProbeState::Ok,
+                    Err(e) => ProbeState::Failed(e.message),
+                },
+            };
+            SourceProbe {
+                state,
+                path: Some(data_dir.display().to_string()),
+            }
+        }
+        agents::StatsSource::CcTranscript => {
+            // CC 判据（评审 P2-1）：目录不存在 = Missing；目录在 = Ok
+            //（坏行静默跳过既定健壮行为，不新建解析失败探测）
+            let state = if cc_dir.is_dir() {
+                ProbeState::Ok
+            } else {
+                ProbeState::Missing("未检测到 claude-code 会话数据目录".to_string())
+            };
+            SourceProbe {
+                state,
+                path: Some(cc_dir.display().to_string()),
+            }
+        }
+        agents::StatsSource::None => SourceProbe {
+            state: ProbeState::NoSource,
+            path: None,
+        },
+    }
+}
+
+/// 生产探测（真实数据目录；阻塞 I/O——调用方须在 spawn_blocking 内，Ok 态
+/// 会真连 db 做 schema 校验，与 doctor 探测同款纪律，§20 落档）。
+/// 消费方：integrations `stats_status_of`（接入卡行），非查询编排。
+pub fn probe_spec(stats: agents::StatsSource) -> SourceProbe {
+    probe_one(stats, &opencode_data_dir(), &transcript::cc_projects_dir())
 }
 
 /// N 源查询编排（`query_stats_dual` 的 P3 泛化，评审 P2-4 更名避开了现存
@@ -1564,7 +1642,7 @@ mod tests {
         std::fs::write(s.join("ses_x.json"), b"{}").unwrap();
         let err = query_stats(&dir, 0, 1, "day").unwrap_err();
         assert_eq!(err.code, ERR_LEGACY_STORAGE);
-        assert!(err.message.contains("升级 opencode"));
+        assert!(err.message.contains("升级 OpenCode"));
     }
 
     // ---- schema 白名单（TC-TK-13） ----
@@ -2223,7 +2301,7 @@ mod tests {
         std::fs::write(s.join("ses_x.json"), b"{}").unwrap();
         let err = query_stats_all(&legacy, &no_cc, &cache, 0, 1, "day").unwrap_err();
         assert_eq!(err.code, ERR_LEGACY_STORAGE);
-        assert!(err.message.contains("升级 opencode"));
+        assert!(err.message.contains("升级 OpenCode"));
     }
 
     #[test]
@@ -2702,6 +2780,96 @@ mod tests {
         let err = query_stats(&dir, 0, i64::MAX, "day").unwrap_err();
         assert_eq!(err.code, ERR_SCHEMA_MISMATCH);
         assert!(err.message.contains("data"), "缺列提示点名 data：{}", err.message);
+    }
+
+    // ---- §二十（V2-OPEN-ITEMS）：probe_one 三态探测（判据与 query 路径
+    // 逐字同款；生产壳 probe_spec 仅真实路径拼装无分支，不测——tempdir 纪律）----
+
+    /// §20 钉①：opencode 源三态——无 db = Missing（原因透传）× 合法 db =
+    /// Ok × 垃圾 db 文件（在但坏）= Failed（两段式判据，不按错误码误判
+    /// Missing——与 `p3_opencode_db_corrupt_file_failed_banner_kept` 同源）。
+    #[test]
+    fn s20_probe_opencode_three_states() {
+        let nodb = temp_dir("s20-nodb");
+        let p = probe_one(
+            agents::StatsSource::OpenencodeDb,
+            &nodb,
+            Path::new("s20-nonexistent-cc"),
+        );
+        assert!(
+            matches!(&p.state, ProbeState::Missing(m) if m.contains("数据库未运行")),
+            "无 db → Missing（原因透传）：{:?}",
+            p.state
+        );
+        assert!(p.path.is_some(), "Ok/Missing 态携带路径（hover 展示）");
+
+        let dir = make_db("s20-ok", CREATE_SESSION);
+        let p = probe_one(
+            agents::StatsSource::OpenencodeDb,
+            &dir,
+            Path::new("s20-nonexistent-cc"),
+        );
+        assert_eq!(p.state, ProbeState::Ok, "合法 db（session+message schema）→ Ok");
+
+        let bad = temp_dir("s20-corrupt");
+        std::fs::write(bad.join("opencode.db"), b"not a sqlite file").unwrap();
+        let p = probe_one(
+            agents::StatsSource::OpenencodeDb,
+            &bad,
+            Path::new("s20-nonexistent-cc"),
+        );
+        assert!(
+            matches!(&p.state, ProbeState::Failed(_)),
+            "db 在但坏 → Failed（非 Missing，两段式第二段）：{:?}",
+            p.state
+        );
+    }
+
+    /// §20 钉②：CC 源目录存在性 + `StatsSource::None` 形态（仅事件链接入
+    /// → 无统计源，agent-registry §7.1 预留形态的自然呈现）。
+    #[test]
+    fn s20_probe_cc_dir_presence_and_none_form() {
+        let base = temp_dir("s20-cc");
+        let p = probe_one(
+            agents::StatsSource::CcTranscript,
+            Path::new("s20-nonexistent"),
+            &base.join("absent"),
+        );
+        assert!(matches!(p.state, ProbeState::Missing(_)), "无目录 → Missing");
+
+        let cc = base.join("projects");
+        std::fs::create_dir_all(&cc).unwrap();
+        let p = probe_one(agents::StatsSource::CcTranscript, Path::new("s20-nonexistent"), &cc);
+        assert_eq!(p.state, ProbeState::Ok, "目录在 → Ok（空目录 = 空态同 Ok）");
+
+        let n = probe_one(
+            agents::StatsSource::None,
+            Path::new("s20-nonexistent"),
+            Path::new("s20-nonexistent"),
+        );
+        assert_eq!(n.state, ProbeState::NoSource, "None 形态 → 无统计源");
+        assert!(n.path.is_none(), "None 形态无路径");
+    }
+
+    /// §20 钉③：§14 起 message 表缺失 = schema 校验失败 = **Failed**（探测
+    /// 与 query 路径判据不漂移——同款 DROP TABLE 构造对照 s14 钉⑤；probe 的
+    /// Failed 携带原始 message）。
+    #[test]
+    fn s20_probe_schema_error_is_failed_not_missing() {
+        let dir = make_db("s20-nomessage", CREATE_SESSION);
+        let conn = Connection::open(dir.join("opencode.db")).unwrap();
+        conn.execute_batch("DROP TABLE message;").unwrap();
+        drop(conn);
+        let p = probe_one(
+            agents::StatsSource::OpenencodeDb,
+            &dir,
+            Path::new("s20-nonexistent-cc"),
+        );
+        assert!(
+            matches!(&p.state, ProbeState::Failed(_)),
+            "db 在但 schema 坏 → Failed（缺 message 表）：{:?}",
+            p.state
+        );
     }
 
     /// §14 钉⑥（CC 侧）：跨天 jsonl 按 by_day 分桶——day 两天各得各的、today
