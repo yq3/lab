@@ -224,9 +224,12 @@ impl ExecExecutor {
             .chars()
             .any(|c| !(c.is_ascii_graphic() || c == ' '));
         if suspicious {
+            // §二十二：按**字符**截断（原 `&command[..min(80)]` 按字节切，
+            // 命令含中文/emoji 时切点可落字符中间 → panic 闪退）。
+            let head: String = command.chars().take(80).collect();
             plog!(
                 "[pulsepet] exec command contains special characters (windows escaping risk, R3): {:?}",
-                &command[..command.len().min(80)]
+                head
             );
         }
         Ok(())
@@ -269,6 +272,14 @@ async fn exec_run_with_timeout(
     let mut cmd = build_shell_command(command);
     if let Some(dir) = cwd {
         cmd.current_dir(dir);
+    }
+    // §二十四：GUI 启动（launchd）PATH 为最小集且非交互 sh 不读 shell 配置
+    // → 用户级工具 command not found（127）。追加常见用户 bin 目录（只增
+    // 不删不改序）。Windows 不动：安装器写注册表 PATH，GUI 进程天然可见
+    //（`-NoProfile` 残余风险挂观察项，V2-OPEN-ITEMS §二十四）。
+    #[cfg(unix)]
+    if let (Ok(base), Ok(home)) = (std::env::var("PATH"), std::env::var("HOME")) {
+        cmd.env("PATH", augmented_path(&base, &home));
     }
     cmd.stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -425,6 +436,37 @@ fn shell_program() -> &'static str {
     {
         "powershell"
     }
+}
+
+/// §二十四：GUI 启动（macOS launchd）继承最小 PATH，非交互 `sh -c` 不读
+/// 用户 shell 配置（`.zshrc` 等仅交互式读取）→ 用户级工具（npm-global /
+/// homebrew 等）command not found。向 PATH **追加**常见用户 bin 目录：
+/// 只增不删不改序——系统优先级不变，对已在 PATH 的命令零影响；清单外
+/// 工具仍需绝对路径（表单 hint 兜底说明）。Windows 不动（见调用点注释）。
+#[cfg(unix)]
+const EXTRA_PATH_ABS: &[&str] = &[
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+    "/home/linuxbrew/.linuxbrew/bin",
+];
+#[cfg(unix)]
+const EXTRA_PATH_HOME: &[&str] = &[".npm-global/bin", ".local/bin", ".opencode/bin", ".cargo/bin", "bin"];
+
+#[cfg(unix)]
+fn augmented_path(base: &str, home: &str) -> String {
+    let mut dirs: Vec<String> = base
+        .split(':')
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .collect();
+    let mut candidates: Vec<String> = EXTRA_PATH_ABS.iter().map(|s| s.to_string()).collect();
+    candidates.extend(EXTRA_PATH_HOME.iter().map(|rel| format!("{home}/{rel}")));
+    for dir in candidates {
+        if !dirs.contains(&dir) {
+            dirs.push(dir);
+        }
+    }
+    dirs.join(":")
 }
 
 /// 杀进程组（Unix `kill(-pgid, SIGKILL)`——pid 即 pgid（setsid）；Windows
@@ -924,6 +966,32 @@ mod tests {
         );
     }
 
+    #[test]
+    fn exec_module_panic_discipline_s22() {
+        // §二十二纪律钉（照 integrations TC-INT-08-5 模式）：exec 模块非测试
+        // 代码——① 禁 unwrap()/expect()（命令路径零 panic）；② 禁对命令串
+        // 按**字节**切片截断（R3 警告日志曾因此 panic 闪退，2026-08-30 实测
+        // 0.2.3 release），字符串截断一律走 chars() 按字符。
+        let src = include_str!("action_exec.rs");
+        let code = src.split("#[cfg(test)]").next().unwrap_or("");
+        assert!(
+            !code.contains(".unwrap()"),
+            "exec 命令路径出现 unwrap()（§二十二纪律）"
+        );
+        assert!(
+            !code.contains(".expect("),
+            "exec 命令路径出现 expect()（§二十二纪律）"
+        );
+        assert!(
+            !code.contains("command[..command.len().min("),
+            "按字节切片截断回归（§二十二病灶形态）"
+        );
+        assert!(
+            code.contains("chars().take(80).collect"),
+            "R3 警告日志须按字符截断（§二十二修复形态）"
+        );
+    }
+
     fn ctx() -> (Arc<Mutex<RunningTasks>>, RunCtx) {
         let reg = Arc::new(Mutex::new(RunningTasks::default()));
         (
@@ -1004,6 +1072,59 @@ mod tests {
         assert!(parse_exec_params(r#"{"command":"ls"}"#).is_ok());
     }
 
+    // ---- §二十二：Unicode 对抗钉子（R3 警告日志字节切片 panic 回归） ----
+
+    #[test]
+    fn exec_validate_unicode_straddling_byte80_no_panic() {
+        // 精确复现钉子：原实现 `&command[..command.len().min(80)]` 按字节切
+        // 片，第 80 字节落多字节字符内 → panic（V2-OPEN-ITEMS §二十二，
+        // 2026-08-30 实测 0.2.3 release 闪退）。以下每条命令的 bytes 78~81
+        // 都横跨多字节字符——旧代码必 panic，新代码必须不 panic 且放行。
+        let cases: Vec<String> = vec![
+            // 实测复现命令（第 80 字节落「有」bytes 78..81）
+            "opencode run --title 'pulsepet 例程: 该喝水啦 💧' '数一下仓库有几个 md 文件'"
+                .to_string(),
+            // 最小构造：78 ASCII + 「中」（bytes 78..81）
+            format!("{}中", "x".repeat(78)),
+            // 最小构造：77 ASCII + emoji（4 字节，bytes 77..81）
+            format!("{}💧", "x".repeat(77)),
+            // 全多字节超长（截断点连续命中字符中间）
+            "数一下仓库有几个 md 文件".repeat(20),
+        ];
+        for cmd in cases {
+            let params = serde_json::json!({ "command": cmd });
+            assert!(
+                ExecExecutor::validate_params(&params).is_ok(),
+                "合法 Unicode 命令应放行：{cmd}"
+            );
+        }
+    }
+
+    #[test]
+    fn exec_validate_unicode_corpus_no_panic() {
+        // 对抗语料：任意 Unicode 经 validate 不 panic、判定正确；suspicious
+        // 类输入同时驱动 R3 警告分支（原 panic 点）。含字符口径钉：
+        // 恰 2000 个汉字（6000 字节）放行 / 2001 个（6003 字节）按字符数拒绝。
+        let ok_cases: Vec<String> = vec![
+            "echo café".to_string(),        // 预组重音
+            "echo e\u{301}x".to_string(),   // 组合音符
+            "echo z\u{200b}w".to_string(),  // 零宽空格
+            "echo مرحبا".to_string(),       // RTL（阿拉伯语）
+            "echo a\tb\nc".to_string(),     // 制表 / 换行
+            "echo a\u{0000}b".to_string(),  // NUL（spawn 失败另行记 failed，校验层放行）
+            "数".repeat(2000),              // 恰 2000 字符 = 6000 字节（字符口径放行）
+        ];
+        for cmd in ok_cases {
+            let params = serde_json::json!({ "command": cmd });
+            assert!(ExecExecutor::validate_params(&params).is_ok(), "语料应放行：{cmd}");
+        }
+        let params = serde_json::json!({ "command": "数".repeat(2001) });
+        assert!(
+            ExecExecutor::validate_params(&params).is_err(),
+            "2001 字符应按字符数拒绝"
+        );
+    }
+
     // ---- registry / executor 分派 ----
 
     #[test]
@@ -1038,6 +1159,52 @@ mod tests {
         assert_eq!(out.len(), TailBuf::TRUNC_MARK.len() + 2048);
         // 空输出 → None
         assert!(TailBuf::default().finish().is_none());
+    }
+
+    #[test]
+    fn tail_buf_invalid_utf8_lossy() {
+        // §二十二运行时钉子：子进程输出非法 UTF-8 → finish() lossy 转换
+        // 不 panic（非法字节替换 U+FFFD）；多字节字符跨 push 切开时按字节
+        // 拼回后整体仍合法。
+        let mut t = TailBuf::default();
+        t.push(&[0xff, 0xfe]);
+        t.push("中文".as_bytes());
+        assert_eq!(t.finish().as_deref(), Some("\u{fffd}\u{fffd}中文"));
+
+        let mut t = TailBuf::default();
+        let zh = "字".as_bytes();
+        t.push(&zh[..1]);
+        t.push(&zh[1..]);
+        assert_eq!(t.finish().as_deref(), Some("字"));
+    }
+
+    // ---- §二十四：GUI PATH 增广 ----
+
+    #[test]
+    fn augmented_path_appends_user_dirs_dedup_order() {
+        #[cfg(unix)]
+        {
+            let home = "/Users/tester";
+            // 保序 + 追加 + HOME 展开
+            let out = augmented_path("/usr/bin:/bin", home);
+            assert_eq!(
+                out,
+                format!(
+                    "/usr/bin:/bin:/opt/homebrew/bin:/usr/local/bin:/home/linuxbrew/.linuxbrew/bin:{home}/.npm-global/bin:{home}/.local/bin:{home}/.opencode/bin:{home}/.cargo/bin:{home}/bin"
+                )
+            );
+            // 去重：base 已含的目录（系统/用户各一）不重复追加
+            let out = augmented_path(
+                "/usr/bin:/opt/homebrew/bin:/Users/tester/.npm-global/bin",
+                home,
+            );
+            assert_eq!(out.matches("/opt/homebrew/bin").count(), 1);
+            assert_eq!(out.matches("/Users/tester/.npm-global/bin").count(), 1);
+            // 空段容错（尾随冒号不产空头/连续冒号）
+            let out = augmented_path("/usr/bin:", home);
+            assert!(out.starts_with("/usr/bin:"), "空段不产空头：{out}");
+            assert!(!out.contains("::"), "无连续冒号：{out}");
+        }
     }
 
     // ---- run（真实进程；Unix 实测，Windows 分支同构挂观察项） ----

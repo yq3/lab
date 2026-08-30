@@ -12,9 +12,11 @@ import {
   fetchReminders,
   formatInterval,
   formatLogTime,
+  hasSmartQuotes,
   isTauriRuntime,
   kindEmoji,
   kindLabel,
+  normalizeSmartQuotes,
   parseWeekdays,
   renderTaskSummary,
   ruleToForm,
@@ -379,18 +381,53 @@ export default function Tasks() {
     }));
   };
 
-  /** 动作类型切换（notify ↔ exec）：清调度无关态 + exec 默认间隔调度。 */
+  /**
+   * 动作类型切换（notify ↔ exec）：清调度无关态 + exec 默认间隔调度。
+   * §二十三二轮微调：exec 任务名默认值「任务名示例」——仅当 label 仍是
+   * 模板默认文案（用户没改过）时替换；切回 notify 对称恢复模板默认
+   *（zh/en 双语判定，防跨语言残留）。
+   */
   const setActionType = (action: ActionType) => {
-    setForm((f) => ({
-      ...f,
-      action_type: action,
-      action_params: null,
-      // exec 不消费时间窗（表单不提供；Rust normalize 双保险清空）
-      start_time: action === "exec" ? null : f.start_time,
-      end_time: action === "exec" ? null : f.end_time,
-      use_fireworks: action === "exec" ? false : f.use_fireworks,
-    }));
+    setForm((f) => {
+      let { label } = f;
+      if (action === "exec" && allTemplateLabels().has(label)) {
+        label = t("tasks.form.nameDefault");
+      } else if (
+        action === "notify" &&
+        (label === t("tasks.form.nameDefault", undefined, "zh") ||
+          label === t("tasks.form.nameDefault", undefined, "en"))
+      ) {
+        label = t(TEMPLATE_KEYS[0]);
+      }
+      return {
+        ...f,
+        label,
+        action_type: action,
+        action_params: null,
+        // exec 不消费时间窗（表单不提供；Rust normalize 双保险清空）
+        start_time: action === "exec" ? null : f.start_time,
+        end_time: action === "exec" ? null : f.end_time,
+        use_fireworks: action === "exec" ? false : f.use_fireworks,
+      };
+    });
     if (action === "exec") setExec(emptyExec());
+  };
+
+  /** 任务名/文案输入：更新 label；exec 语境同步重拼模板 command（§二十三）。 */
+  const onLabelInput = (value: string) => {
+    setForm((f) => ({ ...f, label: value }));
+    setExec((x) =>
+      form.action_type === "exec" && x.command.includes("opencode run")
+        ? {
+            ...x,
+            command: buildOpencodeCommand(
+              value.trim() || t("tasks.form.namePlaceholder"),
+              x.tplInstruction,
+              x.tplAuto,
+            ),
+          }
+        : x,
+    );
   };
 
   const weekdays = parseWeekdays(form.schedule_weekdays);
@@ -561,6 +598,23 @@ export default function Tasks() {
                 ))}
               </div>
 
+              {/* §二十三二轮微调：exec 任务名上移到执行命令块最顶（独立行；
+                  notify 的「类型 + 文案」行保持在原位） */}
+              {form.action_type === "exec" && (
+                <div className="reminder-form-row">
+                  <label className="grow">
+                    {t("tasks.form.name")}
+                    <input
+                      type="text"
+                      value={form.label}
+                      maxLength={140}
+                      placeholder={t("tasks.form.namePlaceholder")}
+                      onChange={(e) => onLabelInput(e.target.value)}
+                    />
+                  </label>
+                </div>
+              )}
+
               {/* notify 快捷模板（仅 notify 动作） */}
               {form.action_type === "notify" && (
                 <div className="reminder-templates">
@@ -582,7 +636,22 @@ export default function Tasks() {
                     rows={2}
                     placeholder={t("tasks.form.instruction")}
                     value={exec.tplInstruction}
-                    onChange={(e) => setExec((x) => ({ ...x, tplInstruction: e.target.value }))}
+                    onChange={(e) =>
+                      setExec((x) => ({
+                        ...x,
+                        tplInstruction: e.target.value,
+                        // §二十三：指令输入自动同步进模板拼的 command（与
+                        // --auto checkbox 同款启发式）——常规路径无需手改
+                        // command 文本框（手改是弯引号事故的入口）
+                        command: x.command.includes("opencode run")
+                          ? buildOpencodeCommand(
+                              form.label.trim() || t("tasks.form.namePlaceholder"),
+                              e.target.value,
+                              x.tplAuto,
+                            )
+                          : x.command,
+                      }))
+                    }
                   />
                   <div className="task-tpl-row">
                     <label className={`reminder-check${exec.tplAuto ? " danger-check" : ""}`}>
@@ -594,7 +663,11 @@ export default function Tasks() {
                           setExec((x) => {
                             // 已用模板拼过 command：--auto 增删同步进 command
                             const cmd = x.command.includes("opencode run")
-                              ? buildOpencodeCommand(form.label || "task", x.tplInstruction, auto)
+                              ? buildOpencodeCommand(
+                                  form.label.trim() || t("tasks.form.namePlaceholder"),
+                                  x.tplInstruction,
+                                  auto,
+                                )
                               : x.command;
                             return { ...x, tplAuto: auto, command: cmd };
                           });
@@ -612,8 +685,8 @@ export default function Tasks() {
                 </div>
               )}
 
-              <div className="reminder-form-row">
-                {form.action_type === "notify" && (
+              {form.action_type === "notify" && (
+                <div className="reminder-form-row">
                   <label>
                     {t("reminders.form.type")}
                     <select
@@ -627,22 +700,18 @@ export default function Tasks() {
                       ))}
                     </select>
                   </label>
-                )}
-                <label className="grow">
-                  {form.action_type === "exec" ? t("tasks.form.name") : t("reminders.form.label")}
-                  <input
-                    type="text"
-                    value={form.label}
-                    maxLength={140}
-                    placeholder={
-                      form.action_type === "exec"
-                        ? t("tasks.form.namePlaceholder")
-                        : t("reminders.form.labelPlaceholder")
-                    }
-                    onChange={(e) => setForm((f) => ({ ...f, label: e.target.value }))}
-                  />
-                </label>
-              </div>
+                  <label className="grow">
+                    {t("reminders.form.label")}
+                    <input
+                      type="text"
+                      value={form.label}
+                      maxLength={140}
+                      placeholder={t("reminders.form.labelPlaceholder")}
+                      onChange={(e) => onLabelInput(e.target.value)}
+                    />
+                  </label>
+                </div>
+              )}
 
               {/* exec 专属字段（§4.7：command 等宽多行 / cwd / 超时） */}
               {form.action_type === "exec" && (
@@ -657,6 +726,23 @@ export default function Tasks() {
                       onChange={(e) => setExec((x) => ({ ...x, command: e.target.value }))}
                     />
                   </label>
+                  <p className="reminder-hint">{t("tasks.form.commandHint")}</p>
+                  {/* §二十三：弯引号（IME 引号键）顶替结构引号 → sh 必解析失败；
+                      警示不阻止保存（R3 口径），一键修正仅替 ‘’“” 四字符 */}
+                  {hasSmartQuotes(exec.command) && (
+                    <p className="task-danger-hint task-smartquote-row">
+                      {t("tasks.tpl.smartQuoteWarn")}
+                      <button
+                        type="button"
+                        className="seg primary"
+                        onClick={() =>
+                          setExec((x) => ({ ...x, command: normalizeSmartQuotes(x.command) }))
+                        }
+                      >
+                        {t("tasks.tpl.smartQuoteFix")}
+                      </button>
+                    </p>
+                  )}
                   <div className="reminder-form-row">
                     <label className="grow">
                       {t("tasks.form.cwd")}

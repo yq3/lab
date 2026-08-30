@@ -5,7 +5,7 @@
 > 性质：两项 **Windows 特有缺陷**，根因已定位、修复方案已裁定（R1-R5，见 [§三](#三修复任务清单r1r5统一实施)）。
 > **状态（2026-08-27 闭环）**：R1-R5 **已修复并随 `pulse-pet-v0.2.1` 发布**——实施 commit `6f9e0be`（R1-R4）/ `9e609d6`（R5）/ `acc12b3`（本文件）/ `f2cf13e`（版本 bump 四件套），tag `pulse-pet-v0.2.1`（CI run 33071206433 双矩阵 success，安装包挂 draft Release）。测试基线全绿（`cargo test` 320+3 钉子 / `npm test` 409 / `tsc --noEmit`），committer 评审 APPROVED（P0/P1=0，三条 P3 加固已落地）。**Windows release 实机三场景验证通过（2026-08-27，v0.2.1，§四）**，#19 / #20 可闭环。
 > 共同背景：与 v1 issue #9 同源——Windows 上 WebView2 环境创建异步、主线程泵消息期间页面已加载执行（GUI 子系统 + 控制台子进程交互）的时序盲区；v1 里程碑"Windows 实机验证后移"的欠账在 v2 实机使用中集中显性化。macOS 开发机均无法复现。
-> 构成说明（2026-08-27 补充）：§一~§四为 issue #19/#20 专项记录（**已闭环**）；§五起为 **v2 六里程碑（M1~M6）工作流检查点遗留事项汇总**（supervised-coding 2026-08-27 归档，来源 `.opencode/workflows/task-pulsepet-v2-m1~m6.md`），清偿后回写勾选并注来源任务 ID 与日期；**§十一为 2026-08-28 新增**：宠物大小三档 + 视觉归一化特性（设计 + 实施同日完成，含 en 右键菜单裁剪与 atlas 短缓冲两处存量缺陷清偿，见 §11.5 与 `docs/v2/pet-size.md`）；**§十二为 2026-08-28 二次新增**：v2 收尾用户反馈批次 F1~F16（气泡汇总 / Token 页柱图与文案 / 例程页全宽·notify 徽标·todo 类别列·todo 烟花勾选项·日期时间控件规格·历史统计区移除 / 设置页控件形态·接入卡缩高·命名统一·宠物下拉字样·二轮微调 / Windows 托盘与任务栏图标资产；**2026-08-28 用户批准后同日全部实施**，F16 为实施后目验二轮微调，见 §12.4）；**§十三为 2026-08-28 三次新增**：新增第三 agent 接入成本审计（预研备查——约 12 处老代码必改 + agent registry 收敛机会，是否立项待决策）；**§十四为 2026-08-29 新增**：token 统计跨天会话归属缺陷（聚合粒度 session 级 → 跨天会话 token 全部归到最后活跃日；修正方案已与用户对齐——day/week/range/today 四类聚合下沉 message 级按消息时间归天，**同日实施完毕**，见 §14.5 实施记录）；**§十五为 2026-08-29 四次新增**：Windows 托盘/任务栏图标 tile 化（F15 后续——复刻 macOS dock 系统合成底观感，tile 只上 Windows 侧资产 + tray.rs 平台分叉，**同日实施完毕**，见 §十五）；**§十六为 2026-08-29 五次新增**：panel 默认高度 640→650（Token 页图表日期标签被窗口底边裁半，用户目验驱动微调，见 §十六）；**§十七为 2026-08-29 六次新增**：设置页选择宠物下拉与「宠物大小」标签间距 +10px（原 0px 挤贴，用户目验驱动微调，见 §十七）；**§十八为 2026-08-29 七次新增**：卸载应用不自动清理接入插件——README 卸载插件节 + 设置页接入管理卡各加提示（用户问询驱动，见 §十八）；**§十九为 2026-08-29 八次新增**：设置页最底部新增"版本"区块（h2 + 版本号小字，用户目验驱动，见 §十九）。
+> 构成说明（2026-08-27 补充）：§一~§四为 issue #19/#20 专项记录（**已闭环**）；§五起为 **v2 六里程碑（M1~M6）工作流检查点遗留事项汇总**（supervised-coding 2026-08-27 归档，来源 `.opencode/workflows/task-pulsepet-v2-m1~m6.md`），清偿后回写勾选并注来源任务 ID 与日期；**§十一为 2026-08-28 新增**：宠物大小三档 + 视觉归一化特性（设计 + 实施同日完成，含 en 右键菜单裁剪与 atlas 短缓冲两处存量缺陷清偿，见 §11.5 与 `docs/v2/pet-size.md`）；**§十二为 2026-08-28 二次新增**：v2 收尾用户反馈批次 F1~F16（气泡汇总 / Token 页柱图与文案 / 例程页全宽·notify 徽标·todo 类别列·todo 烟花勾选项·日期时间控件规格·历史统计区移除 / 设置页控件形态·接入卡缩高·命名统一·宠物下拉字样·二轮微调 / Windows 托盘与任务栏图标资产；**2026-08-28 用户批准后同日全部实施**，F16 为实施后目验二轮微调，见 §12.4）；**§十三为 2026-08-28 三次新增**：新增第三 agent 接入成本审计（预研备查——约 12 处老代码必改 + agent registry 收敛机会，是否立项待决策）；**§十四为 2026-08-29 新增**：token 统计跨天会话归属缺陷（聚合粒度 session 级 → 跨天会话 token 全部归到最后活跃日；修正方案已与用户对齐——day/week/range/today 四类聚合下沉 message 级按消息时间归天，**同日实施完毕**，见 §14.5 实施记录）；**§十五为 2026-08-29 四次新增**：Windows 托盘/任务栏图标 tile 化（F15 后续——复刻 macOS dock 系统合成底观感，tile 只上 Windows 侧资产 + tray.rs 平台分叉，**同日实施完毕**，见 §十五）；**§十六为 2026-08-29 五次新增**：panel 默认高度 640→650（Token 页图表日期标签被窗口底边裁半，用户目验驱动微调，见 §十六）；**§十七为 2026-08-29 六次新增**：设置页选择宠物下拉与「宠物大小」标签间距 +10px（原 0px 挤贴，用户目验驱动微调，见 §十七）；**§十八为 2026-08-29 七次新增**：卸载应用不自动清理接入插件——README 卸载插件节 + 设置页接入管理卡各加提示（用户问询驱动，见 §十八）；**§十九为 2026-08-29 八次新增**：设置页最底部新增"版本"区块（h2 + 版本号小字，用户目验驱动，见 §十九）；**§二十为 2026-08-30 九次新增**：接入管理卡补统计源状态行 + Token 页被动读取脚注（**已实施同日**，见 §二十）；**§二十一为 2026-08-30 十次新增**：品牌名显示层 "opencode" → "OpenCode" 统一（**已实施同日**，见 §二十一）；**§二十二为 2026-08-30 十一次新增**：exec 例程含中文命令保存即闪退——R3 警告日志按字节切片越界 panic（根因已定位 + 修复方案已与用户对齐，**同日实施完毕**，见 §二十二）；**§二十三为 2026-08-30 十二次新增**：exec 例程命令含中文弯引号 → sh 引号不配对执行 failed（§二十二修复验证顺带发现——模板指令不自动同步 command 逼用户手改 + 中文 IME 引号键出弯引号；四处前端加固**同日实施完毕**，见 §二十三）；**§二十四为 2026-08-30 十三次新增**：exec 例程 GUI 启动 PATH 最小集 → 用户级工具 command not found（§二十三验证顺带发现——launchd 最小 PATH × 非交互 `sh -c` 不读 shell 配置；dev 能跑 release 必现的环境盲区；Unix PATH 增广 + hint **同日实施完毕**，见 §二十四）。
 
 ---
 
@@ -625,6 +625,118 @@ Rust 定义 `AgentSpec { id, short_name, bundled_hook, install/uninstall/status,
 
 ---
 
+## 二十二、exec 例程含中文命令保存即闪退（R3 警告日志字节切片越界，2026-08-30，**已实施同日**）
+
+> 来源：用户实机报告（2026-08-30）——例程页新建「执行命令」例程（OpenCode 模板拼装，命令含中文标题 + 中文指令），点「新建」App 整体闪退，**可稳定复现**；结合 `~/.pulsepet/pulsepet.log` panic 栈 + 源码定位。影响 v0.2.3 release（实测复现）；dev 构建同源码路径理论必现。
+
+**根因（日志 + 源码双证，已定位）**：
+
+- panic 点：`src-tauri/src/action_exec.rs:229`——R3 特殊字符**警告日志行**（`plog!("…special characters…: {:?}", &command[..command.len().min(80)])`）对命令做**按字节**截断；命令含多字节 UTF-8（中文/emoji）且第 80 字节落在字符中间时 → `str::slice_error_fail` panic；
+- 触发链路：点「新建」→ `reminders_upsert` → `reminder_scheduler::normalize_input` → `ExecExecutor::validate` → plog! 截断 panic；panic 发生在 WKWebView scheme handler / Tauri IPC 回调内（栈帧 `url_scheme_handler::start_task`），跨 FFI 边界展开即 abort → **整个 App 闪退**（日志有 PANIC 块、无 exit 行）；
+- 复现输入逐字吻合：`opencode run --title 'pulsepet 例程: 该喝水啦 💧' '数一下仓库有几个 md 文件'` 的第 80 字节恰落「有」（bytes 78..81）内——日志原文 `end byte index 80 is not a char boundary; it is inside '有' (bytes 78..81 of string)`；
+- 讽刺点：R3 警告本来就是给「含非 ASCII 字符的命令」打日志提醒（Windows PowerShell 转义风险，**警告不阻止**，V2-DESIGN R3）——恰是它要警告的输入类（中文/emoji）必崩；
+- **数据未入库**：panic 在 DB insert 之前，例程保存失败；修复后需重新新建。
+
+**全量审计（2026-08-30，"彻底修复"依据——结论：唯一病灶一处）**：
+
+| 检查项 | 扫描结果 |
+|---|---|
+| str 按字节切片 `[..N]` | 全库仅 action_exec.rs:229 对用户输入按长度切；其余切片切点均安全（`opencode_config.rs` 来自 ASCII 标记 `find()` 索引 / `todos.rs` 日期前 10 字节恒 ASCII / `transcript.rs` 换行索引 / `TailBuf` 为 `Vec<u8>` 字节操作） |
+| `split_at` / 非边界索引 / 字符串精度截断 `{:.N}` | 零命中（精度格式仅用于浮点数） |
+| 命令输出乱码/二进制 | `TailBuf::finish` 用 `from_utf8_lossy`（action_exec.rs:486）——替换 U+FFFD，不 panic |
+| 命令含 NUL/控制字符 spawn 失败 | spawn 返回 Err → Failed outcome（Result 化，不 panic） |
+| 长度校验口径 | command ≤2000 **字符**、label ≤140 **字符**（`chars().count()`），中文按字算 |
+| `normalize_input` / `reminders_upsert` 链 | 全 Result 化，无 unwrap/expect |
+
+**修复方案（2026-08-30 与用户对齐，先记录后实施）**：
+
+1. `action_exec.rs:229` 改**按字符截断**：`command.chars().take(80).collect::<String>()`（日志语义不变）；
+2. 对抗性回归测试（表驱动）：精确复现命令（原代码必崩）→ `validate_params` 返回 `Ok`；语料：4 字节 emoji 恰跨第 80 字节 / 组合音符 / 零宽连接符 / RTL / 控制符 / NUL / 恰 2000/2001 个汉字（顺带钉字符口径）→ 全部不 panic 且判定正确；
+3. 运行时钉子：子进程输出非法 UTF-8 → tail lossy 回填不 panic（现有测试仅覆盖截断未覆盖编码）；
+4. 源码级纪律钉（照 integrations TC-INT-08-5 模式）：exec 模块非测试代码禁 unwrap + 禁按字节切 str，防未来回归。
+
+**裁定（2026-08-30）**：① 维持 R3「警告不阻止」语义——控制字符仍放行，spawn 失败自会记 failed + 执行历史留 `spawn failed: …`（非崩溃面，不升级为校验拒绝）；② 不采用命令处理器全局 `catch_unwind` 兜底（改动面大、与 POC 定位不符；现有防线 = panic hook 落日志 + 命令路径零 panic 纪律 + 本次 exec 对抗钉，三层已足够）。修复后各类输入归宿：中文/emoji/组合字符/RTL → 正常保存 + 日志一行 R3 警告；控制符/NUL → 保存放行，到点 spawn 失败记 failed（进程不崩）；输出乱码 → lossy 显示；超长 → 校验拒绝报错（前端可见）。
+
+**边界诚实口径**：静态审计保证当前代码再无同类崩溃点；测试钉子保证该路径未来不被改坏；但"今后新写出的 panic"无静态手段 100% 杜绝——以三层防线 + 纪律钉兜底（catch_unwind 全局兜底不采用，理由见裁定②）。
+
+**实施记录（2026-08-30）**：已实施（工作区改动，未 commit）。① 修复：`action_exec.rs` validate 的 R3 警告日志截断改**按字符**（`command.chars().take(80).collect::<String>()`，日志语义不变）；② 新钉 4 枚（cargo **374 passed + 3 ignored** = §二十后基线 370 + 4）：`exec_validate_unicode_straddling_byte80_no_panic`（精确复现命令 + 「78 ASCII+中」/「77 ASCII+💧」最小跨界构造 + 全多字节超长——旧代码在此必 panic，断言放行即回归钉）/ `exec_validate_unicode_corpus_no_panic`（对抗语料：预组重音 / 组合音符 / 零宽 / RTL / 制表换行 / NUL / 恰 2000 汉字放行 + 2001 汉字按字符数拒绝——顺带钉 chars 口径）/ `tail_buf_invalid_utf8_lossy`（运行时钉：非法 UTF-8 输出 lossy 不 panic + 多字节字符跨 push 拼回）/ `exec_module_panic_discipline_s22`（源码级纪律钉，照 integrations TC-INT-08-5 模式：exec 非测试代码禁 `.unwrap()`/`.expect(` + 禁病灶形态 `command[..command.len().min(` + 修复形态 `chars().take(80).collect` 必须在）。两项裁定照 §二十二记录执行：维持 R3「警告不阻止」、不采用全局 catch_unwind。验证：`cargo build` 零警告 / npm test **447 passed** 原样（无前端改动）/ `npx tsc --noEmit` 0 错。**用户实机目验（待办）**：重建复现例程（该中文命令）→ 点「新建」保存成功不闪退，日志出现 R3 警告行（预期）而非 PANIC；此前 panic 在入库前，旧尝试未落数据、无需清理。
+
+---
+
+## 二十三、exec 例程命令含中文弯引号 → sh 引号不配对 failed（模板 UX 缺陷链 + 加固，2026-08-30，**已实施同日**）
+
+> 来源：用户实机报告（2026-08-30，§二十二修复验证过程顺带发现）——新建 exec 例程成功（闪退修复生效），但到点执行 failed（exit 2）。
+
+**根因链（已定位，DB 字节级 + 日志双证）**：
+
+1. **模板指令框输入不自动更新 command**（Tasks.tsx 指令 onChange 仅更新 `tplInstruction`，需再点一次「OpenCode 例程」按钮才重拼；`--auto` checkbox 有同步逻辑而指令没有）→ 用户填完指令后 command 仍为 `''`，只能**手动进 command 文本框改**；
+2. 手改时**中文输入法的引号键产出弯引号**：用户输入环境实测按引号键出 `‘’“”`（用户同一会话消息即含 U+201C/U+201D）。字节级对账：例程 #78 存储命令 `opencode run --title 'pulsepet 例程: 该喝水啦 💧’ '统计一下当前项目有几个MD文档'` 与 `buildOpencodeCommand` 应有输出**唯一差异 = 标题收引号位（pos 41）ASCII `'` 被 `’`（U+2019）顶替**，其余字节（空格/指令引号）与模板输出逐位一致——即模板拼装函数无误， substitutions 发生在 textarea 编辑环节；
+3. sh 收到不配对引号 → `unexpected EOF while looking for matching '` → exit 2 → 例程 failed（执行历史正确落库：log#63 `failed|2`，output_tail 含 sh 报错——失败呈现链路工作正常）。
+
+**字节级证据**：`action_params` 中引号位谱 `21:'(ASCII) 41:’(U+2019) 43:' 59:'`；`label` 干净（`该喝水啦 💧` 无弯引号）；该例程为全新创建（无编辑历史路径）；`buildOpencodeCommand`/`shellQuote` 逻辑复核无误（恒产 ASCII 引号）。
+
+**加固方案（2026-08-30 与用户对齐，四处小改动，全前端，Rust 零改动）**：
+
+1. **指令输入自动同步进 command**：模板指令框 onChange 时，若 command 为模板拼装（含 `opencode run`，与既有 `--auto` checkbox 同款启发式）→ 自动 `buildOpencodeCommand` 重拼——常规路径消灭手改 command 的需求（根因①）；
+2. **弯引号检测 + 一键修正**：command 含 `‘’“”` 时表单警示行（「命令含中文弯引号，shell 无法识别」）+「一键修正」按钮（`‘’`→`'`、`“”`→`"`，修正后仍可再编辑）；**不阻止保存**（与 R3「警告不阻止」口径一致）；
+3. **模板拼装规范化**：`buildOpencodeCommand` 对任务名/指令先做弯引号→ASCII 归一再 `shellQuote`（防任务名带 IME 弯引号进入标题）；
+4. i18n 新键 zh/en 成对（警示行 + 修正按钮文案，键集合完备性测试自动把守）+ `reminders.test.ts` 钉子（含弯引号输入 → 输出全 ASCII 且 `shellQuote` 转义正确）。
+
+**口径**：Rust 不动（R3 警告已覆盖弯引号类、失败落历史行为正确）；弯引号修正仅替 `‘’“”` 四字符，不动其他全角标点（保守最小替换）；用户当前例程 #78 的即时解法 = 手改该字符为英文引号（不等新代码）。
+
+**实施记录（2026-08-30）**：已实施（工作区改动，未 commit；Rust 零改动照口径）。① `reminders.ts`：新增 `normalizeSmartQuotes`（`‘’`→`'`、`“”`→`"`，保守最小替换）+ `hasSmartQuotes`；`buildOpencodeCommand` 对任务名/指令先归一再 `shellQuote`（拼出命令恒 ASCII 结构引号）；② `Tasks.tsx` 三处同步：模板指令框 onChange 自动重拼 command（含 `opencode run` 启发式，与既有 `--auto` checkbox 同款；消灭"填完指令手改 command"的事故入口）+ **实施中顺带扩展**：任务名 onChange 同款重拼（改名后同样无需手改，启发式与目标一致）；command 含弯引号时表单警示行（`task-danger-hint` 危险色，R3「警告不阻止」口径）+「一键修正为英文引号」按钮（仅替 `‘’“”` 四字符，修正后仍可再编辑）；③ `global.css`：`.task-smartquote-row`（flex 同行 + seg 按钮缩小）一条；④ i18n 新键 2 ×zh/en：`tasks.tpl.smartQuoteWarn` / `tasks.tpl.smartQuoteFix`（键集合完备性测试自动把守）。测试：`reminders.test.ts` 新钉 1 枚（实测病灶形态「任务名收尾 `’`」→ `shellQuote` 转义输出逐字断言 + 指令双弯引号归一 + 四字符映射/检测纯函数钉）；基线 npm test **448 passed**（447 + 1）/ `npx tsc --noEmit` 0 错 / `npm run build` 通过 / `npm run tauri build` 产物双 bundle 正常。**用户实机目验（待办）**：替换新 build 后——编辑例程 #78 手动把 `’` 敲回弯引号（复现警示）→ 警示行出现 → 点「一键修正」→ 保存试一试执行成功；或直接重建例程全程不再触碰 command 文本框（指令/任务名输入即自动同步）。
+
+**修订（2026-08-30，用户质询驱动）**：用户问"不会是把所有单引号都机械替换吧"——复查确认 ASCII 引号从未被替换（内容 ASCII `'` 走 `shellQuote` 标准转义 `'\''`，保留内容而非替换），但暴露一处设计过度与一处文案失准，已修：① **撤销方案第 3 点（拼装内容归一）**——弯引号在单引号串内是合法字面量，`shellQuote` 包裹后内容弯引号本就无害，拼装归一属无收益的内容改写（如任务名 `他说’你好’` 会被改字面）；`buildOpencodeCommand` 回归内容原样保留，结构安全仍由恒产 ASCII 结构引号 + `shellQuote` 保证；`normalizeSmartQuotes` 仅保留给一键修正按钮（语义明示为"把弯引号当作引号"——修复误替场景；确为内容时替换后最坏是字面变化/词拼接，不比误替更坏）；② **警示文案去绝对化**：原「shell 无法识别，会导致执行失败」对内容弯引号不成立，改「若为输入法误替英文引号会导致执行失败；确为内容可忽略」+ 按钮文案「把弯引号当作引号修正」；③ 测试钉同步改写（弯引号内容原样保留逐字断言 + `shellQuote` 转义钉 + 归一/检测钉），基线 npm test **448** / tsc 0 错 / `npm run tauri build` 重新打包。
+
+---
+
+## 二十四、exec 例程 GUI 启动 PATH 最小集 → 用户级工具 command not found（2026-08-30，**已实施同日**）
+
+> 来源：用户实机报告（2026-08-30，§二十三修复验证过程发现）——弯引号已修复（命令全 ASCII，R3 警告行可见完整命令），执行改报 **exit 127**：`sh: opencode: command not found`（action_logs log#64）。
+
+**根因（已定位，环境盲区）**：
+
+- opencode 实际位于 `~/.npm-global/bin`，PATH 在 **`~/.zshrc`** export（仅**交互式** shell 读取）；
+- PulsePet release 从 Dock/Finder/`open` 启动继承 **launchd 最小 PATH**（`/usr/bin:/bin:/usr/sbin:/sbin`），exec 为非登录非交互 `sh -c`——任何 shell 配置文件都不会执行 → 用户级工具找不到；
+- **判定标准 = 进程树祖先是否终端**：与 .app 安装位置无关（`/Applications` 与 bundle 同样失败）；`npm run tauri dev` 从终端启动继承终端完整 PATH，**故 TC-M4-08 首日实机验证（dev 语境）通过而 release 必现**——测试用例未覆盖 GUI 启动场景；
+- 排除「登录壳 `$SHELL -l -c`」方案：`zsh -l -c` 非交互不读 `.zshrc`（本机 PATH 恰在其中），且引入 profile 副作用/慢启动。
+
+**Windows 侧评估（不动代码，挂观察项）**：Explorer/开始菜单启动的 GUI 进程**继承注册表**用户/系统 PATH——主流安装器（Node/npm、winget、scoop）均写入注册表，`%APPDATA%\npm` 天然可见，主流场景无此问题；残余风险仅「PATH 只写在 PowerShell `$PROFILE`」的少数手动配置（spawn 为 `-NoProfile` 不读）——按 TC-M4-18 口径挂观察项，Windows 实机批次顺带验证 `npm i -g` 场景。
+
+**修复方案（2026-08-30 与用户对齐，B+C）**：
+
+1. **B. spawn 时 PATH 增广（主修复，`action_exec.rs`，仅 Unix）**：新增纯函数 `augmented_path(base, home)`——在现有 PATH 基础上**追加**（去重、保序）常见用户 bin 目录（`~/.npm-global/bin`、`/opt/homebrew/bin`、`/usr/local/bin`、`~/.local/bin`、`~/.opencode/bin`、`~/.cargo/bin`、`~/bin`）；spawn 前 `cmd.env("PATH", …)`。只增不删不改序——系统路径优先级不变，对已在 PATH 的命令零影响；目录清单外仍需绝对路径；
+2. **C. 表单 hint（兜底说明）**：command 框下加一行小字（i18n `tasks.form.commandHint` zh/en）：GUI 启动的 App PATH 有限，清单外工具请用绝对路径或命令前 `export PATH=…`；
+3. 测试：`augmented_path` 单测（HOME 展开 / 去重 / 保序，`#[cfg(unix)]` 门）+ 验证链 cargo / npm / tsc / build。
+
+**口径**：Windows 不动代码（观察项见上）；R3 警告行为不受影响；hint 文案与 §二十三 弯引号警示并存互不干扰。
+
+**实施记录（2026-08-30）**：已实施（工作区改动，未 commit）。① `action_exec.rs`：新增 `EXTRA_PATH_ABS`（/opt/homebrew/bin、/usr/local/bin、/home/linuxbrew/.linuxbrew/bin†）+ `EXTRA_PATH_HOME`（.npm-global/bin、.local/bin、.opencode/bin、.cargo/bin、bin）+ 纯函数 `augmented_path(base, home)`（split ':' → 追加去重 → 保序 join；空段容错）——均 `#[cfg(unix)]` 门控，Windows 编译零涉及；`exec_run_with_timeout` spawn 前读当前进程 `PATH`/`HOME` 增广后 `cmd.env("PATH", …)`（只增不删，系统优先级不变；env 读取失败静默跳过 = 行为回退原样，零 unwrap 符合 §二十二纪律钉）；② hint：i18n 新键 `tasks.form.commandHint` zh/en（command 框下 `.reminder-hint` 小字，与 §二十三弯引号警示并存互不干扰）；③ 测试：`augmented_path_appends_user_dirs_dedup_order`（保序 + HOME 展开逐字断言 / 去重 / 尾随冒号空段容错，内层 `#[cfg(unix)]` 块照既有风格）。验证：cargo test **375 passed + 3 ignored**（§二十二后基线 374 + 1）/ `cargo build` 零警告 / npm test **448 passed** 原样 / `npx tsc --noEmit` 0 错 / `npm run tauri build` 双 bundle 正常。**用户实机目验（待办）**：退出旧 App → 替换新 build → 从 Dock/Finder 启动 → 例程「试一试」执行成功（不再 127）；Token 页应出现「pulsepet 例程:」会话（spawn 的 opencode 加载 hook，宠物细粒度状态随动）——此即 TC-M4-08 在 **GUI 启动语境**下的补验。
+
+> † 修订（2026-08-30，Committer P3-8 处置）：`EXTRA_PATH_ABS` 原枚举仅前两者，linuxbrew 路径为审查后增补（测试断言同步），见 §二十三「Committer 审查」块 P3 处置。
+
+**备忘（Committer P3-9，2026-08-30）**：cwd 表单 label「需填写绝对路径」为 UI 建议，Rust validate 仍接受存在的相对路径（action_exec.rs 只拦「存在但非目录」）——UI 建议严于后端校验系有意口径（绝对路径为最佳实践提示，后端保留宽容），非矛盾。
+
+**二轮微调（2026-08-30，用户目验驱动，5 项，已实施同日）**：
+
+1. **警示文案加 `❗` 前缀**（`tasks.tpl.smartQuoteWarn` zh/en 两 value，key 不变）——与警示行 danger 红色语义呼应，更醒目；
+2. **修正按钮上色**：`seg` → `seg primary`（accent 色，复用「一键填充」/「新建」同款既有样式，零新增 CSS；不用红色——红在本行是"问题"语义，修正按钮是"解决动作"）；
+3. **exec 任务名上移到执行命令块最顶**（动作类型行之后、opencode 模板块之前）——拆 notify/exec 共享行：exec 独立渲染任务名行（handler 含 §二十三 自动重拼逻辑不变），notify 保持「类型 + 文案」行原位与顺序不变；
+4. **exec 任务名默认值：该喝水啦 💧 → 任务名示例**——新 i18n 键 `tasks.form.nameDefault`（zh `任务名示例` / en `Example task`）；仅 exec 语境：`setActionType("exec")` 时 label 若仍为模板默认文案（复用 `allTemplateLabels()` 判定）→ 置为 nameDefault；exec 切回 notify 时若 label == nameDefault（zh/en 双语判定）→ 对称恢复 notify 模板默认文案；编辑已有例程（startEdit）不受影响；notify 表单默认文案保持「该喝水啦 💧」不变（裁定）；
+5. **cwd label 补绝对路径要求**：`tasks.form.cwd` zh `工作目录（可选）` → `工作目录（可选，需填写绝对路径）` / en 同步（zh/en 成对；与 §二十四 PATH 修复呼应——绝对路径无歧义且不受系统「智能引号」影响）。
+
+**实施记录**：见下「二轮微调实施记录」。
+
+**Committer 审查（2026-08-30，§二十二~§二十四 + 二轮微调整体）**：**APPROVED WITH NITS**（P0/P1/P2 均无，10 条 P3 备忘）。文档↔代码一致性逐条核对一致（重点项「拼装内容归一已撤销」与代码逐字吻合）；6 枚测试钉确认为真实回归钉（3 条旧代码必 panic）；测试三件套在主会话独立复跑（cargo 375+3 / npm 448 / tsc 0）与基线一致。**P3 处置（同日）**：
+- 已修 5 条：fallback 统一（`onLabelInput`/指令 onChange/`--auto` checkbox 三处 `|| "task"` 硬编码 → `trim() || t("tasks.form.namePlaceholder")`，与模板按钮同口径）；`normalizeSmartQuotes` 注释口径修正（承认内容弯引号修正后可能造成新的不配对，删「不比误替更坏」的乐观表述）；commandHint 文案跨平台中性化（去 Dock/Finder / export PATH 的 macOS 专属表述，zh/en）；`EXTRA_PATH_ABS` 补 `/home/linuxbrew/.linuxbrew/bin`（测试断言同步）；新测试去重复的 `shellQuote` 断言；
+- 已修 1 条（本轮审查回应）：二轮微调块「实施记录：（待实施）」占位残留与其后实施记录矛盾；
+- 备忘口径补录 1 条：cwd UI 建议严于后端校验系有意口径（见 §二十四备忘）；
+- 暂缓 3 条（记录不修）：`tplSeeded` 结构化标志替代 `includes("opencode run")` 子串探测（既有既定模式，未来重构项）；自定义 label 恰等「任务名示例」切换误重置（需新增 labelDirty 态，边界极小）；纪律钉源码扫描的固有局限（字面量残留假通过 / split 位置敏感——文档已裁定接受）。
+
+**二轮微调实施记录（2026-08-30）**：5 项全部落地（工作区改动，未 commit）。① `i18n.ts`：`smartQuoteWarn` zh/en 加 `❗` 前缀；② `Tasks.tsx` 修正按钮 `seg` → `seg primary`；③ `Tasks.tsx` 任务名行拆分——exec 独立任务名行移至动作类型行之后（模板块之前），notify 保持「类型 + 文案」行原位（模板快捷块顺序不变），输入 handler 抽为 `onLabelInput` 复用（exec 自动重拼逻辑不变，仍在 `form.kind !== "todo"` 片段内）；④ `setActionType` 对称默认值：切 exec 时 label 仍为模板默认文案（`allTemplateLabels()` 判定）→ 置 `t("tasks.form.nameDefault")`（zh 任务名示例 / en Example task）；切回 notify 时 label == nameDefault（zh/en 双语判定）→ 恢复 `t(TEMPLATE_KEYS[0])`；⑤ `tasks.form.cwd` zh/en 补绝对路径要求。**附带发现并修复**：`.task-tpl-row` 的「OpenCode 例程」填充按钮 `seg primary` 为死类——`.primary` accent 样式原本只挂在 `.task-form-actions` / `.reminder-form-actions` 容器下，M4 起填充按钮从未渲染过 accent，新增 `.task-smartquote-row` / `.task-tpl-row` 两处 `.seg.primary` 规则一并启用（hover 走 accent-ink 同款）。验证：npm test **448 passed** / `npx tsc --noEmit` 0 错 / `npm run tauri build` 双 bundle 正常。目验点：警示行 ❗ + accent 修正按钮 + 填充按钮 accent；新建 exec 例程任务名预填「任务名示例」且位于块顶，指令/任务名输入命令自动重拼；切回 notify 文案恢复「该喝水啦 💧」。
+
+---
+
 ## 附：清偿记录
 
 （清偿后回写：日期 + 来源任务 ID + 去向。已有示例：§6.2-5 TC-M4-18 核心面 2026-08-27 随 v0.2.1 §四场景 2 验证；§7-7 或已随 v0.2.1 R2 顺手消化，打磨轮核对）
@@ -638,3 +750,6 @@ Rust 定义 `AgentSpec { id, short_name, bundled_hook, install/uninstall/status,
 - [x] **§十七 设置页选择宠物下拉间距 +10px**：✅ 已实施 2026-08-29（同日）——`global.css` 兄弟选择器一条（`select + .settings-pet-label` margin-top 10px，全页唯一命中），playwright 实测 gap=10px；基线 tsc 0 错 / npm 447 原样；目验 = 设置页宠物区两下拉不再挤贴
 - [x] **§十八 卸载应用不自动清理接入插件提示**：✅ 已实施 2026-08-29（同日）——README「卸载插件」节 blockquote + 设置页接入管理卡"接入说明"三行编号脚注（`integrations.notes` zh/en；备份 / 会话生效时机 / 卸载顺序；`settings-notes` pre-line 渲染；经三轮用户逐轮裁定），playwright 渲染实测；基线 tsc 0 错 / npm 447 原样；目验 = 设置页接入卡下方见三行接入说明
 - [x] **§十九 设置页底部版本信息区块**：✅ 已实施 2026-08-29（同日）——`Settings.tsx` 版本分节（h2「版本」+ 小字版本号；getVersion 权威 + package.json 回退）+ i18n `settings.versionTitle` zh/en，CSS 零改动；playwright 实测；基线 tsc 0 错 / npm 447 原样；目验 = 设置页最底部见「版本 / 0.2.2」
+- [x] **§二十二 exec 例程含中文命令保存即闪退（R3 警告日志字节切片越界）**：✅ 已实施 2026-08-30（同日定位 + 记录 + 实施）——`action_exec.rs` R3 警告日志截断改按字符（原按字节切，第 80 字节落多字节字符内 → panic 经 IPC 回调跨 FFI abort 闪退）+ 对抗钉 4 枚（精确复现跨界 / Unicode 语料 + 字符口径 / 输出非法 UTF-8 lossy / 源码级纪律钉）；裁定维持 R3「警告不阻止」+ 不采用 catch_unwind 全局兜底。基线 cargo **374 passed + 3 ignored**（370 + 4 新钉）/ npm 447 原样 / tsc 0 错 / `cargo build` 零警告。完整留痕：§二十二；用户实机目验 = 重建该中文命令例程保存成功、日志 R3 警告行而非 PANIC
+- [x] **§二十三 exec 例程命令含中文弯引号 → sh 引号不配对 failed**：✅ 已实施 2026-08-30（同日定位 + 记录 + 实施，含用户质询驱动修订）——`reminders.ts` `normalizeSmartQuotes`/`hasSmartQuotes`（仅供一键修正按钮；**拼装内容归一已撤销**——弯引号在单引号串内是合法字面量，内容原样保留）+ `Tasks.tsx` 指令/任务名输入自动重拼模板 command（含 `opencode run` 启发式，消灭手改入口）+ 弯引号警示行与「把弯引号当作引号修正」按钮（R3 警告不阻止口径、文案去绝对化）+ i18n 2 键 zh/en + CSS 一条；Rust 零改动。基线 npm **448 passed** / tsc 0 错 / build 通过。完整留痕：§二十三（含修订注记）；用户实机目验 = 弯引号警示行出现 → 一键修正 → 试一试执行成功
+- [x] **§二十四 exec 例程 GUI 启动 PATH 最小集 → command not found**：✅ 已实施 2026-08-30（同日定位 + 记录 + 实施）——`action_exec.rs` Unix 侧 `augmented_path` spawn 前向 PATH 追加常见用户 bin 目录（只增不删不改序；Windows 不动挂观察项）+ i18n `tasks.form.commandHint` zh/en 表单 hint；含「dev 能跑 release 必现」盲区根因（TC-M4-08 首日验证为 dev 语境）。基线 cargo **375 passed + 3 ignored**（+1 钉）/ npm 448 原样 / tsc 0 错 / build 通过。完整留痕：§二十四；用户实机目验 = GUI 启动后试一试执行成功 + Token 页现「pulsepet 例程:」会话（TC-M4-08 GUI 语境补验）

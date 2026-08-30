@@ -446,6 +446,8 @@ export function scheduleSummary(
  * opencode 例程模板拼接（§4.6，纯填表辅助——执行层不感知 opencode）：
  * `opencode run --title "pulsepet 例程: <任务名>" [--auto] "<指令>"`；
  * 不用 --dir（cwd 字段即工作目录）。
+ * 内容原样保留（§二十三修订：弯引号在单引号串内是合法字面量，不做内容
+ * 归一——结构引号恒由本函数产 ASCII，安全由 shellQuote 转义保证）。
  */
 export function buildOpencodeCommand(
   taskName: string,
@@ -461,6 +463,25 @@ export function buildOpencodeCommand(
 /** POSIX 单引号安全引用（sh -c 双层语义下最稳的引用形态）。 */
 export function shellQuote(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`;
+}
+
+/**
+ * 弯引号 → ASCII 对应字符（§二十三：仅 ‘’“” 四字符——供「一键修正」把
+ * 输入法/系统智能引号误替的结构引号修复回 ASCII；ASCII 引号与其余内容
+ * 一概不动）。语义取舍：把弯引号一律视为「本应是引号」——针对误替场景；
+ * 已知边界：若原命令确为内容弯引号（本身合法），修正后会引入裸 ASCII
+ * 引号，可能造成新的引号不配对——按钮为手动触发、结果在 textarea 可见
+ * 可再编辑，且警示文案已引导「确为内容可忽略」。
+ */
+export function normalizeSmartQuotes(s: string): string {
+  return s.replace(/[\u2018\u2019\u201c\u201d]/g, (c) =>
+    c === "\u201c" || c === "\u201d" ? '"' : "'",
+  );
+}
+
+/** 命令串是否含中文弯引号（§二十三：多为输入法引号键误替结构引号所致）。 */
+export function hasSmartQuotes(s: string): boolean {
+  return /[\u2018\u2019\u201c\u201d]/.test(s);
 }
 
 /**

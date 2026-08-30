@@ -6,6 +6,7 @@ import {
   execBadge,
   formatInterval,
   formatWindow,
+  hasSmartQuotes,
   isCrossMidnight,
   kindLabel,
   parseReminderTrigger,
@@ -13,6 +14,7 @@ import {
   planReminderActions,
   renderTaskSummary,
   ruleToForm,
+  normalizeSmartQuotes,
   sanitizeReminderText,
   scheduleSummary,
   shellQuote,
@@ -558,6 +560,20 @@ describe("v2 M4：opencode 例程模板拼接（§4.6，TC-M4-08）", () => {
     // 单引号指令安全转义（sh -c 双层语义）
     expect(shellQuote("it's")).toBe(`'it'\\''s'`);
     expect(buildOpencodeCommand("n", "don't stop", false)).not.toMatch(/--dir/);
+  });
+
+  it("V2-OPEN-ITEMS §二十三：弯引号内容原样保留 + 检测/修正纯函数", () => {
+    // 2026-08-30 修订：弯引号在单引号串内是合法字面量——**内容不做归一**
+    //（原「拼装归一」属无收益内容改写，撤销）；结构引号恒由模板产 ASCII，
+    // 安全由 shellQuote 保证。ASCII 内容引号走标准转义（保留内容非替换）。
+    expect(buildOpencodeCommand("该喝水啦 💧’", "他说“你好”", false)).toBe(
+      `opencode run --title 'pulsepet 例程: 该喝水啦 💧’' '他说“你好”'`,
+    );
+    // 一键修正专用：仅 ‘’“” 四字符视为「本应是引号」（修复 IME 误替结构引号）
+    expect(normalizeSmartQuotes("‘a’“b”")).toBe(`'a'"b"`);
+    expect(hasSmartQuotes("ok’")).toBe(true);
+    expect(hasSmartQuotes("ok'")).toBe(false);
+    expect(hasSmartQuotes("opencode run --title 'x' 'y'")).toBe(false);
   });
 });
 

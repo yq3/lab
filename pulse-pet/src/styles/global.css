@@ -1434,6 +1434,38 @@ select {
   color: var(--danger);
 }
 
+/* §二十三：弯引号警示行（文案 + 一键修正按钮同行） */
+.task-smartquote-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.task-smartquote-row .seg {
+  flex-shrink: 0;
+  font-size: 11px;
+  padding: 2px 8px;
+}
+
+/* 修正按钮 primary：accent 强调同 M2 主按钮语言（二轮微调——`.primary`
+ * 的 accent 样式原本只挂在 actions 容器下，此处需独立生效）。
+ * 附带修复：.task-tpl-row 的「OpenCode 例程」填充按钮 seg primary 同为
+ * 死类（M4 起样式从未生效），一并启用。 */
+.task-smartquote-row .seg.primary,
+.task-tpl-row .seg.primary {
+  background: var(--accent);
+  color: var(--surface);
+  border: 2px solid var(--accent);
+  cursor: pointer;
+}
+
+.task-smartquote-row .seg.primary:hover,
+.task-tpl-row .seg.primary:hover {
+  background: var(--accent-ink);
+  border-color: var(--accent-ink);
+  color: var(--surface);
+}
+
 /* 等宽多行 command / 指令 / 输出（exec 的技术字面量） */
 .task-textarea,
 .task-output {
