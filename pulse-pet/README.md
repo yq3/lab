@@ -17,6 +17,8 @@
 
 ## 快速上手
 
+> **Windows / 全新机器**：从零安装 Node、Rust、VS 生成工具到打安装包的逐步指南（新手向）见 [docs/WINDOWS-DEV.md](./docs/WINDOWS-DEV.md)。
+
 ```bash
 # 安装依赖
 npm install
