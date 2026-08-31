@@ -14,7 +14,9 @@ registry 收敛后，接入新 agent = **两条独立链路按需接入**：
 - **① 事件链**（宠物动画/气泡/状态芯片/接入管理卡）——纯新增 + 两端注册表各加一行，**本身即完整可发布形态**；
 - **② 统计链**（Token 页/今日汇总/idle 汇报气泡）——可后补；**前提 = 数据源调研有结果**，什么都没有则这部分"不做"而非"后做"。
 
-唯一仍需触碰旧代码的地方全部是**集中扩展点**（enum 加变体后的编译器强制 match 补臂、接 codex 时 7 处预期内拒绝钉翻转——清单见 §1 步骤 5），无散落 if/switch/三元。
+两链之外有一个**可选扩展点 ③ 例程模板行**（routine-exec.md Part B，2026-08-30 起）：有 headless run CLI 的 agent 在 `src/lib/routine-templates.ts` 的 `ROUTINE_TEMPLATES` 加一行（例程页模板 chips / 一键填充辅助）——与 AGENTS 注册表正交、不自动派生，不加无功能断裂，见 §6 checklist 对应项。
+
+唯一仍需触碰旧代码的地方全部是**集中扩展点**（enum 加变体后的编译器强制 match 补臂、接 codex 时 7 处预期内拒绝钉翻转——清单见 §1 步骤 5；加例程模板行时 routine-templates.test.ts 的两行初始结构钉随行更新），无散落 if/switch/三元。
 
 ## 1. ① 事件链接入（最小接入，5 步）
 
@@ -53,7 +55,7 @@ registry 收敛后，接入新 agent = **两条独立链路按需接入**：
 ## 3. 显示层规范（v0.2.3 起，V2-OPEN-ITEMS §21）
 
 - **品牌名指代**用规范大小写：`OpenCode` / `Claude Code`（i18n 值直接写规范形；zh/en 同值——技术名不翻译约定）；
-- **技术字面量豁免不改**：CLI 命令（`opencode run`）、数据文件名（`opencode.db`）、payload 字段名（`opencode_auto`）、wire id（`"opencode"`——两链共同主键，逐字一致且不得为 `"task"`）、shortName（`oc`/`cc`——气泡徽标与分布行共用）；
+- **技术字面量豁免不改**：CLI 命令（`opencode run` / `claude -p`——后者兼 routine-templates 的 matches 前缀）、数据文件名（`opencode.db`）、payload 字段名（`opencode_auto` / `tpl_agent` / `tpl_flags`——Part B 起 action_params 新格式键）、wire id（`"opencode"`——两链共同主键，逐字一致且不得为 `"task"`）、shortName（`oc`/`cc`——气泡徽标与分布行共用）；
 - 状态芯片（Panel.tsx）、Token 页 tab/徽标 title、接入卡名均已查表 `labelKey` 渲染，未知 agent 原名兜底——新 agent 只需 i18n 值写对即全站一致。
 
 ## 4. 测试面
@@ -80,9 +82,14 @@ registry 收敛后，接入新 agent = **两条独立链路按需接入**：
   [ ] agents.ts AGENTS += 一行（每 agent 一行格式，labelKey/descKey camelCase，hasCost）
   [ ] i18n: token.agent.<name> / integrations.<name>Desc（zh/en 成对，品牌规范写法）
   [ ] 例程模板行（Part B，2026-08-30 起）：有 headless run CLI 的 agent 在
-      src/lib/routine-templates.ts 的 ROUTINE_TEMPLATES += 一行（agentId /
-      matches 前缀 / build / flags 声明）+ i18n tasks.tpl.<camel>.* 键对
-      （hint 必需，flag 按 i18nKey/i18nKey+"Hint"）；无 run CLI 不加，UI 不受影响
+      src/lib/routine-templates.ts 的 ROUTINE_TEMPLATES += 一行（agentId 须为
+      agents.ts 已注册 id——chip 文案查 labelKey；matches 前缀 / build / flags
+      声明）+ i18n tasks.tpl.<camel>.* 键对（hint 必需，flag 按
+      i18nKey/i18nKey+"Hint"）；routine-templates.test.ts 的两行初始结构钉
+      （["opencode","claude-code"]）与 build/matches 钉随行更新（预期内钉
+      翻转，性质同 §1 步骤 5 的 codex 钉；CLI 形状先 --help 实测再钉，
+      勿按方案字面写死）；
+      无 run CLI 不加，UI 不受影响
   [ ] "codex" 拒绝钉翻转（Rust 4 + 前端 3 文件，清单见 §1 步骤 5；接其他 id 不动、按需新增）
   [ ] 验证：cargo test / npm test / tsc / build 全绿 + dev 冒烟（白名单、卡、徽标、芯片）
 

@@ -260,7 +260,7 @@ cp -r <下载解压出的宠物目录> ~/.codex/pets/<宠物id>
 v2 起提醒与定时任务合并为一页：一张列表加动作类型徽标（🔔 提醒 / ⚡ 执行命令 / 📋 待办派生），表单按类型条件显隐字段。
 
 - **提醒（notify）**：喝水 / 休息 / 自定义（含 1-140 字符文案）；内置模板一键套用（喝水 30min / 休息 60min / 站立 90min）；
-- **定时任务（exec）**：到点由宠物后台 spawn 终端命令（cwd / 超时可配）并事后汇报结果气泡（成功 / 失败 / 跳过 + 输出尾部），无前置确认；**执行历史**可回查（时间 / 动作 / 退出状态 / 输出截尾）；opencode 命令是一等模板（表单辅助拼装，如定时让 agent 评审 PR——例程会话的状态与 token 统计自动进既有链路）；
+- **定时任务（exec）**：到点由宠物后台 spawn 终端命令（cwd / 超时可配）并事后汇报结果气泡（成功 / 失败 / 跳过 + 输出尾部），无前置确认；**执行历史**可回查（时间 / 任务名 / 动作 / 退出状态 / 输出截尾，15 条/页底部分页；展开显示**当时**的命令与工作目录——规则改名 / 改命令 / 删除后历史仍保留执行时点内容，v2 起）；**例程模板（多 agent，v2 起）**：表单内置 OpenCode / Claude Code 两个一键填充模板（chips 切换，如定时让 agent 评审 PR——例程会话的状态与 token 统计自动进既有链路；Claude 模板任务名不进命令）；
 - **调度四型**：间隔（1-1440 分钟）/ 每天 HH:MM / 每周（勾选星期，不勾 = 每天）/ 一次（日期 + 时间）；提醒类可选时间窗（支持跨午夜，如 22:00-06:00）；
 - **烟花模式**：单条勾选 = 到点放烟花（约 3-5s 全屏粒子）**并同时显示气泡文案**（特效只叠加、不替代）；「全局烟花模式」开 = 未单独勾选的提醒也升级为烟花；
 - **触发行为**：气泡 8 秒自动消失，或点宠物确认；提醒气泡另有**「稍后 10 分钟」**按钮；
@@ -387,6 +387,7 @@ pulse-pet/
 │   │   ├── state.ts          # 归一化状态类型 + 占位降级映射
 │   │   ├── agents.ts         # v2 多 agent 注册表（与 Rust 侧互钉）
 │   │   ├── bubble-queue.ts   # v2 气泡排队模型（优先级 / 合并 / 并发上限 / agent 徽标）
+│   │   ├── routine-templates.ts # v2 例程模板注册表（多 agent 模板 chips / 一键填充 / 重拼启发式）
 │   │   ├── reminders.ts / todos.ts   # 例程（提醒+定时任务）/ todo 纯函数与 Rust 命令封装
 │   │   └── ...（atlas/token-stats/pet-scale/size-bridge/interaction 等桥与纯函数）
 │   └── styles/global.css
@@ -405,14 +406,14 @@ pulse-pet/
 │   │   ├── todos.rs / plugins.rs   # M7 todo 插件与派生提醒
 │   │   ├── atlas.rs          # atlas 加载（内置/codex/petdex + 网格校验 + idle 度量）
 │   │   └── windows.rs / tray.rs / hotkeys.rs / interaction.rs / token_stats.rs
-│   ├── migrations/           # 001-init.sql / 002-m7-todo.sql / 003-m4-tasks.sql
+│   ├── migrations/           # 001-init.sql / 002-m7-todo.sql / 003-m4-tasks.sql / 004-action-logs-snapshot.sql / 005-action-logs-cwd.sql
 │   ├── capabilities/default.json  # 权限收敛：仅 core:event:default
 │   └── Cargo.toml
 ├── opencode-plugin/          # 接入 hook 脚本（opencode 插件 + claude-code hook + 安装脚本，详见其 README）
 ├── scripts/gen-assets.mjs    # 生成内置精灵素材 + 图标源
 ├── docs/                     # 文档（按版本划分：v1 = 0.1.x 线设计/验收/遗留，v2 = v2 范围/设计/遗留/agent 注册）
 │   ├── v1/                   # DESIGN / TEST-CASES / DECISIONS / V1-OPEN-ITEMS（含 v0.1.3 计划 §八）等
-│   └── v2/                   # V2-SCOPE / V2-DESIGN / V2-TEST-CASES / V2-OPEN-ITEMS / agent-registry / agent-onboarding / pet-size
+│   └── v2/                   # V2-SCOPE / V2-DESIGN / V2-TEST-CASES / V2-OPEN-ITEMS / agent-registry / agent-onboarding / pet-size / routine-exec
 └── README.md
 ```
 
@@ -438,7 +439,7 @@ pulse-pet/
 - **M4** ✅ 例程——提醒与定时任务合并（notify / exec 动作泛化、四种调度、snooze、补跑宽限窗、执行历史、opencode 一等模板）。
 - **M5** ✅ Token by agent——Claude Code transcript 解析 + Token 页 agent 维度 + CC 会话汇报气泡。
 - **M6** ✅ 多 agent × 多 session 抢镜（最近活跃优先）+ 气泡 agent 徽标 + 今日 agent 分布行。
-- **收尾批次**（V2-OPEN-ITEMS §十一~§二十一，均已实施）：宠物大小三档 + 视觉归一化、用户反馈批次 F1~F16、token 跨天按消息归天、Windows 托盘/任务栏图标 tile、接入卡统计源状态行、品牌名 OpenCode 统一等。
+- **收尾批次**（V2-OPEN-ITEMS §十一~§二十五，均已实施）：宠物大小三档 + 视觉归一化、用户反馈批次 F1~F16、token 跨天按消息归天、Windows 托盘/任务栏图标 tile、接入卡统计源状态行、品牌名 OpenCode 统一、exec 例程三缺陷修复（§二十二~§二十四）、例程 exec 批次（§二十五 = [routine-exec.md](./docs/v2/routine-exec.md)：执行历史快照化 + 多 agent 例程模板 + 执行上下文）等。
 - **后移项**：多屏实机、Windows 剩余小批次（V2-OPEN-ITEMS §六）、第三 agent（codex）接入——操作手册见 [docs/v2/agent-onboarding.md](./docs/v2/agent-onboarding.md)。
 
 ## M3 实测记录：opencode session 表写入时机（TC-TK-11）
