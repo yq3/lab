@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import {
   dayLabelsBetween,
   fetchTokenRows,
@@ -652,21 +652,23 @@ function StackedBarChart({ bars }: { bars: StackedBar[] }) {
             {t("token.chart.tip", { label: tip.bar.label, total: formatTokens(tip.bar.total) })}
           </div>
           {/* 三项数值行自上而下 cache read → input → output（用户 2026-08-25
-              裁定修订；与柱内堆叠顺序独立——TOOLTIP_ROW_ORDER 钉住） */}
-          {TOOLTIP_ROW_ORDER.map((k) => {
-            const v =
-              k === "output" ? tip.bar.output : k === "input" ? tip.bar.input : tip.bar.cacheRead;
-            const pct = tip.bar.total > 0 ? (v / tip.bar.total) * 100 : 0;
-            return (
-              <div key={k} className="chart-tip-row">
-                {t("token.chart.tipRow", {
-                  name: nameOf[k],
-                  n: v.toLocaleString(),
-                  pct: pct.toFixed(1),
-                })}
-              </div>
-            );
-          })}
+              裁定修订；与柱内堆叠顺序独立——TOOLTIP_ROW_ORDER 钉住）。
+              §二十六：标签列左对齐、数字列右对齐（百分比紧跟数字不参与对齐）——
+              三行同网格共享列宽，每行平铺 name/num/pct 3 个单元格 */}
+          <div className="chart-tip-rows">
+            {TOOLTIP_ROW_ORDER.map((k) => {
+              const v =
+                k === "output" ? tip.bar.output : k === "input" ? tip.bar.input : tip.bar.cacheRead;
+              const pct = tip.bar.total > 0 ? (v / tip.bar.total) * 100 : 0;
+              return (
+                <Fragment key={k}>
+                  <span>{t("token.chart.tipRowName", { name: nameOf[k] })}</span>
+                  <span className="chart-tip-num">{v.toLocaleString()}</span>
+                  <span>{t("token.chart.tipRowPct", { pct: pct.toFixed(1) })}</span>
+                </Fragment>
+              );
+            })}
+          </div>
         </div>
       )}
     </div>

@@ -747,6 +747,36 @@ Rust 定义 `AgentSpec { id, short_name, bundled_hook, install/uninstall/status,
 
 ---
 
+## 二十六、Token 时序图 tooltip 三行数值右对齐（2026-08-31，**已实施同日**）
+
+> 来源：用户会话（2026-08-31）——柱图 tooltip 悬浮行对齐原则微调（视觉打磨，无逻辑变化）。
+
+**现状与裁定**：tooltip 三行（cache read → input → output，`TOOLTIP_ROW_ORDER` 钉序）由 `token.chart.tipRow` 单模板串渲染成**单个文本节点**（zh `"{name}：{n}（{pct}%）"` / en `"{name}: {n} ({pct}%)"`），三行整体左对齐、数字右缘参差。用户裁定：**标签列保持左对齐不动；数字列右对齐**（右缘对齐同一竖线）；**百分比不参与对齐**，紧跟数字（`（` 位置随数字列右缘自然对齐）。标题行（`…：共 …`）不参与。
+
+**方案（4 文件，纯展示层，Rust 零涉及）**：
+
+1. **i18n 拆键**：`token.chart.tipRow` 清退 → `token.chart.tipRowName`（zh `"{name}："` / en `"{name}: "`）+ `token.chart.tipRowPct`（zh `"（{pct}%）"` / en `" ({pct}%)"`）；数字本身不经 i18n（沿用 `toLocaleString()`）；拼接结果与旧模板逐字相同。
+2. **渲染**（`TokenStats.tsx`）：三行外裹 `.chart-tip-rows` 网格容器（`display: grid; grid-template-columns: max-content ×3`），每行平铺 3 个 span（name / `.chart-tip-num` / pct），数字列 `text-align: right`——**必须共享网格列宽**，跨行右缘才能对齐（每行独立 flex 无法对齐）。
+3. **空格塌缩风险（实施前审查发现）**：grid item 会被块化，CSS 空白折叠规则移除行首/行尾空格（`.chart-tip` 的 `nowrap` 继承仍是折叠型）→ en 模板中的分隔空格会消失（`input:5,947,470(2.0%)`）。对策：`.chart-tip-rows { white-space: pre }`——空格保留、分隔符逐字还原；tooltip 本就不换行，`pre` 无副作用；zh 模板全角标点不可折叠、零影响。
+4. **测试**（`i18n.test.ts`）：m3Keys 清单 `tipRow` 换两新键 + 新增清退/钉值 `it`（仿 `todayUnavailable`/`noAgents`/`costOpencodeOnly` 先例）——钉 zh 全角无空格、en 半角带空格的分隔符差异，即空格塌缩的守卫钉。
+
+**效果示例**（数字带千分位，`toLocaleString()`）：
+
+```text
+改前（整体左对齐）            改后（数字列右对齐）
+cache read：297,424,454（97.9%）    cache read：297,424,454（97.9%）
+input：5,947,470（2.0%）            input：       5,947,470（2.0%）
+output：532,386（0.2%）             output：        532,386（0.2%）
+```
+
+**关联面核查（已确认无影响）**：`t()` 为简单 `{(\w+)}` 正则替换（全角标点透传）；`nameOf` 本地字面量表不翻译；`tipRow` 模板值无测试钉住（仅键存在性）；`token-chart.test.ts:223` 只钉顺序常量不钉渲染；`.chart-tip-row` 仅 global.css + TokenStats.tsx 两处引用；tooltip 定位逻辑不动、字符集相同（典型数据下宽度不变；极端数据下 grid 三列 max-content 之和可略超旧单行最大行宽，亚像素级——committer P3-2 修订）；mockups/a.html 为静态设计稿不动。
+
+**实施记录（2026-08-31）**：已实施（工作区改动，未 commit）。① `i18n.ts`：`tipRow` zh/en 两行清退，`tipRowName`/`tipRowPct` zh/en 四行新增（zh `"{name}："` / `"（{pct}%）"`、en `"{name}: "` / `" ({pct}%)"`）；② `TokenStats.tsx`：tooltip 三行改 `.chart-tip-rows` 网格容器、每行 `Fragment` 平铺 name / `.chart-tip-num` / pct 三 span，导入补 `Fragment`；③ `global.css`：`.chart-tip-row` 规则替换为 `.chart-tip-rows`（grid 三列 max-content + `white-space: pre` + `color: var(--ink-soft)`）与 `.chart-tip-num`（`text-align: right`）；④ `i18n.test.ts`：m3Keys 清单 `tipRow` → 两新键 + 新增清退/钉值 `it`（en 带空格钉 = 塌缩守卫）。验证：npm test **464 passed**（基线 463 + 1 新钉，33 文件）/ `npx tsc --noEmit` 0 错；Rust 零涉及（cargo 不涉）。用户目验 = 悬停柱图三行数字右缘对齐、en 语言下冒号后/括号前空格保留。
+
+**Committer 审查（2026-08-31，§二十六）**：**APPROVED**（P0/P1/P2 均无，5 条 P3 备忘）。核心技术点逐项复核成立——Fragment 不产 DOM 层级、9 span 平铺共享网格列宽 + `text-align: right` 跨行对齐右缘；`pre` 防块化空格折叠推理成立（模板无换行符、zh 全角标点不受影响）；zh/en 拼接与旧模板逐字相同；旧引用清退干净（`.chart-tip-row` 零残留、`tipRow` 仅剩测试负向断言）；文档↔代码逐条核对相符（含 464=463+1 与 33 测试文件数）；测试钉具真实防护力（回退任一处会红）。**P3 处置（同日）**：已修 2——P3-2 文档「总宽不变」表述软化（极端数据下 grid 列宽之和可略超旧行宽，亚像素级）；P3-5 CSS 注释补「子 span 须各自独占一行」（同行排列时隔开空格会经 `pre` 保留成匿名 grid item 破坏三列）；记录在案 3——P3-1 工作区 untracked `pulse-pet/images/`（08-20~24 素材，与本批无关）去留待用户裁定，**提交本批时须只 stage 上述 5 文件**；P3-3 en 空格钉防护面为「删空格绕过塌缩」而非「删 CSS pre」（无 CSS 测试基建，按仓库惯例接受）；P3-4 m3Keys 测试名仍冠「v2 M3」属既有「含实施细项微调键」混收惯例（不动）。
+
+---
+
 ## 附：清偿记录
 
 （清偿后回写：日期 + 来源任务 ID + 去向。已有示例：§6.2-5 TC-M4-18 核心面 2026-08-27 随 v0.2.1 §四场景 2 验证；§7-7 或已随 v0.2.1 R2 顺手消化，打磨轮核对）
@@ -766,3 +796,4 @@ Rust 定义 `AgentSpec { id, short_name, bundled_hook, install/uninstall/status,
 - [x] **§二十五 执行历史批次（分页 15 + 快照化三列 + 分页控件移位）**：✅ 已实施 2026-08-30（方案定稿 + reviewer 两轮复核 + 用户批准，同日实施，TDD 全程先红后绿）——迁移 004（action_logs +`label`/`command`/`executed_command` 三快照列，SCHEMA_VERSION=4）+ `db.rs` 四处接线 + 新钉（缺列红→绿、旧行三列 NULL）；`ACTION_LOG_PAGE_SIZE` 50→15 收归单点（局部 `PAGE_SIZE` 删除）+ 分页断言 15/15/tail-31 + 第 5 页末页边界钉；快照管线（`SkippedRule`+`action_params`、`collect_due` 两构造点、`persist_skipped` 判定时刻提取、`command_from_params` 同源助手 pub 共用、`start_exec_run` 派发时刻快照）+ 孤儿悬空可读钉 + skipped「executed 恒 None」钉；前端（底部分页居中、行内任务名、展开「存储命令（当时配置）/ 实际执行命令」双块、skipped→未执行 / 旧行→未记录、i18n 4 键 zh/en、CSS 2 类）；文档（V2-DESIGN §4.2/§4.5/§4.7/§4.8 + TC-M4-16/TC-M4-01）。基线 cargo **377 passed + 3 ignored**（375+2 新钉）/ npm **448** 原样 / tsc 0 错。完整留痕：`docs/v2/routine-exec.md` Part A（含 Reviewer 审查-自审-复核全记录与实施记录）；用户目验待办（分页居中 / 任务名 / 双命令 / 删改规则后历史不变 / skipped 与旧行占位）；P3-6 空历史分页显示悬置未动
 - [x] **§二十五·Part B 例程模板注册表（routine-exec.md §3）**：✅ 已实施 2026-08-30（方案定稿 + reviewer 两轮（NITS→APPROVED）+ 用户批准，同日实施，TDD 全程）——`routine-templates.ts` 新建（shellQuote 迁入 + opencode/claude-code 两行 + templateOf/matchOf/tplHintKey，11 钉）；`reminders.ts` 导出 `ExecFormState`/`emptyExecState`/`execParamsJson`/`execFromParams`（新格式 `tpl_agent`+`tpl_flags` + 兜底四态 + 旧 `opencode_auto` 读兼容 + matchOf 反推，5 测）+ `validateExecParams` 两键预检；Rust validate 两条宽松校验（+1 钉）；`Tasks.tsx` 模板块泛化（chips 单选/共享指令框/声明式 flags/填充恒可点——空指令禁用处置经用户目验推翻恢复旧行为）+ 三联动点 `matchOf` 化 + **空指令守卫（顺带修复编辑改任务名 clobber 隐患）**；i18n 8 新键 + 4 旧键清退；V2-DESIGN §4.6 重写 + TC-M4-08 泛化 + agent-onboarding checklist 补例程模板行。基线 cargo **378+3** / npm **463** / tsc 0。完整留痕：routine-exec.md §3.7；用户目验待办
 - [x] **§二十五·Part C 执行上下文增补（routine-exec.md §4）**：✅ 已实施 2026-08-30（用户目验反馈驱动：双平台确认命令串原样/目录经进程属性生效后，恒同值双展示冗余 + 执行目录不可见；方案定稿过 reviewer 审查与复核 APPROVED，同日实施，TDD 全程）——迁移 005（+cwd 快照列 / DROP executed_command 恒同值冗余列，SCHEMA_VERSION=5，m4b 改版改名 m4c）；`cwd_from_params` pub 助手（只 trim 判空存原串）+ 新钉；insert 参数位 executed→cwd、SELECT 同位换列；前端「命令（当时）」单块 +「工作目录（当时）」块（notExecuted 三元整删）；i18n −3+3；**真实 v4 库副本 migrate 演练 ok**（v4→v5、11 行全保留、id72/73 command 快照完整）。基线 cargo **379+4 ignored** / npm **463** / tsc 0。完整留痕：routine-exec.md §4.6-4.7；用户目验待办
+- [x] **§二十六 Token 时序图 tooltip 三行数值右对齐**：✅ 已实施 2026-08-31（视觉打磨微批，方案核查（含空格塌缩风险前置发现）+ 用户批准，同日实施）——i18n `tipRow` 单模板串拆 `tipRowName`/`tipRowPct` 两键（en 分隔空格）+ `TokenStats.tsx` 三行改共享网格平铺 3 span（数字列 `text-align: right` 跨行对齐右缘）+ `global.css` `.chart-tip-rows`（grid + `white-space: pre` 防 grid item 块化空格折叠）；i18n 新钉 1（清退 + zh/en 分隔符钉值）。基线 npm **464**（463+1）/ tsc 0 错；Rust 零涉及。完整留痕：§二十六；用户目验 = 悬停柱图数字右缘对齐、en 空格保留

@@ -53,7 +53,9 @@ const zh: Dict = {
   "token.chart.aria": "token 时序柱状图",
   // v2 M3：堆叠柱图 HTML tooltip（日期 + 三值 + 占比 + 总量）
   "token.chart.tip": "{label}：共 {total}",
-  "token.chart.tipRow": "{name}：{n}（{pct}%）",
+  // §二十六：tipRow 拆 name/pct 两键（数字列右对齐网格布局，en 空格靠容器 white-space: pre 保留）
+  "token.chart.tipRowName": "{name}：",
+  "token.chart.tipRowPct": "（{pct}%）",
   // v2 M3：模型筛选
   "token.chart.noModels": "未勾选任何模型，柱图为空。",
   "token.col.model": "模型",
@@ -445,7 +447,8 @@ const en: Dict = {
   "token.chart.title": "Token timeline ({dim})",
   "token.chart.aria": "Token bar chart",
   "token.chart.tip": "{label}: total {total}",
-  "token.chart.tipRow": "{name}: {n} ({pct}%)",
+  "token.chart.tipRowName": "{name}: ",
+  "token.chart.tipRowPct": " ({pct}%)",
   "token.chart.noModels": "No models selected — the chart is empty.",
   "token.col.model": "Model",
   "token.model.unknown": "Unknown model",

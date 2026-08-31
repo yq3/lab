@@ -72,7 +72,8 @@ describe("字典完备性", () => {
       "token.project.global",
       "token.project.unknown",
       "token.chart.tip",
-      "token.chart.tipRow",
+      "token.chart.tipRowName",
+      "token.chart.tipRowPct",
       "token.chart.noModels",
       "menu.todayToken",
       "toolb.read",
@@ -208,6 +209,20 @@ describe("字典完备性", () => {
     const { DICT } = await import("./i18n");
     expect(!("token.chart.noAgents" in DICT.zh), "zh 应无 noAgents").toBe(true);
     expect(!("token.chart.noAgents" in DICT.en), "en 应无 noAgents").toBe(true);
+  });
+
+  // §二十六（2026-08-31）：tooltip 三行数字列右对齐——tipRow 单模板串拆
+  // name/pct 两键（数字不经 i18n）。钉住分隔符语言差异（zh 全角无空格 /
+  // en 半角带空格）——en 空格依赖 .chart-tip-rows 的 white-space: pre 保留
+  // （grid item 块化折叠风险的守卫钉，V2-OPEN-ITEMS §二十六）
+  it("§二十六 tipRow 已清退，tipRowName/tipRowPct 齐备且分隔符钉值", async () => {
+    const { DICT } = await import("./i18n");
+    expect(!("token.chart.tipRow" in DICT.zh), "zh 应无 tipRow").toBe(true);
+    expect(!("token.chart.tipRow" in DICT.en), "en 应无 tipRow").toBe(true);
+    expect(DICT.zh["token.chart.tipRowName"]).toBe("{name}：");
+    expect(DICT.zh["token.chart.tipRowPct"]).toBe("（{pct}%）");
+    expect(DICT.en["token.chart.tipRowName"]).toBe("{name}: ");
+    expect(DICT.en["token.chart.tipRowPct"]).toBe(" ({pct}%)");
   });
 });
 

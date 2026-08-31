@@ -891,8 +891,19 @@ select {
   margin-bottom: 2px;
 }
 
-.chart-tip-row {
+/* §二十六：三行数值网格——标签列左对齐、数字列右对齐（共享列宽跨行对齐右缘）；
+   white-space: pre 防 grid item 块化后行首/行尾空格折叠（en 分隔空格）。
+   子 span 须各自独占一行：JSX 剥除换行空白，若同行排列则其间空格会经 pre
+   保留成匿名 grid item、破坏三列布局（committer P3-5） */
+.chart-tip-rows {
+  display: grid;
+  grid-template-columns: max-content max-content max-content;
+  white-space: pre;
   color: var(--ink-soft);
+}
+
+.chart-tip-num {
+  text-align: right;
 }
 
 /* 图例三项（仅说明不可交互，§3.5） */
