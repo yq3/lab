@@ -26,13 +26,16 @@ type Dict = Record<string, string>;
 
 const zh: Dict = {
   // ---- panel 骨架 ----
-  "panel.title": "PulsePet 控制面板",
+  "panel.title": "PulsePet · 控制面板",
   "panel.tab.token": "Token",
   "panel.tab.reminders": "提醒",
-  "panel.tab.todo": "Todo",
+  "panel.tab.todo": "待办",
   "panel.tab.settings": "设置",
+  // v2 M2：顶栏 agent 状态芯片 aria-label（agent/kind 字面量不翻译）
+  "panel.statusAria": "当前 agent 状态：{text}",
 
   // ---- token 统计页 ----
+  "token.preset.today": "今日",
   "token.preset.7d": "近 7 天",
   "token.preset.30d": "近 30 天",
   "token.preset.custom": "自定义",
@@ -45,21 +48,48 @@ const zh: Dict = {
   "token.aria.from": "起始日期",
   "token.aria.to": "结束日期",
   "token.aria.dim": "统计维度",
+  "token.aria.agent": "agent 维度",
   "token.chart.title": "Token 时序（{dim}）",
   "token.chart.aria": "token 时序柱状图",
-  "token.chart.bar": "{label}：{n} tokens",
-  "token.pie.title": "项目分布",
-  "token.pie.aria": "项目 cost 占比",
-  "token.pie.slice": "{label}：{pct}%",
+  // v2 M3：堆叠柱图 HTML tooltip（日期 + 三值 + 占比 + 总量）
+  "token.chart.tip": "{label}：共 {total}",
+  // §二十六：tipRow 拆 name/pct 两键（数字列右对齐网格布局，en 空格靠容器 white-space: pre 保留）
+  "token.chart.tipRowName": "{name}：",
+  "token.chart.tipRowPct": "（{pct}%）",
+  // v2 M3：模型筛选
+  "token.chart.noModels": "未勾选任何模型，柱图为空。",
+  "token.col.model": "模型",
+  "token.model.unknown": "未知模型",
+  "token.kpi.total": "总量",
   "token.sessions.title": "会话（{n}）",
   "token.sessions.empty": "跨度内无会话记录。",
   "token.sessions.updated": "更新时间",
+  "token.project.global": "全局",
   "token.project.unknown": "（未知项目）",
-  "token.error.noDatabase": "数据库未运行/未初始化：未检测到 opencode 数据库（opencode.db / opencode-canary.db）。",
-  "token.error.legacyStorage": "检测到旧版 opencode 存储格式（storage/session/*.json）：请升级 opencode 后使用。",
+  // P3 口径 A′（agent-registry §6.4 规则 2）：硬报错仅当全部源无数据且无一源
+  // Ok——文案 N 源中性化（原「未检测到 opencode 数据库」措辞重写）
+  "token.error.noDatabase": "未检测到任何 agent 用量数据（被监测的 agent 尚未安装或从未使用）。",
+  "token.error.legacyStorage": "检测到旧版 OpenCode 存储格式（storage/session/*.json）：请升级 OpenCode 后使用。",
   "token.error.schemaMismatch": "opencode.db schema 不兼容（{msg}）",
   "token.error.query": "查询失败：{msg}",
   "token.needApp": "Token 统计需要在 PulsePet App（Tauri）内查看",
+  // v2 M5（§5.6，TC-M5-04/10）：agent 筛选 chip + 会话列表徽标全名
+  "token.agent.opencode": "OpenCode",
+  "token.agent.claudeCode": "Claude Code",
+  // v2 M5 R2（TC-M5-04-1）：agent tab「全部」项（恒显，默认选中）
+  "token.agent.all": "全部",
+  // §十二 F3（2026-08-28）：token.costOpencodeOnly 费用口径标注键清退（用户裁定）
+  // v2 M5（TC-M5-07）：例程会话 ⚡ 徽标 title 提示（零 schema 改动）
+  "token.taskBadge": "定时任务例程",
+  // P3 口径 A′（agent-registry §6.4 规则 3）：degraded 细横幅收窄为主源 opencode
+  // Failed（在但坏）× 其余源有数据（仅 panel；Missing 不触发——CC-only 干净）
+  "token.degraded": "OpenCode 数据源异常：仅显示其它 agent 数据",
+  // §二十（V2-OPEN-ITEMS）：Token 页底部被动性质说明（文案 2026-08-30 用户
+  // 逐轮裁定逐字定稿——统计链自动发现/被动读取/无需安装/暂不支持管理 +
+  // 状态查看入口导向接入卡）
+  "token.sourceNote":
+    "说明：Token 统计为被动读取——自动发现各 agent 本地产生的用量记录，无需安装，暂不支持在应用内开关或管理；某 agent 未显示数据时，可到设置 → 接入管理查看统计源状态。",
+  "token.hoverAgent": "今日 agent 分布",
 
   // ---- 提醒页 ----
   "reminders.needApp": "提醒配置需要在 PulsePet App（Tauri）内使用",
@@ -68,7 +98,7 @@ const zh: Dict = {
   "reminders.fwGlobal": "全局烟花模式（未单独勾选的提醒也升级为烟花）",
   "reminders.pausedBadge": "已暂停所有提醒（托盘可恢复）",
   "reminders.rules.title": "提醒规则（{n}）",
-  "reminders.rules.empty": "还没有提醒规则，从下方模板或表单新建一条吧。",
+  "reminders.rules.empty": "还没有例程，从下方模板或表单新建一条吧。",
   "reminders.kind.hydration": "喝水",
   "reminders.kind.rest": "休息",
   "reminders.kind.custom": "自定义",
@@ -91,17 +121,19 @@ const zh: Dict = {
   "reminders.enabled": "启用",
   "reminders.enabledOn": "启用中",
   "reminders.enabledOff": "已停用",
-  "reminders.fireworks": "烟花",
-  "reminders.fireworksOverride": "单条烟花覆盖（TC-RM-11）",
+  // §十二 F12（2026-08-28）：reminders.fireworks/fireworksOverride 随 todo
+  // 派生行烟花勾选项移除清退（烟花随全局总开关，OR 语义不变）
   "reminders.test": "试一试",
   "reminders.edit": "编辑",
   "reminders.delete": "删除",
   "reminders.deleteConfirm": "确认删除？",
   "reminders.deleteHint": "再次点击确认删除",
-  "reminders.form.newTitle": "新建提醒",
-  "reminders.form.editTitle": "编辑提醒 #{n}",
+  "reminders.form.newTitle": "新建例程",
+  "reminders.form.editTitle": "编辑例程 #{n}",
+  // §十二 F12（2026-08-28）：todoHint 修正过时文案——todo 编辑态实际无任何
+  // 可调字段（锁定块包住全部控件），提示只指路 Todo 页
   "reminders.form.todoHint":
-    "📋 Todo 派生提醒（单次，由 Todo 插件管理类型/间隔/时刻——在 Todo 页改任务的截止或提前提醒即可）。此处仅可调整文案、启用与烟花；改动会随任务下次保存被任务标题覆盖。",
+    "📋 Todo 派生提醒（单次，由 Todo 插件管理）——在 Todo 页调整任务的截止时间或提前提醒即可；此处无可调整项。",
   "reminders.form.type": "类型",
   "reminders.form.label": "文案（气泡显示，纯文本 1-140 字符）",
   "reminders.form.labelPlaceholder": "如：该喝水啦 💧",
@@ -114,10 +146,7 @@ const zh: Dict = {
   "reminders.form.save": "保存修改",
   "reminders.form.create": "新建",
   "reminders.form.cancel": "取消编辑",
-  "reminders.stats.title": "历史统计（reminder_logs）",
-  "reminders.stats.empty": "暂无提醒记录。",
-  "reminders.stats.today": "今日 {n} 次",
-  "reminders.stats.total": "累计 {n} 次",
+  // §十二 F14（2026-08-28）：reminders.stats.*（4 键）随「历史统计」区移除清退
   "reminders.toast.fired": "已触发「{label}」",
   "reminders.toast.dedup": "3 分钟内已触发过，去重拦截（TC-RM-05）",
   "reminders.toast.paused": "所有提醒已暂停（托盘「暂停所有提醒」），恢复后再试",
@@ -136,6 +165,99 @@ const zh: Dict = {
   "reminders.validation.intervalBad": "间隔非法（1-{max} 分钟）",
   "reminders.validation.timeFormat": "{what}时间格式应为 HH:MM",
   "reminders.validation.timeRange": "{what}时间越界（00:00-23:59）",
+
+  // ---- v2 M4：定时任务（tasks.*，V2-DESIGN §4.7）----
+  "panel.tab.tasks": "例程",
+  "panel.agentTask": "例程",
+  "tasks.rules.title": "例程（{n}）",
+  "tasks.actionType": "动作类型",
+  "tasks.action.notify": "提醒",
+  "tasks.action.exec": "执行命令",
+  "tasks.badge.notify": "提醒（气泡 + 烟花）",
+  "tasks.badge.exec": "执行命令（后台进程 + 历史）",
+  "tasks.schedule.interval": "间隔",
+  "tasks.schedule.daily": "每天",
+  "tasks.schedule.once": "一次",
+  "tasks.schedule.at": "时刻（HH:MM）",
+  "tasks.schedule.datetime": "日期时间",
+  "tasks.schedule.weekdays": "星期（不勾 = 每天）",
+  "tasks.weekday.1": "一",
+  "tasks.weekday.2": "二",
+  "tasks.weekday.3": "三",
+  "tasks.weekday.4": "四",
+  "tasks.weekday.5": "五",
+  "tasks.weekday.6": "六",
+  "tasks.weekday.7": "日",
+  "tasks.summary.daily": "每天 {at}",
+  "tasks.summary.dailyDays": "周{days} {at}",
+  "tasks.summary.once": "一次 · {at}",
+  "tasks.form.name": "任务名",
+  "tasks.form.namePlaceholder": "如：数 md 文件",
+  "tasks.form.command": "命令（sh -c 执行，≤2000 字符）",
+  "tasks.form.commandHint": "提示：GUI 启动的 App 继承的 PATH 可能有限（不读 shell 配置文件）——依赖用户级工具（opencode/node 等）时请用绝对路径，或在命令前自行补充 PATH",
+  "tasks.form.cwd": "工作目录（可选，需填写绝对路径）",
+  "tasks.form.nameDefault": "任务名示例",
+  "tasks.form.timeout": "超时（分钟，1-120）",
+  "tasks.form.instruction": "指令",
+  // Part B（routine-exec.md）：例程模板注册表——chips 文案复用 agents.ts labelKey
+  "tasks.tpl.blockTitle": "例程模板",
+  "tasks.tpl.fill": "一键填充",
+  "tasks.tpl.opencode.hint": "一键填充：opencode run --title \"pulsepet 例程: <任务名>\" \"<指令>\"（可再改）",
+  "tasks.tpl.opencode.auto": "自动放行权限（--auto，危险）",
+  "tasks.tpl.opencode.autoHint": "勾选后例程的权限请求自动放行——无人值守执行副作用命令，请谨慎",
+  "tasks.tpl.claudeCode.hint": "一键填充：claude -p \"<指令>\"（可再改；CC 会话无 ⚡ 例程徽标）",
+  "tasks.tpl.claudeCode.skipPerms": "跳过全部权限确认（--dangerously-skip-permissions，危险）",
+  "tasks.tpl.claudeCode.skipPermsHint": "勾选后权限请求不再拦截——无人值守执行副作用命令，请谨慎",
+  "tasks.tpl.smartQuoteWarn": "❗ 命令含中文弯引号（‘ ’ “ ”）——若为输入法误替英文引号会导致执行失败；确为内容可忽略",
+  "tasks.tpl.smartQuoteFix": "把弯引号当作引号修正",
+  "tasks.skip": "跳过本次",
+  "tasks.skipDone": "已跳过本周期",
+  "tasks.skipFail": "跳过失败：{msg}",
+  "tasks.snooze": "稍后 10 分钟",
+  "tasks.history.title": "执行历史",
+  "tasks.history.empty": "暂无执行记录。",
+  "tasks.history.loadFail": "读取执行历史失败：{msg}",
+  "tasks.history.page": "第 {page}/{pages} 页 · 共 {total} 条",
+  "tasks.history.prev": "上一页",
+  "tasks.history.next": "下一页",
+  "tasks.history.expand": "展开输出",
+  "tasks.history.collapse": "收起",
+  "tasks.history.delay": "补跑延迟 {sec} 秒",
+  "tasks.history.output": "输出尾部（≤2KB）",
+  // routine-exec.md Part C（005）：命令单块 + 工作目录块（实录与配置恒同值）
+  "tasks.history.command": "命令（当时）",
+  "tasks.history.workdir": "工作目录（当时）",
+  "tasks.history.cwdNone": "（未配置——继承 App 进程目录）",
+  "tasks.history.unrecorded": "—（未记录）",
+  "tasks.history.filterAll": "全部任务",
+  "tasks.status.ok": "ok",
+  "tasks.status.failed": "failed",
+  "tasks.status.skipped": "skipped",
+  "tasks.status.running": "running",
+  "task.summary.ok": "任务完成",
+  "task.summary.failed": "失败（退出码 {n}）",
+  "task.summary.failedNoCode": "失败",
+  "task.summary.timeout": "超时（{n} 分钟）被终止",
+  "task.summary.missed": "错过补跑窗（15 分钟）",
+  "task.summary.paused": "暂停期间跳过",
+  "task.summary.interrupted": "App 退出中断",
+  "task.summary.stale": "上次运行未完结（启动清理）",
+  "tasks.validation.actionBad": "动作类型非法（应为 notify/exec）",
+  "tasks.validation.scheduleBad": "调度类型非法（应为 interval/daily/once）",
+  "tasks.validation.atRequired": "时刻不能为空",
+  "tasks.validation.atFormat": "时刻应为 HH:MM",
+  "tasks.validation.dtFormat": "日期时间应为 YYYY-MM-DDTHH:MM",
+  "tasks.validation.dtPast": "须为未来时刻（防创建即意外执行）",
+  "tasks.validation.weekdaysBad": "星期过滤非法（1-7）",
+  "tasks.validation.paramsMissing": "执行命令需要 action_params（JSON 对象）",
+  "tasks.validation.commandEmpty": "命令不能为空",
+  "tasks.validation.commandLong": "命令超长（≤2000 字符）",
+  "tasks.validation.cwdNotDir": "工作目录不存在或不是目录",
+  "tasks.validation.timeoutBad": "超时非法（1-120 分钟，缺省 10）",
+  "tasks.validation.autoBad": "opencode_auto 应为布尔值",
+  // Part B（routine-exec.md §3.3）：tpl_agent / tpl_flags 预检（与 Rust 同规则）
+  "tasks.validation.tplAgentBad": "tpl_agent 应为字符串",
+  "tasks.validation.tplFlagsBad": "tpl_flags 应为对象且所有值为布尔",
 
   // ---- todo 插件页 ----
   "todo.needApp": "Todo 需要在 PulsePet App（Tauri）内使用",
@@ -201,17 +323,34 @@ const zh: Dict = {
   "settings.loadFail": "读取宠物列表失败：{msg}",
   "settings.switchFail": "切换宠物失败：{msg}",
   "settings.passFail": "切换穿透失败：{msg}",
+  "settings.languageFail": "切换语言失败：{msg}",
   "settings.pet": "宠物",
   "settings.petLabel": "选择宠物（切换立即生效；重启保留）",
+  // §十一（V2-OPEN-ITEMS）：大小三档分段控件；§十二 二轮微调（2026-08-28）：
+  // label「大小」→「宠物大小」
+  "settings.size": "宠物大小",
+  "settings.sizeSmall": "小",
+  "settings.sizeMedium": "中",
+  "settings.sizeLarge": "大",
+  "settings.sizeFail": "切换大小失败：{msg}",
+  "settings.versionTitle": "版本",
   "settings.autoOption": "自动（默认 blinking-kitty）",
   "settings.source.builtin": "内置",
   "settings.missingOption": "{id} — 素材损坏或不存在，已回退",
   "settings.brokenOption": " — 素材损坏/非标准，不可选",
-  "settings.current": "当前渲染：{id}（来源 {source}，{cols}×{rows} 网格，单帧 {fw}×{fh}）",
-  "settings.fellBack": "，已从「{id}」回退",
-  "settings.interaction": "交互",
-  "settings.passThrough":
-    "点击穿透（纯展示模式）：开启后鼠标事件透出——宠物不可拖拽、右键菜单不可达，动画照常播放；可经全局热键 ⌘/Ctrl+Shift+Alt+P 或托盘菜单「切换交互模式」切回。",
+  // §十二 二轮微调（2026-08-28）：「当前渲染」行移除，current/fellBack 键清退
+  //（回退可见性仍由 settings.notice 横幅与下拉 requestedMissing 占位承担）
+  // §十二 F6（2026-08-28）：交互与工具播报合并一区（卡片行形态）——
+  // 原「交互」「宠物与播报」两个 h2 区键（settings.interaction/sectionPet）清退；
+  // 二轮微调：区名「交互与播报」→「交互管理」，卡片文案拆粗体名 + 常规描述两键
+  "settings.sectionInteraction": "交互管理",
+  "settings.passThrough": "点击穿透（纯展示模式）",
+  "settings.passThroughDesc":
+    "开启后鼠标事件透出——宠物不可拖拽、右键菜单不可达，动画照常播放；可经全局热键 ⌘/Ctrl+Shift+Alt+P 或托盘菜单「切换交互模式」切回。",
+  "settings.toolBroadcast": "工具播报",
+  "settings.toolBroadcastDesc":
+    "agent 使用工具时宠物气泡播报（如「正在编辑 X.md」）；关闭立即静默，插件照常上报。",
+  "settings.toolBroadcastFail": "工具播报开关保存失败：{msg}",
   "settings.hotkeys": "全局热键：⌘/Ctrl+Shift+P 唤起/隐藏面板；⌘/Ctrl+Shift+Alt+P 切换穿透；",
   "settings.hotkeys.debug": " ⌘/Ctrl+Shift+Alt+F 调试烟花（仅开发构建）。",
   "settings.language": "语言",
@@ -219,12 +358,63 @@ const zh: Dict = {
   "settings.languageZh": "中文",
   "settings.languageEn": "English",
 
+  // ---- v2 M2 外观（主题三档，V2-DESIGN §2.3；§十二 F6：改下拉；二轮微调：
+  //     themeLabel 键清退——hint 上移替代 label 位）----
+  "settings.theme": "外观",
+  "settings.themeHint": "面板主题（跟随系统或固定浅色/深色；重启保留；气泡与右键菜单不随主题变）",
+  "settings.themeAuto": "跟随系统",
+  "settings.themeLight": "浅色",
+  "settings.themeDark": "深色",
+  "settings.themeFail": "切换主题失败：{msg}",
+
+  // ---- v2 M1 接入管理（V2-DESIGN §1.7/§1.8）----
+  "integrations.title": "接入管理",
+  "integrations.installed": "已安装",
+  "integrations.notInstalled": "未安装",
+  "integrations.stale": "需更新",
+  "integrations.error": "检测失败",
+  "integrations.install": "安装",
+  "integrations.reinstall": "重新安装",
+  "integrations.uninstall": "卸载",
+  "integrations.installing": "安装中…",
+  "integrations.nodeMissing": "未检测到 node（CC 接入需要）",
+  "integrations.nodeReady": "node 已就绪",
+  "integrations.lastEvent": "事件正常",
+  "integrations.noEvent": "最近无事件",
+  "integrations.notes": "接入说明：\n1.安装/卸载前会自动备份配置文件至同目录\n2.安装/卸载之后重开会话才会生效，已运行中的会话保持原样\n3.卸载 PulsePet 前请先在此卸载各接入，卸载应用不会自动移除插件文件",
+  "integrations.opencodeDesc": "OpenCode",
+  "integrations.claudeDesc": "Claude Code",
+  // §二十（V2-OPEN-ITEMS）：接入卡统计源状态行（被动发现式读取的三态呈现；
+  // statsRow 的 {state} 由 STATS_STATE_KEYS 查表子键填充）
+  "integrations.statsRow": "统计源：{state}",
+  "integrations.statsOk": "正常",
+  "integrations.statsMissing": "未检测到数据",
+  "integrations.statsFailed": "异常",
+  "integrations.statsNone": "无统计源（仅事件接入）",
+  "integrations.fail": "操作失败：{msg}",
+  "integrations.actionDone": "操作完成：",
+
+  // ---- v2 M2 功能管理（feature flag，V2-DESIGN §2.5）----
+  "plugins.manage": "功能管理",
+  "plugins.manageHint": "关闭插件将隐藏其面板页并停用其派生提醒（数据保留，重新启用即恢复）",
+  "plugins.manageToggle": "启用 {name}",
+  "plugins.disabledBadge": "已停用（插件关闭）",
+
   // ---- 宠物右键菜单 ----
   "menu.settings": "设置…",
   "menu.togglePass": "切换交互模式（穿透：{state}）",
   "menu.passOn": "开",
   "menu.passOff": "关",
   "menu.hidePet": "隐藏宠物",
+  // v2 M3：入口层「今日 token」信息项（{v} = … / 42M / — 三态）
+  "menu.todayToken": "今日 token：{v}",
+
+  // ---- v2 M3 工具级气泡（模板 ID 协议，§3.7.1；{p} = 净化后的 param）----
+  "toolb.read": "正在读 {p}",
+  "toolb.edit": "正在编辑 {p}",
+  "toolb.bash": "正在跑 {p}",
+  "toolb.search": "搜索 {p}",
+  "toolb.web": "访问 {p}",
 
   // ---- 通用 ----
   "pass.on": "穿透开：纯展示（鼠标穿透，不可拖拽/右键）",
@@ -233,12 +423,14 @@ const zh: Dict = {
 };
 
 const en: Dict = {
-  "panel.title": "PulsePet Control Panel",
+  "panel.title": "PulsePet · Control Panel",
   "panel.tab.token": "Token",
   "panel.tab.reminders": "Reminders",
   "panel.tab.todo": "Todo",
   "panel.tab.settings": "Settings",
+  "panel.statusAria": "Current agent state: {text}",
 
+  "token.preset.today": "Today",
   "token.preset.7d": "Last 7 days",
   "token.preset.30d": "Last 30 days",
   "token.preset.custom": "Custom",
@@ -251,23 +443,44 @@ const en: Dict = {
   "token.aria.from": "Start date",
   "token.aria.to": "End date",
   "token.aria.dim": "Dimension",
+  "token.aria.agent": "Agent dimension",
   "token.chart.title": "Token timeline ({dim})",
   "token.chart.aria": "Token bar chart",
-  "token.chart.bar": "{label}: {n} tokens",
-  "token.pie.title": "Project distribution",
-  "token.pie.aria": "Project cost share",
-  "token.pie.slice": "{label}: {pct}%",
+  "token.chart.tip": "{label}: total {total}",
+  "token.chart.tipRowName": "{name}: ",
+  "token.chart.tipRowPct": " ({pct}%)",
+  "token.chart.noModels": "No models selected — the chart is empty.",
+  "token.col.model": "Model",
+  "token.model.unknown": "Unknown model",
+  "token.kpi.total": "Total",
   "token.sessions.title": "Sessions ({n})",
   "token.sessions.empty": "No sessions in this range.",
   "token.sessions.updated": "Updated",
+  "token.project.global": "Global",
   "token.project.unknown": "(unknown project)",
+  // P3 口径 A′（agent-registry §6.4 规则 2）：硬报错仅当全部源无数据且无一源
+  // Ok——wording kept source-neutral (was opencode-specific)
   "token.error.noDatabase":
-    "Database not running/initialized: no opencode database detected (opencode.db / opencode-canary.db).",
+    "No agent usage data detected (monitored agents not installed or never used).",
   "token.error.legacyStorage":
-    "Legacy opencode storage detected (storage/session/*.json): please upgrade opencode.",
+    "Legacy OpenCode storage detected (storage/session/*.json): please upgrade OpenCode.",
   "token.error.schemaMismatch": "opencode.db schema incompatible ({msg})",
   "token.error.query": "Query failed: {msg}",
   "token.needApp": "Token stats are only available inside the PulsePet app (Tauri)",
+  // v2 M5（§5.6，TC-M5-04/10）：agent 筛选 chip + 会话列表徽标全名
+  "token.agent.opencode": "OpenCode",
+  "token.agent.claudeCode": "Claude Code",
+  "token.agent.all": "All",
+  // §十二 F3（2026-08-28）：token.costOpencodeOnly 费用口径标注键清退（用户裁定）
+  // v2 M5（TC-M5-07）：例程会话 ⚡ 徽标 title 提示（零 schema 改动）
+  "token.taskBadge": "Scheduled routine",
+  // P3 口径 A′（agent-registry §6.4 规则 3）：degraded banner narrowed to primary
+  // source opencode Failed × other sources have data (panel only; Missing silent)
+  "token.degraded": "OpenCode data source error: showing other agents' data only",
+  // §二十（V2-OPEN-ITEMS）：Token 页底部被动性质说明（与 zh 同一定稿口径）
+  "token.sourceNote":
+    "Note: token stats are read passively — PulsePet auto-discovers each agent's local usage records. No setup is needed, and sources cannot be toggled in-app. If an agent shows no data, check its source status in Settings → Integrations.",
+  "token.hoverAgent": "Today's tokens by agent",
 
   "reminders.needApp": "Reminders are only available inside the PulsePet app (Tauri)",
   "reminders.loadFail": "Failed to load reminders: {msg}",
@@ -275,7 +488,8 @@ const en: Dict = {
   "reminders.fwGlobal": "Global fireworks mode (reminders without per-rule opt-in are upgraded to fireworks)",
   "reminders.pausedBadge": "All reminders paused (resume from tray)",
   "reminders.rules.title": "Reminder rules ({n})",
-  "reminders.rules.empty": "No reminder rules yet — create one from the templates or the form below.",
+  "reminders.rules.empty":
+    "No routines yet — create one from the templates or the form below.",
   "reminders.kind.hydration": "Hydration",
   "reminders.kind.rest": "Rest",
   "reminders.kind.custom": "Custom",
@@ -298,17 +512,19 @@ const en: Dict = {
   "reminders.enabled": "Enabled",
   "reminders.enabledOn": "Enabled",
   "reminders.enabledOff": "Disabled",
-  "reminders.fireworks": "Fireworks",
-  "reminders.fireworksOverride": "Per-rule fireworks override (TC-RM-11)",
+  // §十二 F12（2026-08-28）：fireworks/fireworksOverride keys retired with the
+  // todo-row fireworks checkbox (global toggle covers it; OR semantics unchanged)
   "reminders.test": "Test",
   "reminders.edit": "Edit",
   "reminders.delete": "Delete",
   "reminders.deleteConfirm": "Confirm delete?",
   "reminders.deleteHint": "Click again to confirm delete",
-  "reminders.form.newTitle": "New reminder",
-  "reminders.form.editTitle": "Edit reminder #{n}",
+  "reminders.form.newTitle": "New routine",
+  "reminders.form.editTitle": "Edit routine #{n}",
+  // §十二 F12（2026-08-28）：todoHint corrected — todo edit state has no
+  // adjustable fields (locked); the hint just points to the Todo page
   "reminders.form.todoHint":
-    "📋 Derived todo reminder (one-shot; type/interval/time are managed by the Todo plugin — change the task's due or lead time on the Todo page). Only text, enabled and fireworks can be adjusted here; edits will be overwritten by the task title on its next save.",
+    "📋 Derived todo reminder (one-shot, managed by the Todo plugin) — adjust the task's due time or lead time on the Todo page; nothing to adjust here.",
   "reminders.form.type": "Type",
   "reminders.form.label": "Text (shown in bubble, plain text, 1-140 chars)",
   "reminders.form.labelPlaceholder": "e.g. Drink some water 💧",
@@ -321,10 +537,7 @@ const en: Dict = {
   "reminders.form.save": "Save changes",
   "reminders.form.create": "Create",
   "reminders.form.cancel": "Cancel editing",
-  "reminders.stats.title": "History (reminder_logs)",
-  "reminders.stats.empty": "No reminder records yet.",
-  "reminders.stats.today": "Today: {n}",
-  "reminders.stats.total": "Total: {n}",
+  // §十二 F14（2026-08-28）：reminders.stats.* keys retired with the stats section
   "reminders.toast.fired": "Fired “{label}”",
   "reminders.toast.dedup": "Already fired within 3 minutes, deduplicated (TC-RM-05)",
   "reminders.toast.paused": "All reminders are paused (tray “Pause all reminders”) — resume first",
@@ -343,6 +556,99 @@ const en: Dict = {
   "reminders.validation.intervalBad": "Invalid interval (1-{max} minutes)",
   "reminders.validation.timeFormat": "{what} time should be HH:MM",
   "reminders.validation.timeRange": "{what} time out of range (00:00-23:59)",
+
+  // ---- v2 M4: scheduled tasks (tasks.*, V2-DESIGN §4.7) ----
+  "panel.tab.tasks": "Routines",
+  "panel.agentTask": "Routine",
+  "tasks.rules.title": "Routines ({n})",
+  "tasks.actionType": "Action",
+  "tasks.action.notify": "Notify",
+  "tasks.action.exec": "Run command",
+  "tasks.badge.notify": "Notify (bubble + fireworks)",
+  "tasks.badge.exec": "Run command (background process + history)",
+  "tasks.schedule.interval": "Interval",
+  "tasks.schedule.daily": "Daily",
+  "tasks.schedule.once": "Once",
+  "tasks.schedule.at": "Time (HH:MM)",
+  "tasks.schedule.datetime": "Date & time",
+  "tasks.schedule.weekdays": "Weekdays (none = every day)",
+  "tasks.weekday.1": "Mon",
+  "tasks.weekday.2": "Tue",
+  "tasks.weekday.3": "Wed",
+  "tasks.weekday.4": "Thu",
+  "tasks.weekday.5": "Fri",
+  "tasks.weekday.6": "Sat",
+  "tasks.weekday.7": "Sun",
+  "tasks.summary.daily": "Daily {at}",
+  "tasks.summary.dailyDays": "{days} {at}",
+  "tasks.summary.once": "Once · {at}",
+  "tasks.form.name": "Task name",
+  "tasks.form.namePlaceholder": "e.g. count md files",
+  "tasks.form.command": "Command (runs via sh -c, ≤2000 chars)",
+  "tasks.form.commandHint": "Note: GUI-launched apps may inherit a limited PATH (shell profiles are not read) — for user-level tools (opencode, node, …) use absolute paths or add their install dir to PATH first",
+  "tasks.form.cwd": "Working directory (optional, absolute path required)",
+  "tasks.form.nameDefault": "Example task",
+  "tasks.form.timeout": "Timeout (minutes, 1-120)",
+  "tasks.form.instruction": "Instruction",
+  // Part B（routine-exec.md）：例程模板注册表——chips 文案复用 agents.ts labelKey
+  "tasks.tpl.blockTitle": "Routine templates",
+  "tasks.tpl.fill": "Fill command",
+  "tasks.tpl.opencode.hint": "One-click fill: opencode run --title \"pulsepet 例程: <task name>\" \"<instruction>\" (editable)",
+  "tasks.tpl.opencode.auto": "Auto-approve permissions (--auto, dangerous)",
+  "tasks.tpl.opencode.autoHint": "Permission requests are auto-approved — unattended side-effect commands, use with care",
+  "tasks.tpl.claudeCode.hint": "One-click fill: claude -p \"<instruction>\" (editable; CC sessions carry no ⚡ routine badge)",
+  "tasks.tpl.claudeCode.skipPerms": "Bypass all permission checks (--dangerously-skip-permissions, dangerous)",
+  "tasks.tpl.claudeCode.skipPermsHint": "Permission checks are bypassed — unattended side-effect commands, use with care",
+  "tasks.tpl.smartQuoteWarn": "❗ Command contains curly quotes (‘ ’ “ ”) — if they were meant as straight quotes, the shell will fail to parse; ignore if intentional",
+  "tasks.tpl.smartQuoteFix": "Treat as quotes and fix",
+  "tasks.skip": "Skip once",
+  "tasks.skipDone": "Skipped this cycle",
+  "tasks.skipFail": "Skip failed: {msg}",
+  "tasks.snooze": "Snooze 10 min",
+  "tasks.history.title": "Run history",
+  "tasks.history.empty": "No runs yet.",
+  "tasks.history.loadFail": "Failed to load history: {msg}",
+  "tasks.history.page": "Page {page}/{pages} · {total} runs",
+  "tasks.history.prev": "Previous",
+  "tasks.history.next": "Next",
+  "tasks.history.expand": "Show output",
+  "tasks.history.collapse": "Collapse",
+  "tasks.history.delay": "Catch-up delay {sec}s",
+  "tasks.history.output": "Output tail (≤2KB)",
+  // routine-exec.md Part C（005）：命令单块 + 工作目录块（实录与配置恒同值）
+  "tasks.history.command": "Command (at run time)",
+  "tasks.history.workdir": "Working directory (at run time)",
+  "tasks.history.cwdNone": "(not set — inherits app process directory)",
+  "tasks.history.unrecorded": "— (not recorded)",
+  "tasks.history.filterAll": "All tasks",
+  "tasks.status.ok": "ok",
+  "tasks.status.failed": "failed",
+  "tasks.status.skipped": "skipped",
+  "tasks.status.running": "running",
+  "task.summary.ok": "Task finished",
+  "task.summary.failed": "Failed (exit code {n})",
+  "task.summary.failedNoCode": "Failed",
+  "task.summary.timeout": "Timed out (terminated after {n} min)",
+  "task.summary.missed": "Missed catch-up window (15 min)",
+  "task.summary.paused": "Skipped while paused",
+  "task.summary.interrupted": "Interrupted on app exit",
+  "task.summary.stale": "Unfinished run from last session (cleaned)",
+  "tasks.validation.actionBad": "Invalid action type (notify/exec)",
+  "tasks.validation.scheduleBad": "Invalid schedule kind (interval/daily/once)",
+  "tasks.validation.atRequired": "Time is required",
+  "tasks.validation.atFormat": "Time should be HH:MM",
+  "tasks.validation.dtFormat": "Date & time should be YYYY-MM-DDTHH:MM",
+  "tasks.validation.dtPast": "Must be in the future (no accidental run on create)",
+  "tasks.validation.weekdaysBad": "Invalid weekdays (1-7)",
+  "tasks.validation.paramsMissing": "Run-command needs action_params (JSON object)",
+  "tasks.validation.commandEmpty": "Command cannot be empty",
+  "tasks.validation.commandLong": "Command too long (≤2000 chars)",
+  "tasks.validation.cwdNotDir": "Working directory missing or not a directory",
+  "tasks.validation.timeoutBad": "Invalid timeout (1-120 minutes, default 10)",
+  "tasks.validation.autoBad": "opencode_auto should be a boolean",
+  // Part B（routine-exec.md §3.3）：tpl_agent / tpl_flags 预检（与 Rust 同规则）
+  "tasks.validation.tplAgentBad": "tpl_agent should be a string",
+  "tasks.validation.tplFlagsBad": "tpl_flags must be an object with boolean values",
 
   "todo.needApp": "Todo is only available inside the PulsePet app (Tauri)",
   "todo.loadFail": "Failed to load Todo: {msg}",
@@ -406,17 +712,32 @@ const en: Dict = {
   "settings.loadFail": "Failed to load pet list: {msg}",
   "settings.switchFail": "Failed to switch pet: {msg}",
   "settings.passFail": "Failed to toggle pass-through: {msg}",
+  "settings.languageFail": "Failed to switch language: {msg}",
   "settings.pet": "Pet",
   "settings.petLabel": "Select pet (applies immediately; persisted across restarts)",
+  // §十一（V2-OPEN-ITEMS）：size tiers；§十二 二轮微调：label Size → Pet size
+  "settings.size": "Pet size",
+  "settings.sizeSmall": "Small",
+  "settings.sizeMedium": "Medium",
+  "settings.sizeLarge": "Large",
+  "settings.sizeFail": "Failed to switch size: {msg}",
+  "settings.versionTitle": "Version",
   "settings.autoOption": "Auto (default blinking-kitty)",
   "settings.source.builtin": "Built-in",
   "settings.missingOption": "{id} — broken or missing, fell back",
   "settings.brokenOption": " — broken/non-standard, not selectable",
-  "settings.current": "Now rendering: {id} (source {source}, {cols}×{rows} grid, frame {fw}×{fh})",
-  "settings.fellBack": ", fell back from “{id}”",
-  "settings.interaction": "Interaction",
-  "settings.passThrough":
-    "Click-through (display-only mode): when on, mouse events pass through — the pet cannot be dragged and the right-click menu is unavailable, while animations keep playing; toggle back via global hotkey ⌘/Ctrl+Shift+Alt+P or the tray menu “Toggle interaction mode”.",
+  // §十二 二轮微调（2026-08-28）："Now rendering" line removed; keys retired
+  // (fallback visibility stays via the notice banner + missing-option placeholder)
+  // §十二 F6（2026-08-28）：merged interaction section (card rows); round 2:
+  // section renamed, card text split into bold name + regular description keys
+  "settings.sectionInteraction": "Interaction",
+  "settings.passThrough": "Pass-through (display-only mode)",
+  "settings.passThroughDesc":
+    "When on, mouse events pass through — the pet cannot be dragged and the right-click menu is unavailable, while animations keep playing; toggle back via global hotkey ⌘/Ctrl+Shift+Alt+P or the tray menu “Toggle interaction mode”.",
+  "settings.toolBroadcast": "Tool broadcast",
+  "settings.toolBroadcastDesc":
+    "The pet bubble reports tool usage (e.g. “Editing X.md”); turning it off silences immediately while the plugin keeps reporting.",
+  "settings.toolBroadcastFail": "Failed to save tool broadcast switch: {msg}",
   "settings.hotkeys": "Global hotkeys: ⌘/Ctrl+Shift+P show/hide panel; ⌘/Ctrl+Shift+Alt+P toggle pass-through;",
   "settings.hotkeys.debug": " ⌘/Ctrl+Shift+Alt+F debug fireworks (dev builds only).",
   "settings.language": "Language",
@@ -424,11 +745,61 @@ const en: Dict = {
   "settings.languageZh": "中文",
   "settings.languageEn": "English",
 
+  // ---- v2 M2 appearance (theme; §十二 F6 dropdown; round 2: themeLabel key
+  //      retired — hint moved above the select in the label position) ----
+  "settings.theme": "Appearance",
+  "settings.themeHint": "Panel theme (follow system or fixed light/dark; persisted; bubble and right-click menu keep their pet-world look)",
+  "settings.themeAuto": "Follow system",
+  "settings.themeLight": "Light",
+  "settings.themeDark": "Dark",
+  "settings.themeFail": "Failed to switch theme: {msg}",
+
+  // ---- v2 M1 接入管理（V2-DESIGN §1.7/§1.8）----
+  "integrations.title": "Integrations",
+  "integrations.installed": "Installed",
+  "integrations.notInstalled": "Not installed",
+  "integrations.stale": "Needs update",
+  "integrations.error": "Check failed",
+  "integrations.install": "Install",
+  "integrations.reinstall": "Reinstall",
+  "integrations.uninstall": "Uninstall",
+  "integrations.installing": "Installing…",
+  "integrations.nodeMissing": "node not found (required for claude-code)",
+  "integrations.nodeReady": "node ready",
+  "integrations.lastEvent": "Receiving events",
+  "integrations.noEvent": "No recent events",
+  "integrations.notes": "Notes:\n1. Config files are backed up automatically to the same directory before install/uninstall\n2. Changes take effect in newly started sessions only — running sessions keep the previous plugin\n3. Uninstall integrations here before uninstalling PulsePet; uninstalling the app does not remove plugin files",
+  "integrations.opencodeDesc": "OpenCode",
+  "integrations.claudeDesc": "Claude Code",
+  // §二十（V2-OPEN-ITEMS）：接入卡统计源状态行（与 zh 键集合一致，
+  // i18n.test.ts 完备性测试把守）
+  "integrations.statsRow": "Stats source: {state}",
+  "integrations.statsOk": "OK",
+  "integrations.statsMissing": "no data detected",
+  "integrations.statsFailed": "error",
+  "integrations.statsNone": "none (events only)",
+  "integrations.fail": "Operation failed: {msg}",
+  "integrations.actionDone": "Done: ",
+
+  // ---- v2 M2 features (feature flag, V2-DESIGN §2.5) ----
+  "plugins.manage": "Features",
+  "plugins.manageHint": "Disabling a plugin hides its panel tab and stops its derived reminders (data is kept; re-enable to restore)",
+  "plugins.manageToggle": "Enable {name}",
+  "plugins.disabledBadge": "Disabled (plugin off)",
+
   "menu.settings": "Settings…",
-  "menu.togglePass": "Toggle interaction mode (pass-through: {state})",
+  "menu.togglePass": "Pass-through: {state}",
   "menu.passOn": "on",
   "menu.passOff": "off",
   "menu.hidePet": "Hide pet",
+  "menu.todayToken": "Today's tokens: {v}",
+
+  // ---- v2 M3 tool-level bubbles (template ID protocol, §3.7.1) ----
+  "toolb.read": "Reading {p}",
+  "toolb.edit": "Editing {p}",
+  "toolb.bash": "Running {p}",
+  "toolb.search": "Searching {p}",
+  "toolb.web": "Fetching {p}",
 
   "pass.on": "Pass-through on: display-only (mouse passes through, no drag/right-click)",
   "pass.off": "Pass-through off: interactive (draggable / right-clickable)",

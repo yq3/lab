@@ -34,13 +34,20 @@ export function describePassThrough(passThrough: boolean, lang?: Lang): string {
   return t(passThrough ? "pass.on" : "pass.off", undefined, lang);
 }
 
-/** Panel tab 白名单（PetMenu「设置…」→ panel 设置页；M7 起 todo 存在）。 */
-export type PanelTab = "token" | "reminders" | "settings" | "todo";
+/** Panel tab 白名单（v2 M4：reminders → tasks 改名；旧值直达兼容 TC-M4-02）。 */
+export type PanelTab = "token" | "tasks" | "settings" | "todo";
 
-/** 校验 tab 字符串；非法 → null。 */
+/** 旧 tab id 映射（v1 外部链接 panel://tab?tab=reminders → tasks）。 */
+const TAB_ALIASES: Record<string, PanelTab> = {
+  reminders: "tasks",
+};
+
+/** 校验 tab 字符串（旧值先映射）；非法 → null。 */
 export function normalizeTab(tab: unknown): PanelTab | null {
-  if (tab === "token" || tab === "reminders" || tab === "settings" || tab === "todo") {
-    return tab;
+  if (typeof tab !== "string") return null;
+  const mapped = TAB_ALIASES[tab] ?? tab;
+  if (mapped === "token" || mapped === "tasks" || mapped === "settings" || mapped === "todo") {
+    return mapped;
   }
   return null;
 }

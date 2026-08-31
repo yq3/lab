@@ -97,20 +97,34 @@ impl Lang {
     }
 
     // ---- panel 窗口标题 ----
-
+    // R2 P3-2：与页内 h1（前端 panel.title）逐字一致——「PulsePet · 控制面板」。
     pub fn panel_title(&self) -> &'static str {
         match self {
-            Lang::Zh => "PulsePet 控制面板",
-            Lang::En => "PulsePet Control Panel",
+            Lang::Zh => "PulsePet · 控制面板",
+            Lang::En => "PulsePet · Control Panel",
         }
     }
 
-    // ---- token 会话汇报气泡（TC-TK-10/11/12；i/o/c 为已格式化数字串）----
+    // ---- token 会话汇报气泡（TC-TK-10/11/12；total 为 format_tokens_k 已格式化串）----
 
-    pub fn token_report(&self, input: &str, output: &str, cost: &str) -> String {
+    /// §十二 F1（2026-08-28）：**单总量口径**（= 面板 KPI total：in + out +
+    /// cache_read，reasoning 不计）——原 input/output/cost 明细模板与 CC 无
+    /// cost 双模板（M5 S4）统一收敛为一个总量模板；opencode 的 cost 段一并
+    /// 去除（用户裁定），cost 仍可在面板会话列表/详情查看。
+    pub fn token_report(&self, total: &str) -> String {
         match self {
-            Lang::Zh => format!("本期用了 {input} input / {output} output / {cost}"),
-            Lang::En => format!("This session: {input} input / {output} output / {cost}"),
+            Lang::Zh => format!("本次会话消耗 token {total}"),
+            Lang::En => format!("This session used {total} tokens"),
+        }
+    }
+
+    /// M3（V2-DESIGN §3.2）：idle 汇报气泡末尾追加的「今日累计」段（含前导
+    /// 分隔符；total 为 format_tokens_k 已格式化串）。今日聚合失败时调用方
+    /// 静默省略本段（本期文案照常），zh 措辞与 SCOPE C ①「· 今日 42M」钉住。
+    pub fn token_report_today(&self, total: &str) -> String {
+        match self {
+            Lang::Zh => format!(" · 今日 {total}"),
+            Lang::En => format!(" · today {total}"),
         }
     }
 
@@ -179,6 +193,134 @@ impl Lang {
             Lang::En => "both spritesheet.webp / .png missing",
         }
     }
+
+    // ---- v2 M1 接入管理 doctor 文案（V2-DESIGN §1.7/§1.8；组装在 integrations.rs）----
+
+    pub fn intg_installed(&self) -> String {
+        match self {
+            Lang::Zh => format!("已安装 · v{}", env!("CARGO_PKG_VERSION")),
+            Lang::En => format!("Installed · v{}", env!("CARGO_PKG_VERSION")),
+        }
+    }
+
+    pub fn intg_not_installed(&self) -> &'static str {
+        match self {
+            Lang::Zh => "未安装",
+            Lang::En => "Not installed",
+        }
+    }
+
+    pub fn intg_stale(&self) -> &'static str {
+        match self {
+            Lang::Zh => "需更新（一键重装修复）",
+            Lang::En => "Needs update (reinstall to fix)",
+        }
+    }
+
+    pub fn intg_error(&self, reason: &str) -> String {
+        match self {
+            Lang::Zh => format!("检测失败：{reason}"),
+            Lang::En => format!("Check failed: {reason}"),
+        }
+    }
+
+    pub fn intg_node_ready(&self) -> &'static str {
+        match self {
+            Lang::Zh => "node 已就绪",
+            Lang::En => "node ready",
+        }
+    }
+
+    pub fn intg_node_missing(&self) -> &'static str {
+        match self {
+            Lang::Zh => "未检测到 node（CC 接入需要）",
+            Lang::En => "node not found (required for claude-code)",
+        }
+    }
+
+    pub fn intg_last_event(&self) -> &'static str {
+        match self {
+            Lang::Zh => "事件正常",
+            Lang::En => "Receiving events",
+        }
+    }
+
+    pub fn intg_no_event(&self) -> &'static str {
+        match self {
+            Lang::Zh => "最近无事件",
+            Lang::En => "No recent events",
+        }
+    }
+
+    /// 卸载后建议新开 CC 会话（§1.4.4：Windows 字面路径无逐事件自愈，TC-INT-07-5）。
+    pub fn intg_uninstall_hint(&self) -> &'static str {
+        match self {
+            Lang::Zh => "已卸载；如 CC 会话仍在运行，建议新开会话使其生效",
+            Lang::En => "Uninstalled; restart your CC session for this to take effect",
+        }
+    }
+
+    /// 安装后建议新开 CC 会话（v2 M2 L1/P2-1：安装路径的提示不再复用卸载
+    /// 文案——修复「已安装…已卸载」措辞矛盾；一键级 i18n）。
+    pub fn intg_install_hint(&self) -> &'static str {
+        match self {
+            Lang::Zh => "已安装；如 CC 会话已在运行，建议新开会话以启用",
+            Lang::En => "Installed; restart your CC session to activate it",
+        }
+    }
+
+    // ---- v2 M4：定时任务 summary 模板（§4.8 P3-3——存模板键，展示按当前
+    //      语言渲染；action_logs.summary 列 + 结果气泡 text 消费）----
+
+    /// action_logs.summary 存储键 → 当前语言渲染。参数化键：failed 用
+    /// exit_code；timeout 的分钟数以 `key:N` 形式内嵌（与 TS 侧
+    /// renderTaskSummary 同口径）。未知键原样返回（可观测不静默）。
+    pub fn render_task_summary(&self, stored: &str, exit_code: Option<i32>) -> String {
+        match stored.split_once(':') {
+            Some(("task.summary.timeout", n)) => {
+                let n = n.trim();
+                match self {
+                    Lang::Zh => format!("超时（{n} 分钟）被终止"),
+                    Lang::En => format!("Timed out (terminated after {n} min)"),
+                }
+            }
+            _ if stored == "task.summary.ok" => match self {
+                Lang::Zh => "任务完成".into(),
+                Lang::En => "Task finished".into(),
+            },
+            _ if stored == "task.summary.failed" => match (self, exit_code) {
+                (Lang::Zh, Some(n)) => format!("失败（退出码 {n}）"),
+                (Lang::En, Some(n)) => format!("Failed (exit code {n})"),
+                (Lang::Zh, None) => "失败".into(),
+                (Lang::En, None) => "Failed".into(),
+            },
+            _ if stored == "task.summary.missed" => match self {
+                Lang::Zh => "错过补跑窗（15 分钟）".into(),
+                Lang::En => "Missed catch-up window (15 min)".into(),
+            },
+            _ if stored == "task.summary.paused" => match self {
+                Lang::Zh => "暂停期间跳过".into(),
+                Lang::En => "Skipped while paused".into(),
+            },
+            _ if stored == "task.summary.interrupted" => match self {
+                Lang::Zh => "App 退出中断".into(),
+                Lang::En => "Interrupted on app exit".into(),
+            },
+            _ if stored == "task.summary.stale" => match self {
+                Lang::Zh => "上次运行未完结（启动清理）".into(),
+                Lang::En => "Unfinished run from last session (cleaned)".into(),
+            },
+            _ => stored.to_string(),
+        }
+    }
+
+    /// 结果气泡 text = 任务名 + summary（lib 层拼接，§4.5 P3-3）。
+    pub fn task_result_text(&self, label: &str, summary: &str) -> String {
+        match self {
+            Lang::Zh => format!("{label}：{summary}"),
+            Lang::En => format!("{label}: {summary}"),
+        }
+    }
 }
 
 /// setup 时恢复持久化语言（无值 / 非法值保持默认 zh，由前端按系统语言接管）。
@@ -239,6 +381,9 @@ mod tests {
         assert_eq!(Lang::En.tray_toggle(), "Show/Hide Pet");
         assert!(Lang::Zh.tray_quit().contains("退出"));
         assert_eq!(Lang::En.tray_quit(), "Quit");
+        // R2 P3-2：窗口标题 zh/en 互异且含间隔点（与前端 panel.title 一致性钉子）
+        assert_eq!(Lang::Zh.panel_title(), "PulsePet · 控制面板");
+        assert_eq!(Lang::En.panel_title(), "PulsePet · Control Panel");
         // 全部五项在两种语言下互不相同（防"en 串误粘贴 zh"类回归）
         for (zh, en) in [
             (Lang::Zh.tray_toggle(), Lang::En.tray_toggle()),
@@ -253,17 +398,47 @@ mod tests {
 
     #[test]
     fn token_report_follows_current_lang() {
+        // §十二 F1：单总量口径（双模板收敛后重写断言）
         set(Lang::Zh);
-        assert_eq!(
-            current().token_report("58.3k", "910", "$0.05"),
-            "本期用了 58.3k input / 910 output / $0.05"
-        );
+        assert_eq!(current().token_report("59.2k"), "本次会话消耗 token 59.2k");
         set(Lang::En);
-        assert_eq!(
-            current().token_report("58.3k", "910", "$0.05"),
-            "This session: 58.3k input / 910 output / $0.05"
+        assert_eq!(current().token_report("59.2k"), "This session used 59.2k tokens");
+        assert_ne!(
+            Lang::Zh.token_report("1"),
+            Lang::En.token_report("1"),
+            "zh/en 互异（防粘贴错语言）"
         );
         set(Lang::Zh); // 恢复默认，避免影响其它测试
+    }
+
+    #[test]
+    fn token_report_today_appends_segment_bilingually() {
+        // M3：追加段模板（TC-M3-09-1 逐字钉住——含前导「 · 」分隔）
+        set(Lang::Zh);
+        assert_eq!(current().token_report_today("42M"), " · 今日 42M");
+        // 拼接语义：本期文案 + 追加段
+        let full = format!(
+            "{}{}",
+            current().token_report("59.2k"),
+            current().token_report_today("42M")
+        );
+        assert_eq!(full, "本次会话消耗 token 59.2k · 今日 42M");
+        set(Lang::En);
+        assert_eq!(current().token_report_today("1.2M"), " · today 1.2M");
+        assert_ne!(
+            Lang::Zh.token_report_today("42M"),
+            Lang::En.token_report_today("42M"),
+            "zh/en 互异（防粘贴错语言）"
+        );
+        set(Lang::Zh); // 恢复默认
+    }
+
+    #[test]
+    fn token_report_has_no_cost_segment_f1() {
+        // §十二 F1：cost 段去除钉子（原 cc_token_report 无 $ 断言的统一收敛版）
+        for l in [Lang::Zh, Lang::En] {
+            assert!(!l.token_report("1").contains('$'));
+        }
     }
 
     #[test]
@@ -290,6 +465,95 @@ mod tests {
         crate::db::set_state(&conn, KEY_LANGUAGE, "en").unwrap();
         restore_from_db(&conn);
         assert_eq!(current(), Lang::En);
+        set(Lang::Zh); // 恢复默认
+    }
+
+    #[test]
+    fn integration_texts_bilingual() {
+        // v2 M1：doctor 文案 zh/en 均非空且互不相同（防粘贴错语言）
+        for (zh, en) in [
+            (Lang::Zh.intg_not_installed(), Lang::En.intg_not_installed()),
+            (Lang::Zh.intg_stale(), Lang::En.intg_stale()),
+            (Lang::Zh.intg_node_ready(), Lang::En.intg_node_ready()),
+            (Lang::Zh.intg_node_missing(), Lang::En.intg_node_missing()),
+            (Lang::Zh.intg_last_event(), Lang::En.intg_last_event()),
+            (Lang::Zh.intg_no_event(), Lang::En.intg_no_event()),
+            (Lang::Zh.intg_uninstall_hint(), Lang::En.intg_uninstall_hint()),
+        ] {
+            assert!(!zh.is_empty() && !en.is_empty());
+            assert_ne!(zh, en);
+        }
+        // v2 M2 L1（P2-1）：安装提示独立成键——安装路径不再出现「已卸载」措辞
+        for (zh, en) in [(
+            Lang::Zh.intg_install_hint(),
+            Lang::En.intg_install_hint(),
+        )] {
+            assert!(!zh.is_empty() && !en.is_empty());
+            assert_ne!(zh, en);
+            assert!(zh.contains("已安装"), "{zh}");
+            assert!(!zh.contains("已卸载"), "安装文案不得复用卸载措辞：{zh}");
+            assert!(en.to_lowercase().contains("installed"), "{en}");
+            assert!(
+                !en.to_lowercase().contains("uninstalled"),
+                "install wording must not reuse uninstall text: {en}"
+            );
+        }
+        assert!(Lang::Zh.intg_installed().contains("已安装"));
+        assert!(Lang::En.intg_installed().contains("Installed"));
+        assert!(Lang::Zh.intg_error("boom").contains("boom"));
+        assert!(Lang::En.intg_error("boom").starts_with("Check failed"));
+    }
+
+    // ---- v2 M4（TC-M4-17）：task summary 模板键双语渲染 ----
+
+    #[test]
+    fn task_summary_templates_bilingual() {
+        set(Lang::Zh);
+        assert_eq!(current().render_task_summary("task.summary.ok", None), "任务完成");
+        assert_eq!(
+            current().render_task_summary("task.summary.failed", Some(3)),
+            "失败（退出码 3）"
+        );
+        assert_eq!(
+            current().render_task_summary("task.summary.timeout:1", None),
+            "超时（1 分钟）被终止"
+        );
+        assert_eq!(
+            current().render_task_summary("task.summary.missed", None),
+            "错过补跑窗（15 分钟）"
+        );
+        assert_eq!(
+            current().render_task_summary("task.summary.paused", None),
+            "暂停期间跳过"
+        );
+        assert_eq!(
+            current().render_task_summary("task.summary.interrupted", None),
+            "App 退出中断"
+        );
+        assert_eq!(
+            current().task_result_text("数 md 文件", "任务完成"),
+            "数 md 文件：任务完成"
+        );
+        set(Lang::En);
+        assert_eq!(
+            current().render_task_summary("task.summary.ok", None),
+            "Task finished"
+        );
+        assert_eq!(
+            current().render_task_summary("task.summary.failed", Some(3)),
+            "Failed (exit code 3)"
+        );
+        assert_eq!(
+            current().render_task_summary("task.summary.timeout:10", None),
+            "Timed out (terminated after 10 min)"
+        );
+        assert_eq!(
+            current().task_result_text("count md files", "Task finished"),
+            "count md files: Task finished"
+        );
+        // 未知键原样返回（可观测不静默）；failed 无退出码兜底
+        assert_eq!(current().render_task_summary("task.summary.unknown", None), "task.summary.unknown");
+        assert_eq!(current().render_task_summary("task.summary.failed", None), "Failed");
         set(Lang::Zh); // 恢复默认
     }
 }

@@ -1,6 +1,6 @@
 {
   "id": "blinking-kitty",
-  "displayName": "blinking-kitty（内置小猫）",
+  "displayName": "blinking-kitty",
   "description": "PulsePet 内置小猫（默认宠物）。codex 格式 atlas 8×9 = 1536×1872，单帧 192×208，9 行姿态；idle 常驻「左眼睁、右眼一条缝」单眨眼造型（与 App 图标同款，另带长帧呼吸下沉）。作者自绘，CC0。",
   "spritesheetPath": "spritesheet.png"
 }

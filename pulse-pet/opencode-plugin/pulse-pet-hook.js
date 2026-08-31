@@ -16,6 +16,28 @@
 //   据此定案：主复位 = tool.execute.after → working；兜底 = session.status 非 idle
 //   → working / session.idle → idle；App 侧另有 30s 瞬态超时兜底（Rust session_state）。
 // ===========================================================================
+// 零阻塞契约（2026-08-22 根因修复，实测 opencode 1.18.19/1.18.21）：
+//   - opencode 服务端**同步 await 插件钩子且无超时**：chat.message 在用户消息
+//     保存/推送 TUI 之前（session/prompt.ts），tool.execute.before/after 包夹
+//     每次工具执行（session/tools.ts）。旧实现钩子 await 串行投递队列，PulsePet
+//     未运行时 readFileSync(endpoint) 抛 ENOENT → 队列内退避 sleep 1s→30s 封顶
+//     → 宿主症状：发消息延迟数秒上屏、read/write/edit 全体变慢（换 opencode
+//     版本无效，因为阻塞源在本插件）。
+//   - 修复双管齐下：① 全部钩子 fire-and-forget（绝不 await/return 投递 promise），
+//     投递/退避只在后台队列进行；② endpoint/update-token 缺失（App 未运行）→
+//     postState 返回 null，deliver 静默跳过且不计退避（下游缺席≠错误）。
+// ===========================================================================
+// v0.1.3 事件层三机制（V1-OPEN-ITEMS §8.4，2026-08-22）：
+//   - 流式心跳（四-4）：message.part.delta（高频主力，实测 ~28 次/s）+ message.
+//     updated / message.part.updated（part 边界低频补充）→ working，经 reaction
+//     桶 10s 节流成心跳，防纯文本生成期 30s 静默误回 idle（spike：session.status
+//     busy 仅开始发一次）。缺 sessionID 的流式事件丢弃（不落 default）。
+//   - thinking 粘性窗口（四-2）：thinking 后 STICKY_MS=4s 内吞同 session 的
+//     working/idle（ThinkingSticky，节流前判定、不占桶）；更高优先级自然穿透。
+//   - idle 节流豁免（四-3）：idle 移出 reaction 桶（bucketFor→null 永远放行），
+//     会话结束信号即到即投，双通道重复幂等无害。
+//   三机制均在 deliver 内部，零阻塞契约不受影响（§九钉子用例守护）。
+// ===========================================================================
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -69,6 +91,15 @@ export function classifyEvent(event) {
       // 双处理）；补总线分支后两条通道一致——同一次询问若 hook 与总线都发，
       // permission 桶 3s 冷却天然去重，无双发。
       return "waiting-permission";
+    // v0.1.3 四-4 流式心跳（spike 实测 opencode 1.18.19，2026-08-22）：
+    // message.part.delta 是纯文本生成期的高频事件（~28 次/s，TUI 打字机源），
+    // 映射 working 后经 reaction 桶 10s 节流天然形成心跳，防 30s 静默超时
+    // 误回 idle；message.updated / message.part.updated 仅 part 边界低频到达
+    // （全程 ~7 次），同映射无害作补充。V1-OPEN-ITEMS §8.4。
+    case "message.part.delta":
+    case "message.updated":
+    case "message.part.updated":
+      return "working";
     default:
       return null;
   }
@@ -89,11 +120,117 @@ export function classifyToolBefore(tool, args, command) {
   return "working";
 }
 
+// ---- v2 M3 工具级气泡：detail 模板 ID 协议（V2-DESIGN §3.7.1，TC-M3-13）----
+//
+// detail = "<tplId>:<param>"（复用 /state 既有字段；App 白名单校验 + i18n 渲染）。
+// 仅 tool.execute.before 携带（args = output?.args，与 classifyToolBefore 同源）；
+// TC-SEC 净化口径：绝不携带路径/参数/URL 原文——param 提取后只剩 basename /
+// 首词 / hostname / ≤40 字符 pattern。
+
+/** 工具族 → 模板 ID（白名单五模板；文档 §3.7.1 表为唯一权威，R4）。 */
+export const DETAIL_TPLS = Object.freeze({
+  read: new Set(["read", "listfile", "listfiles", "readfile"]),
+  edit: EDIT_TOOLS,
+  bash: SHELL_TOOLS,
+  search: new Set(["grep", "glob"]),
+  web: new Set(["webfetch", "websearch"]),
+});
+
+/** 工具 → 模板 ID（白名单五模板；文档 §3.7.1 表为唯一权威，R4）。 */
+export function detailTplOf(tool) {
+  for (const [id, set] of Object.entries(DETAIL_TPLS)) {
+    if (set.has(tool)) return id;
+  }
+  return null;
+}
+
+/** 路径 basename：按 / 与 \ 切分取末段非空（跨平台；无分隔符原样）。 */
+export function basenameOf(s) {
+  const parts = String(s ?? "").split(/[\\/]+/).filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : "";
+}
+
+/** detail param 上限（与 App 桥侧 sanitizeToolParam 同口径）。 */
+export const DETAIL_PARAM_MAX = 40;
+
+function clip(s, max = DETAIL_PARAM_MAX) {
+  return [...String(s)].slice(0, max).join("");
+}
+
+/**
+ * 提取 detail param（纯函数，单测覆盖 P1-4 净化强化）：
+ * - read/edit：file path → basename；
+ * - bash：先剥离行首连续 KEY=value 赋值段，再取首词；首词含 / 或 \ 时取
+ *   basename（绝对路径命令 `/opt/homebrew/bin/npm test` → npm；env 赋值
+ *   `FOO=secret npm test` → npm）；
+ * - search：pattern 净化后原样 ≤40 字符（含 / 或 \ 取末段）；
+ * - web：URL → hostname（websearch 无 URL 时 query 按 search 同款净化）。
+ * 无参 / 提取失败 / 白名单外工具 → null（不携带 detail）。
+ */
+export function extractDetailParam(tool, args) {
+  if (!tool || isSelfTool(tool)) return null;
+  const a = args ?? {};
+  const tpl = detailTplOf(tool);
+  if (!tpl) return null;
+
+  if (tpl === "read" || tpl === "edit") {
+    const path = a.filePath ?? a.path ?? a.file_path ?? null;
+    if (typeof path !== "string" || !path.trim()) return null;
+    return basenameOf(path) || null;
+  }
+  if (tpl === "bash") {
+    const command = a.command ?? a.cmd ?? null;
+    if (typeof command !== "string" || !command.trim()) return null;
+    // 先剥离行首连续 KEY=value 赋值段（env 前缀），再取首词
+    const stripped = command.replace(/^(?:\w+=\S*\s+)+/, "").trim();
+    const firstWord = stripped.split(/\s+/)[0] ?? "";
+    if (!firstWord) return null;
+    // 首词含路径分隔符 → basename（绝对路径命令净化，P1-4）
+    return /[\\/]/.test(firstWord) ? basenameOf(firstWord) : firstWord;
+  }
+  if (tpl === "search") {
+    const pattern = a.pattern ?? a.query ?? null;
+    if (typeof pattern !== "string" || !pattern.trim()) return null;
+    const clean = clip(pattern.trim());
+    // 含路径分隔符时取末段（与 read/edit 同口径）
+    return /[\\/]/.test(clean) ? basenameOf(clean) : clean;
+  }
+  // web
+  if (typeof a.url === "string" && a.url.trim()) {
+    try {
+      const hostname = new URL(a.url).hostname;
+      if (hostname) return hostname;
+    } catch {
+      // 非 URL 形态（如裸域名）：按 basename 兜底
+      return basenameOf(a.url) || null;
+    }
+    return null;
+  }
+  // websearch：query 按 search 同款净化（无 URL 可提）
+  if (typeof a.query === "string" && a.query.trim()) {
+    const clean = clip(a.query.trim());
+    return /[\\/]/.test(clean) ? basenameOf(clean) : clean;
+  }
+  return null;
+}
+
+/** detail = "<tplId>:<param>"（param 提取失败 → null 不携带）。 */
+export function buildDetail(tool, args) {
+  const param = extractDetailParam(tool, args);
+  if (param == null) return null;
+  const tpl = detailTplOf(tool);
+  return tpl ? `${tpl}:${param}` : null;
+}
+
 // ---- 节流（TC-EV-18，三类互不干扰 + 同桶升级放行） ----
 
 const SPEECH_KINDS = new Set(["thinking", "success", "error"]);
 const PERMISSION_KINDS = new Set(["waiting-permission"]);
-const REACTION_KINDS = new Set(["working", "editing", "testing", "idle"]);
+// v0.1.3 四-3：idle 移出 reaction 桶——会话结束时最后投递的 working(1) 刚占桶，
+// 紧随的 idle(0) 永远无法穿透同桶升级放行（只放行更高优先级）→ 被 10s 冷却吞掉，
+// 宠物停 working 30-60s 才靠 App 侧 idle_timeout 兜底。idle 仅由真实会话边界事件
+// 触发、低频，豁免（bucketFor 返回 null 永远放行）后双通道重复投递幂等无害。
+const REACTION_KINDS = new Set(["working", "editing", "testing"]);
 const COOLDOWNS = { speech: 20000, permission: 3000, reaction: 10000 };
 
 // 视觉优先级（与 Rust session_state.rs / DESIGN §3.3 一致，M5 同桶升级放行用）：
@@ -156,9 +293,72 @@ export class Throttle {
   }
 }
 
+// ---- thinking 粘性窗口（v0.1.3 四-2，V1-OPEN-ITEMS §8.4） ----
+
+// 粘性时长：chat.message → thinking 与 session.status(busy) → working 几乎同时
+// 到达，App 侧同 session 后到覆盖 → thinking 可见窗口仅几百毫秒。窗口内吞掉
+// working/idle 使 thinking 稳定显示至真正开始干活（更高优先级的 editing/
+// testing/waiting-permission/error 不在吞没集合，自然穿透）。
+const STICKY_MS = 4000;
+// 被吞没的 kind 集合（视觉优先级 ≤ thinking(3) 的 reaction 类复位信号）。
+const STICKY_SWALLOW = new Set(["working", "idle"]);
+export { STICKY_MS };
+
+export class ThinkingSticky {
+  constructor(now = () => Date.now()) {
+    this.now = now;
+    /** sessionId → 窗口到期时刻（ms）。 */
+    this.until = new Map();
+  }
+
+  /** thinking 到达：置/续窗（在节流检查前调用——thinking 被 speech 桶 20s 节流吞掉也续窗）。 */
+  arm(sessionId) {
+    const t = this.now();
+    // 顺手清理其它 session 的过期项，防 map 无界增长（session 数小，O(n) 可忽略）
+    for (const [sid, exp] of this.until) {
+      if (exp <= t) this.until.delete(sid);
+    }
+    this.until.set(sessionId, t + STICKY_MS);
+  }
+
+  /** working/idle 到达：窗口内返回 true = 吞掉（不进节流、不占桶）。 */
+  swallows(kind, sessionId) {
+    if (!STICKY_SWALLOW.has(kind)) return false;
+    const exp = this.until.get(sessionId);
+    if (exp == null) return false;
+    if (this.now() >= exp) {
+      this.until.delete(sessionId);
+      return false;
+    }
+    return true;
+  }
+}
+
 // ---- 指数退避（TC-EV-07，静默 + 1s→2s→5s→30s 封顶） ----
 
 const BACKOFF_DELAYS = [0, 1000, 2000, 5000, 30000];
+
+// ---- v2 M3：detail 独立 20s 节流桶（§3.7.1 澄清-1：全局单桶、与 speech 桶
+//      同参数非复用——防刷屏；消耗时机在 deliver 内 reaction 检查之后） ----
+
+export const DETAIL_COOLDOWN_MS = 20000;
+
+export class DetailThrottle {
+  constructor(now = () => Date.now()) {
+    this.now = now;
+    this.last = -Infinity;
+  }
+
+  /** true = 放行并消耗冷却（网络成败不回滚，N7）；false = 冷却期内。 */
+  shouldSend() {
+    const t = this.now();
+    if (t - this.last >= DETAIL_COOLDOWN_MS) {
+      this.last = t;
+      return true;
+    }
+    return false;
+  }
+}
 
 export class Backoff {
   constructor(sleepFn = (ms) => new Promise((r) => setTimeout(r, ms))) {
@@ -246,28 +446,47 @@ export function killswitchActive(dir = runtimeDir()) {
 
 /**
  * POST /state。每次发请求前读最新 endpoint/token 文件（端口回退后无需重装插件，
- * TC-EV-09）。返回 response；任何 IO/网络/401 错误抛出（由调用方静默退避）。
+ * TC-EV-09）。返回 response；任何网络/HTTP≥400 错误抛出（由调用方静默退避）。
+ *
+ * **App 未运行快速通道（2026-08-22 根因修复）**：endpoint/update-token 文件
+ * 缺失（ENOENT）或为空 → 返回 null，不发起请求——「下游缺席」不是错误，调用方
+ * 静默跳过且不计退避（对齐 Langfuse/LangSmith 等遥测插件「下游缺席→丢弃，
+ * 遥测永不伤害宿主」的主流语义）。
  *
  * P3-③（M2 遗留）：不再发送 `connection: close` 头——`Connection` 是 fetch 规范的
  * forbidden header name，实现会静默忽略，发了也是冗余；一次性连接语义由服务端
  * tiny_http「一请求一连接」保证（TC-EV-14），客户端配合 AbortSignal 3s 兜底。
  */
+function readRuntimeFile(dir, name) {
+  try {
+    return readFileSync(join(dir, name), "utf8").trim();
+  } catch (err) {
+    if (err && err.code === "ENOENT") return null;
+    throw err;
+  }
+}
+
 export async function postState(
   kind,
   sessionId,
   agent = "opencode",
   fetchImpl = fetch,
   dir = runtimeDir(),
+  detail = null,
 ) {
-  const endpoint = readFileSync(join(dir, "endpoint"), "utf8").trim();
-  const token = readFileSync(join(dir, "update-token"), "utf8").trim();
+  const endpoint = readRuntimeFile(dir, "endpoint");
+  const token = readRuntimeFile(dir, "update-token");
+  if (!endpoint || !token) return null; // App 未运行：快速跳过（非错误）
+  const body = { sessionId, kind, agent };
+  // v2 M3：仅 tool.execute.before 路径会带 detail（"<tplId>:<param>"）
+  if (detail) body.detail = detail;
   const res = await fetchImpl(`http://${endpoint}/state`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
       "x-pulsepet-token": token,
     },
-    body: JSON.stringify({ sessionId, kind, agent }),
+    body: JSON.stringify(body),
     signal: AbortSignal.timeout(3000),
   });
   if (res.status === 401 || res.status >= 400) {
@@ -294,6 +513,8 @@ export function createDeliverer({
   postStateImpl = postState,
   killswitch = killswitchActive,
   agent = "opencode",
+  sticky = new ThinkingSticky(),
+  detailThrottle = new DetailThrottle(),
 } = {}) {
   let queue = Promise.resolve();
   const enqueue = (fn) => {
@@ -305,16 +526,30 @@ export function createDeliverer({
     );
     return run;
   };
-  async function deliver(kind, sessionId) {
+  /**
+   * v2 M3：可选 detail（"<tplId>:<param>"）。**冷却消耗时机在 reaction 检查
+   * 之后**——状态事件被节流桶吞掉时 detail 桶不消耗；状态放行且 detail 桶
+   * 放行时才附加 detail 并消耗冷却（网络成败不回滚，N7）。detail 桶独立于
+   * 状态节流桶（互不影响）。
+   */
+  async function deliver(kind, sessionId, detail = null) {
     if (!kind) return;
     if (killswitch()) return; // TC-EV-10：killswitch 整体跳过
-    if (!throttle.shouldSend(kind)) return; // TC-EV-18：节流
+    const sid = sessionId ?? "default";
+    // v0.1.3 四-2：thinking 置/续粘性窗（节流检查前——被节流吞掉也续窗）；
+    // 窗口内 working/idle 静默丢弃（不占节流桶、不重置冷却，编辑/测试/权限照常穿透）
+    if (kind === "thinking") sticky.arm(sid);
+    if (sticky.swallows(kind, sid)) return;
+    if (!throttle.shouldSend(kind)) return; // TC-EV-18：节流（detail 桶不消耗）
+    const detailToSend =
+      detail != null && detailThrottle.shouldSend() ? detail : null;
     await enqueue(async () => {
       try {
-        await postStateImpl(kind, sessionId ?? "default", agent);
+        const res = await postStateImpl(kind, sid, agent, undefined, undefined, detailToSend);
+        if (res == null) return; // App 未运行：静默跳过（不 reset、不退避）
         backoff.reset(); // 恢复后下次立即投递
       } catch {
-        // TC-EV-07：静默跳过（不打日志不报错）+ 指数退避
+        // TC-EV-07：静默跳过（不打日志不报错）+ 指数退避（detail 冷却不回滚，N7）
         await backoff.wait();
       }
     });
@@ -324,37 +559,76 @@ export function createDeliverer({
 
 // ---- opencode 插件注册（v1 格式：export default { id, server }）----
 
+/**
+ * 构建注册给 opencode 的 Hooks（deliverer 可注入，供单测替换）。
+ *
+ * **零阻塞契约（2026-08-22 根因修复，实测 opencode 1.18.x）**：opencode 服务端
+ * 会同步 await 每个插件钩子且无任何超时保护——`chat.message` 在用户消息保存/
+ * 推送 TUI **之前**触发（session/prompt.ts），`tool.execute.before/after` **包夹**
+ * 每次工具执行（session/tools.ts）。钩子一旦 await 投递队列（含退避 sleep
+ * 1s→30s），宿主会整体卡住：发消息延迟数秒才上屏、read/write/edit 全体变慢。
+ * 因此所有钩子 fire-and-forget：绝不 await、也绝不 return 投递 promise（宿主会
+ * await 钩子返回值）——对齐 Langfuse/LangSmith 等遥测类插件「热路径零网络 I/O」
+ * 的主流设计。
+ */
+// v0.1.3 四-4：流式心跳类事件必须有 sessionID——缺号落到 "default" 会污染
+// 状态机（TC-EV-26-3；spike 实测正常事件均携带 properties.sessionID）。
+const STREAM_HEARTBEAT_TYPES = new Set([
+  "message.part.delta",
+  "message.updated",
+  "message.part.updated",
+]);
+
+export function buildHooks(deliverer = createDeliverer()) {
+  const fire = (kind, sessionId, detail = null) => {
+    try {
+      // detail 非 null 才传第三参（保持 v1 两参调用形态，既有断言/契约不动）
+      const p =
+        detail != null
+          ? deliverer.deliver(kind, sessionId, detail)
+          : deliverer.deliver(kind, sessionId);
+      void p.catch(() => {});
+    } catch {
+      // deliver 为 async 函数不会同步抛错；防御性吞掉，钩子永不向宿主抛错
+    }
+  };
+
+  return {
+    event: ({ event }) => {
+      const kind = classifyEvent(event);
+      if (!kind) return;
+      const sid = event?.properties?.sessionID;
+      if (STREAM_HEARTBEAT_TYPES.has(event?.type) && !sid) return;
+      fire(kind, sid);
+    },
+    "chat.message": (input) => {
+      fire("thinking", input?.sessionID);
+    },
+    "permission.ask": (input) => {
+      fire("waiting-permission", input?.sessionID);
+    },
+    "tool.execute.before": (input, output) => {
+      // v2 M3（§3.7.1 澄清-3）：detail 仅 before 携带（工具开始 = 播报正当时）；
+      // args 来源 = output?.args（与 classifyToolBefore 同源）
+      fire(
+        classifyToolBefore(input?.tool, output?.args),
+        input?.sessionID,
+        buildDetail(input?.tool, output?.args),
+      );
+    },
+    "tool.execute.after": (input) => {
+      // TC-EV-05：主复位信号（把 editing/testing 拉回 working）；不携带 detail
+      if (isSelfTool(input?.tool)) return; // 自忽略
+      fire("working", input?.sessionID);
+    },
+    "command.execute.before": (input) => {
+      const cmd = input?.command ?? "";
+      if (TEST_CMD_RE.test(cmd)) fire("testing", input?.sessionID);
+    },
+  };
+}
+
 export default {
   id: "pulse-pet",
-  server: async () => {
-    const deliverer = createDeliverer();
-    const deliver = deliverer.deliver;
-
-    return {
-      event: async ({ event }) => {
-        await deliver(classifyEvent(event), event?.properties?.sessionID);
-      },
-      "chat.message": async (input) => {
-        await deliver("thinking", input?.sessionID);
-      },
-      "permission.ask": async (input) => {
-        await deliver("waiting-permission", input?.sessionID);
-      },
-      "tool.execute.before": async (input, output) => {
-        await deliver(
-          classifyToolBefore(input?.tool, output?.args),
-          input?.sessionID,
-        );
-      },
-      "tool.execute.after": async (input) => {
-        // TC-EV-05：主复位信号（把 editing/testing 拉回 working）
-        if (isSelfTool(input?.tool)) return; // 自忽略
-        await deliver("working", input?.sessionID);
-      },
-      "command.execute.before": async (input) => {
-        const cmd = input?.command ?? "";
-        if (TEST_CMD_RE.test(cmd)) await deliver("testing", input?.sessionID);
-      },
-    };
-  },
+  server: async () => buildHooks(),
 };

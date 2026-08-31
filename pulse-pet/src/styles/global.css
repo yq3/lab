@@ -1,3 +1,14 @@
+/**
+ * global.css：v2 M2 组件层（消费 tokens.css 的 token，V2-DESIGN §2.2/§2.8）。
+ *
+ * - BEM 类名与 v1 一致（组件零改动面），值全部 token 化；
+ * - 例外（P2-3 修订）：pet 窗气泡/右键菜单走「宠物世界」固定色
+ *   `--pet-world-*`，不随 data-theme（§2.3 作用域边界）；
+ * - 像素语言四规则：2px 实线边框（分隔线 1px dashed）、位移式硬阴影、
+ *   直角为主、数字/技术字面量等宽（--font-mono）；
+ * - 字号阶 10/11/12/13/17/22（不再出现 14/15/16/20）。
+ */
+
 html,
 body,
 #root {
@@ -5,60 +16,244 @@ body,
   padding: 0;
   width: 100%;
   height: 100%;
-  background: transparent;
+  background: transparent; /* pet 窗透明不变（panel 底色在 .panel 上） */
 }
 
 * {
   box-sizing: border-box;
 }
 
-/* pet 窗口：220×220 透明画布 */
+/* 键盘焦点环（craft-floor states：焦点可见且主题化；鼠标点击不显环） */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* 文本选中态（craft-floor browser surfaces：selection 属于设计面，从色板取） */
+.panel ::selection {
+  background: var(--accent);
+  color: var(--bg);
+}
+
+/* 减少动态偏好（craft-floor motion：spinner 转为静态强调，保状态可辨） */
+@media (prefers-reduced-motion: reduce) {
+  .intg-spinner {
+    animation: none;
+    border: 2px solid var(--line);
+    border-top-color: var(--accent);
+  }
+}
+
+/* ---- v2 M2 控件规格基线（R1-supplement-2 打磨）----
+ * 三页（提醒/Todo/设置）控件历史上来自不同批次、规格发散；统一为：
+ * 输入类控件 32px 高（padding 5px 10px + 2px 边框 + 13px 字）；
+ * 行内小按钮 28px 高（5px 12px + 12px 字）；主按钮 32px 与输入框齐高；
+ * checkbox 16×16 + accent-color 主题化（原生控件随主题，深色勾选可见）。 */
+input[type="checkbox"],
+input[type="radio"] {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  accent-color: var(--accent);
+}
+
+input[type="text"],
+input[type="number"],
+input[type="date"],
+input[type="time"],
+select {
+  font-family: inherit;
+}
+
+/* 行内按钮基类（R1-supplement-3：`.seg` 是三页共有的按钮模式，此前只有
+ * 各容器局部规则——裸用（Token 刷新 / 表单取消）落在 UA 默认渲染上，为
+ * 「组件大小粗糙」的系统性根源。基类 = 28px 规格；分段容器（token-seg /
+ * theme-seg）与主按钮由各自规则按特异性覆盖。 */
+.seg {
+  appearance: none;
+  padding: 5px 12px;
+  min-height: 28px;
+  border: 2px solid var(--line);
+  background: var(--surface);
+  font-size: 12px;
+  font-family: inherit;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+
+.seg:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+
+.seg.danger {
+  color: var(--danger);
+}
+
+/* 禁用态（craft-floor states：↑/↓ 到边界、加载中刷新等真实场景）。
+   task-pulsepet-v2-polish #3：全站禁用语汇统一（原 .seg 用 opacity、
+   intg 按钮用 ink-faint、select 用 ink-faint+wait、表单用 ink-faint+
+   surface-2+not-allowed 四套并存）——统一口径：
+   ① 字色一律 var(--ink-faint)（弃 opacity 弱化）；
+   ② 输入类控件（select/input）加 surface-2 底，按钮类底色不动（与 hover
+     态保持视觉隔离）；
+   ③ cursor 二分：wait = 加载/操作进行中（select 切换中、接入安装卸载中）；
+     not-allowed = 锁定/边界不可用（本类与表单锁定）。 */
+.seg:disabled {
+  color: var(--ink-faint);
+  cursor: not-allowed;
+}
+
+.seg:disabled:hover {
+  background: var(--surface);
+}
+
+/* 滚动条（深浅两主题可读，R7） */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border: 2px solid var(--bg);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--ink-faint);
+}
+
+/* pet 窗口：透明画布（§十一档位化：尺寸 = --pet-size 变量，Pet.tsx 按档位注入；
+   兜底 220px = medium，防变量缺失） */
 .pet-root {
   position: relative;
-  width: 220px;
-  height: 220px;
+  width: var(--pet-size, 220px);
+  height: var(--pet-size, 220px);
   background: transparent;
 }
 
 .pet-canvas {
   display: block;
-  width: 220px;
-  height: 220px;
+  width: var(--pet-size, 220px);
+  height: var(--pet-size, 220px);
 }
 
-/* 宠物气泡（M3 token 汇报；M4 复用）：窗口内顶部悬浮卡片，单行省略 */
+/* ---- 宠物气泡（v2 M2：宠物世界固定色，不随主题，§2.6.3） ---- */
+/* task-pulsepet-v2-polish #4：单行省略 → 至多两行——idle 汇报「… · 今日 X」
+   追加段在 208px 单行内被截断不可见；两行后短文案仍单行（收窄）、长文案
+   第二行完整可见。
+   实现要点（playwright 实测定案）：
+   - absolute 盒 left:50% 居中法下 shrink-to-fit 可用宽只剩 110（containing
+     block 减 left），white-space:normal 的折行文本会塌成 110px 窄柱——
+     显式 width:max-content 恢复「短收窄 / 长 208」；
+   - -webkit-line-clamp 需配 -webkit-box 布局，后者无视 max-content 测宽
+     （仍窄柱），弃用；改 max-height 截断；
+   - 行数取 3 非 2：idle 汇报实测 ~476px 超 208px 两行容量（~360px），
+     两行下「· 今日 X」仍落第三行被裁；文案措辞被 TC-M3-09-1 逐字钉住
+     不可精简，三行（70px）是尾段可见的最小行数。超三行直接裁掉无省略号
+     提示（sanitize 上限 140 字符的极端文案，可接受）。 */
 .pet-bubble {
   position: absolute;
   top: 2px;
   left: 50%;
   transform: translateX(-50%);
-  max-width: 208px;
-  padding: 5px 10px;
-  background: rgba(255, 255, 255, 0.96);
-  border: 1px solid #e5e7eb;
-  border-radius: 10px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
-  color: #1f2937;
-  font-size: 12px;
+  width: max-content;
+  max-width: calc(100% - 12px); /* §十一：随档位（中档 208 / 小档 172；长文案折行，至多三行） */
+  max-height: 70px; /* 3×行高 18.2 + padding 14 ≈ 68.6，余 1.4 容字体涨落 */
+  padding: 7px 12px;
+  background: var(--pet-world-surface);
+  border: 2px solid var(--pet-world-line);
+  box-shadow: var(--pet-world-shadow);
+  color: #29241d; /* 墨字（pet-world 固定暖白面上的墨色，两主题同值） */
+  font-size: 13px;
   line-height: 1.4;
-  white-space: nowrap;
+  white-space: normal;
   overflow: hidden;
-  text-overflow: ellipsis;
   z-index: 2;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", system-ui, sans-serif;
 }
 
-/* 宠物右键菜单（M6，TC-WIN-03）：220×220 窗口内 DOM 浮层（clamp 见 pet-menu.ts） */
+/* 像素尖角：45° 旋转小方块（样例所见） */
+.pet-bubble::after {
+  content: "";
+  position: absolute;
+  left: 24px;
+  bottom: -8px;
+  width: 8px;
+  height: 8px;
+  background: var(--pet-world-surface);
+  border-right: 2px solid var(--pet-world-line);
+  border-bottom: 2px solid var(--pet-world-line);
+  transform: rotate(45deg);
+}
+
+/* critical 级左侧 4px 蜜橘色条（可交互暗示；蜜橘恒定不随主题——§2.6.3，
+   值 = 浅色主题 --accent 同源 #d96c2c，pet-world 物件固定色） */
+.pet-bubble.level-critical {
+  border-left-width: 4px;
+  border-left-color: #d96c2c;
+}
+
+/* ---- v2 M6（V2-DESIGN §6.2，TC-M6-03-4）：气泡 agent 前置徽标 ---- */
+/* 前置等宽小字 `[oc] `（技术名不翻译；缺省不渲染——提醒气泡无徽标）。
+   徽标形态（气泡 [oc]）与 M5 会话列表（无括号 oc 列徽标）刻意不同（P3-2） */
+.pet-bubble-agent {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  margin-right: 4px;
+  color: #6b5f4e; /* 暖褐弱化（pet-world 固定墨色系）——徽标不喧宾 */
+  white-space: nowrap;
+}
+
+/* ---- v2 M4（TC-M4-13）：critical 提醒气泡的 snooze 按钮（hover 浮现） ---- */
+/* 可 snooze 气泡：文案右留按钮位；按钮默认隐形，hover 气泡时浮现（不喧宾） */
+.pet-bubble.snoozable {
+  padding-right: 30px;
+}
+
+.pet-bubble-snooze {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  appearance: none;
+  border: 2px solid var(--pet-world-line);
+  background: var(--pet-world-surface);
+  color: #29241d;
+  font-size: 11px;
+  font-family: inherit;
+  line-height: 1;
+  padding: 4px 6px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease-out;
+  white-space: nowrap;
+}
+
+.pet-bubble:hover .pet-bubble-snooze,
+.pet-bubble-snooze:focus-visible {
+  opacity: 1;
+}
+
+.pet-bubble-snooze:hover {
+  background: #ef8b4d; /* 蜜橘 hover（pet-world 物件固定色系） */
+  color: #17130f;
+}
+
+/* ---- 宠物右键菜单（v2 M2 同语言翻新：暖白 + 2px 墨边 + 硬阴影 + 直角项；
+   行为零改动，clamp/关闭逻辑在 pet-menu.ts / PetMenu.tsx） ---- */
 .pet-menu {
   position: absolute;
   z-index: 3;
   min-width: 168px;
+  /* §11.5 保险丝：菜单是窗口内 DOM 浮层，任何语言/文案/档位组合下最坏只
+     省略文案（见下 .pet-menu-item），不裁布局（en 长文案曾实测外宽 266px） */
+  max-width: calc(100% - 4px);
   padding: 4px;
-  background: rgba(255, 255, 255, 0.97);
-  border: 1px solid #e5e7eb;
-  border-radius: 10px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.22);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  background: var(--pet-world-surface);
+  border: 2px solid var(--pet-world-line);
+  box-shadow: var(--pet-world-shadow);
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", system-ui, sans-serif;
 }
 
 .pet-menu-item {
@@ -69,83 +264,224 @@ body,
   background: transparent;
   padding: 6px 10px;
   font-size: 12px;
-  color: #1f2937;
-  border-radius: 6px;
+  color: #29241d; /* 墨字（pet-world 固定） */
+  border-radius: 0; /* 直角项 */
   cursor: pointer;
   white-space: nowrap;
+  overflow: hidden; /* §11.5：配合 max-width 超长文案省略号降级，不裁布局 */
+  text-overflow: ellipsis;
 }
 
 .pet-menu-item:hover {
-  background: #f3f4f6;
+  background: rgba(23, 19, 15, 0.08); /* pet-world 墨系的低透明 hover（固定色族） */
 }
 
-/* panel 窗口：普通不透明控制面板 */
+/* v2 M3（§3.4 ③）：信息项（今日 token）与行为项间的分隔线样式 */
+.pet-menu-info {
+  border-bottom: 1px dashed rgba(23, 19, 15, 0.35);
+  border-radius: 0;
+  margin-bottom: 3px;
+  color: #29241d;
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+
+/* v2 M6（V2-DESIGN §6.2，TC-M6-04）：今日 token 信息项的 agent 分布子行
+   `oc 36.0M · cc 3.0M`（双 agent 有数据才显示；单项/零数据省略） */
+.pet-menu-sub {
+  display: block;
+  margin-top: 2px;
+  font-size: 10px;
+  color: #6b5f4e;
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---- panel 窗口 ---- */
 .panel {
   min-height: 100%;
-  background: #f5f6f8;
-  color: #1f2937;
-  padding: 24px;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-}
-
-.panel h1 {
-  margin: 0 0 12px;
-  font-size: 22px;
+  background: var(--bg);
+  color: var(--ink);
+  padding: 20px 24px 24px;
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", system-ui, sans-serif;
 }
 
 .panel p {
-  color: #4b5563;
+  color: var(--ink-soft);
   line-height: 1.6;
 }
 
 .panel ul {
-  color: #4b5563;
+  color: var(--ink-soft);
   line-height: 1.8;
 }
 
-/* 面板 tab */
+/* ---- 顶栏（v2 M2 面板壳：标题 + agent 状态芯片两段，§2.4 修订） ---- */
+.panel-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 14px;
+  border-bottom: 2px solid var(--ink);
+}
+
+.panel-title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--ink);
+}
+
+/* （mini 猫样式随 MiniCat.tsx 移除一并回收——2026-08-24 修订，§2.4） */
+
+/* agent 状态芯片：● {agent} · {kind} 等宽（字面量不翻译，TC-UI-03） */
+.panel-status-chip {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 2px solid var(--ink);
+  background: var(--surface);
+  padding: 4px 10px;
+  box-shadow: var(--shadow-hard);
+  font-size: 12px;
+  color: var(--ink-soft);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+
+.chip-dot {
+  width: 8px;
+  height: 8px;
+  background: var(--accent);
+  flex: none;
+}
+
+/* ---- tab 栏（注册表驱动；激活 tab accent 硬阴影上浮，§2.4） ---- */
 .panel-tabs {
   display: flex;
-  gap: 4px;
-  border-bottom: 1px solid #e5e7eb;
-  margin-bottom: 16px;
+  gap: 8px;
+  border-bottom: 2px solid var(--line);
+  margin: 14px 0 16px;
+  padding-bottom: 10px;
 }
 
 .panel-tab {
   appearance: none;
-  border: none;
-  background: transparent;
-  padding: 8px 14px;
-  font-size: 14px;
-  color: #6b7280;
+  border: 2px solid var(--line);
+  background: var(--surface);
+  padding: 6px 16px;
+  font-size: 13px;
+  color: var(--ink-soft);
   cursor: pointer;
-  border-bottom: 2px solid transparent;
+  font-family: inherit;
 }
 
 .panel-tab.active {
-  color: #111827;
-  border-bottom-color: #6366f1;
-  font-weight: 600;
+  border-color: var(--ink);
+  color: var(--ink);
+  font-weight: 700;
+  background: var(--surface);
+  box-shadow: 2px 2px 0 var(--accent);
+  position: relative;
+  top: -1px;
+}
+
+/* 非激活 tab hover（craft-floor states）；按下时落回基线（位移阴影世界的
+ * 按压语汇：上浮 -1px 的逆动作） */
+.panel-tab:hover:not(.active) {
+  border-color: var(--ink-soft);
+  color: var(--ink);
+}
+
+.panel-tab.active:active {
+  top: 0;
 }
 
 .tab-milestone {
   margin-left: 6px;
   font-size: 10px;
-  color: #9ca3af;
+  color: var(--ink-faint);
 }
 
 .panel-placeholder {
   padding: 32px 0;
   text-align: center;
-  color: #9ca3af;
+  color: var(--ink-faint);
 }
 
-/* ---- 设置页（M5 选择宠物，TC-SP-11） ---- */
+/* ---- 深色主题组件覆盖（skill 审查 R1-supplement：对齐 b-cool 样例） ----
+ * 两份权威样例的边框系统在深色下系统性不同（b-cool 比 a 低调）：卡片/控件
+ * 用 --line 线框而非亮墨重边、芯片与分段容器用 --ink-faint、激活 tab 与
+ * KPI 首卡强调改走 --accent 边框（浅色 a 的「ink 边 + 首卡 accent 阴影」
+ * 直接映射深色会得到刺眼的亮白粗边）。覆盖只改边框引用，值仍全部来自
+ * tokens.css 既有 token（token 表零变更）。 */
+[data-theme="dark"] .panel-header {
+  border-bottom-color: var(--ink-faint); /* b-cool .hd */
+}
 
+[data-theme="dark"] .panel-status-chip {
+  border-color: var(--ink-faint); /* b-cool .hd-state */
+}
+
+[data-theme="dark"] .token-seg {
+  border-color: var(--ink-faint); /* b-cool .seg */
+}
+
+[data-theme="dark"] .panel-tab.active {
+  border-color: var(--accent); /* b-cool .tab.on */
+}
+
+[data-theme="dark"] .kpi,
+[data-theme="dark"] .token-section {
+  border-color: var(--line); /* b-cool .kpi / .card */
+}
+
+[data-theme="dark"] .token-kpis .kpi:first-child {
+  border-color: var(--accent); /* b-cool .kpi.first：边框强调（非阴影） */
+  box-shadow: var(--shadow-hard-lg);
+}
+
+/* ---- 通用分段控件（时间跨度/维度等；§十二 F6：theme-seg 随主题/大小改下拉清退） ---- */
+.token-seg {
+  display: inline-flex;
+  border: 2px solid var(--ink);
+  background: var(--surface);
+}
+
+.token-seg .seg {
+  appearance: none;
+  border: none;
+  background: transparent;
+  padding: 5px 14px;
+  min-height: 32px;
+  font-size: 13px;
+  color: var(--ink-soft);
+  cursor: pointer;
+  font-family: inherit;
+  border-right: 1px solid var(--line);
+}
+
+.token-seg .seg:last-child {
+  border-right: none;
+}
+
+.token-seg .seg.active {
+  background: var(--ink);
+  color: var(--bg);
+  font-weight: 700;
+}
+
+/* ---- 设置页 ---- */
 .panel-settings h2 {
-  font-size: 15px;
-  color: #111827;
-  margin: 20px 0 10px;
+  /* §十二 F4（2026-08-28）：与其他 tab 区块标题（.token-section h3）统一 14px（原 13px） */
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--ink);
+  margin: 26px 0 10px;
 }
 
 .panel-settings h2:first-child {
@@ -154,84 +490,231 @@ body,
 
 .settings-pet-label {
   display: block;
-  font-size: 13px;
-  color: #6b7280;
+  /* §十二 二轮续（2026-08-28）：13→12px——与 settings-current/hotkey-hint/
+     intg 描述等设置页非加粗小字统一字号基线 */
+  font-size: 12px;
+  color: var(--ink-soft);
   margin-bottom: 6px;
 }
 
 .panel-settings select {
-  appearance: none;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  padding: 8px 12px;
-  font-size: 14px;
-  background: #fff;
+  /* 不用 appearance:none——去掉原生外观会连下拉箭头一起消失（无箭头的
+   * select 缺少展开暗示，R1-supplement-3）；保留原生箭头，边框/底色/字色
+   * 仍走 token（与表单 select 同口径）。 */
+  border: 2px solid var(--line);
+  border-radius: 2px;
+  padding: 5px 10px;
+  min-height: 32px;
+  font-size: 13px;
+  background: var(--surface);
+  color: var(--ink);
   min-width: 320px;
-  color: #111827;
+  max-width: 480px;
 }
 
+/* 禁用统一口径见 .seg:disabled 注释（#3）；wait = 切换中/语言切换中的忙态 */
 .panel-settings select:disabled {
-  color: #9ca3af;
+  color: var(--ink-faint);
+  background: var(--surface-2);
   cursor: wait;
+}
+
+/* §十七（2026-08-29 用户目验）：选择宠物下拉与其下「宠物大小」标签之间原
+ * 间距 0（其他下拉后跟 h2 区块标题自带 26px 上边距，唯此处 select 直贴
+ * label）——兄弟选择器仅命中此一处，加 10px 呼吸感（量级经用户调定） */
+.panel-settings select + .settings-pet-label {
+  margin-top: 10px;
 }
 
 .settings-notice {
   margin-top: 12px;
   padding: 8px 12px;
-  border-radius: 8px;
-  background: #fef3c7;
-  color: #92400e;
+  border: 2px solid var(--chart-cache);
+  background: var(--surface-2);
+  color: var(--ink-soft);
   font-size: 13px;
 }
 
 .settings-current {
+  /* 三轮回归修复（P3-8 引出）：themeHint 改 label 后曾挂本类，inline 排版 +
+     脚注级 ink-faint 双问题——label 已改走 settings-pet-label（控件伴随文字
+     = ink-soft）；本类回归纯脚注，display:block 留守防未来 label 复用再翻车 */
+  display: block;
   margin-top: 10px;
+  margin-bottom: 2px;
   font-size: 12px;
-  color: #6b7280;
+  line-height: 1.7;
+  color: var(--ink-faint);
+}
+
+/* §十八（2026-08-29）：接入管理"接入说明"多行脚注——文案含 \n 编号行，
+   pre-line 按行渲染（无 \n 的其余 settings-current 用法渲染不受影响） */
+.settings-current.settings-notes {
+  white-space: pre-line;
 }
 
 .settings-problems {
   margin-top: 8px;
   padding-left: 18px;
   font-size: 12px;
-  color: #b45309;
+  color: var(--accent-ink);
   line-height: 1.7;
 }
 
-/* M6 交互设置（点击穿透开关，TC-APP-12） */
-.settings-check {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  font-size: 13px;
-  color: #374151;
-  line-height: 1.6;
-  max-width: 640px;
-  cursor: pointer;
-}
-
-.settings-check input {
-  margin-top: 3px;
-}
+/* §十二 二轮续（2026-08-28）：.settings-check（+input 规则）随 F6 控件形态
+ * 统一清退——设置页无消费方（交互/播报改卡片行后） */
 
 .settings-error {
   margin: 0 0 12px;
   padding: 8px 12px;
-  border-radius: 8px;
-  background: #fef2f2;
-  border: 1px solid #fecaca;
-  color: #b91c1c;
+  border: 2px solid var(--danger);
+  background: var(--surface);
+  color: var(--danger);
   font-size: 13px;
 }
 
 .settings-hotkey-hint {
   margin-top: 10px;
   font-size: 12px;
-  color: #9ca3af;
+  color: var(--ink-faint);
 }
 
-/* ---- Token 统计（M3，TC-TK-08/09） ---- */
+/* ---- v2 M1 接入管理 / v2 M2 功能管理（同列表形态） ---- */
+.intg-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 640px;
+}
 
+.intg-row {
+  border: 2px solid var(--line);
+  background: var(--surface);
+  /* §十二 F7（2026-08-28）：12→8px 缩高（用户裁定微调） */
+  padding: 8px 12px;
+}
+
+.intg-row-head {
+  display: flex;
+  flex-wrap: wrap; /* R1-supplement-4：spinner + 双按钮 + 长路径态的收敛保护 */
+  align-items: center;
+  gap: 10px;
+}
+
+.intg-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+/* §十二 二轮（2026-08-28）：卡片行名独占一行后的常规体描述行——
+   二轮续：改块级 <p>（名称行下方独立一行）+ 字号统一 12px（设置页小字基线） */
+.intg-desc {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.intg-state-label {
+  font-size: 12px;
+  color: var(--ink-soft);
+  font-family: var(--font-mono);
+}
+
+.intg-row-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.intg-row-actions button {
+  font-size: 12px;
+  padding: 5px 12px;
+  min-height: 28px;
+  border: 2px solid var(--line);
+  background: var(--surface);
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+
+.intg-row-actions button:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+
+/* 禁用统一口径见 .seg:disabled 注释（#3）；wait = 安装/卸载进行中的忙态 */
+.intg-row-actions button:disabled {
+  color: var(--ink-faint);
+  cursor: wait;
+}
+
+.intg-path {
+  margin-top: 4px; /* §十二 F7：6→4 行距微收 */
+  font-size: 12px;
+  color: var(--ink-faint);
+  word-break: break-all;
+  font-family: var(--font-mono);
+}
+
+.intg-message {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.intg-row-error {
+  margin-top: 2px; /* §十二 F7：4→2 行距微收 */
+  font-size: 12px;
+  color: var(--danger);
+}
+
+/* 操作结果成功提示条（绿色，与错误条对称；TC-INT-07-5） */
+.intg-row-notice {
+  margin-top: 2px; /* §十二 F7：4→2 行距微收 */
+  font-size: 12px;
+  color: var(--ok);
+}
+
+/* §十二 F7（2026-08-28）：.intg-note 每卡「修改前自动备份」提示去重——
+   提升为接入管理区底部一处（Settings.tsx settings-current 承载），规则清退 */
+
+/* 状态点四态（已安装=ok / 未安装=line / 需更新=accent / 错误=danger） */
+.intg-dot {
+  width: 10px;
+  height: 10px;
+  flex: none;
+  background: var(--line);
+}
+
+.intg-dot-installed {
+  background: var(--ok);
+}
+
+.intg-dot-stale {
+  background: var(--accent);
+}
+
+.intg-dot-error {
+  background: var(--danger);
+}
+
+/* 安装中 spinner */
+.intg-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--line);
+  border-top-color: var(--ink-soft);
+  animation: intg-spin 0.8s linear infinite;
+}
+
+@keyframes intg-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ---- Token 统计 ---- */
 .token-controls {
   display: flex;
   flex-wrap: wrap;
@@ -240,55 +723,50 @@ body,
   margin-bottom: 16px;
 }
 
-.token-seg {
-  display: inline-flex;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  overflow: hidden;
-  background: #fff;
-}
-
-.token-seg .seg {
-  appearance: none;
-  border: none;
-  background: transparent;
-  padding: 6px 12px;
-  font-size: 13px;
-  color: #6b7280;
-  cursor: pointer;
-}
-
-.token-seg .seg.active {
-  background: #6366f1;
-  color: #fff;
-}
-
 .token-dates {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 13px;
-  color: #6b7280;
+  font-size: 12px;
+  color: var(--ink-faint);
+  font-family: var(--font-mono);
 }
 
 .token-dates input {
   padding: 5px 8px;
-  border: 1px solid #e5e7eb;
-  border-radius: 6px;
-  font-size: 13px;
+  border: 2px solid var(--line);
+  border-radius: 2px;
+  font-size: 12px;
+  background: var(--surface);
+  color: var(--ink);
+  font-family: var(--font-mono);
 }
 
 .token-error {
   margin: 16px 0;
   padding: 14px 16px;
-  background: #fef3c7;
-  border: 1px solid #fcd34d;
-  border-radius: 8px;
-  color: #92400e;
+  background: var(--surface);
+  border: 2px solid var(--danger);
+  color: var(--danger);
   font-size: 13px;
   line-height: 1.6;
 }
 
+/* v2 M5（C1/N-4）：degraded 细横幅（仅 panel 顶部，不遮蔽内容——
+   opencode 源报错 × CC 有数据时的降级提示） */
+.token-degraded {
+  margin: 0 0 12px;
+  padding: 6px 10px;
+  border: 1px solid var(--warn);
+  border-left: 3px solid var(--warn);
+  background: var(--surface-2);
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+/* §十二 F3（2026-08-28）：.token-kpi-note 费用口径标注随文案去除一并清退 */
+
+/* KPI 卡：2px 墨边 + 硬阴影；首卡 accent 阴影（今日高亮语义） */
 .token-kpis {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -297,37 +775,62 @@ body,
 }
 
 .kpi {
-  background: #fff;
-  border: 1px solid #e5e7eb;
-  border-radius: 10px;
-  padding: 14px;
-  text-align: center;
+  background: var(--surface);
+  border: 2px solid var(--ink);
+  padding: 12px 14px;
+  box-shadow: var(--shadow-hard-lg);
+  text-align: left;
+}
+
+.token-kpis .kpi:first-child {
+  box-shadow: 3px 3px 0 var(--accent);
 }
 
 .kpi-value {
-  font-size: 20px;
+  font-family: var(--font-mono);
+  font-size: 22px;
   font-weight: 700;
-  color: #111827;
+  color: var(--ink);
 }
 
 .kpi-label {
   margin-top: 4px;
-  font-size: 12px;
-  color: #9ca3af;
+  font-size: 11px;
+  color: var(--ink-soft);
+  letter-spacing: 0.08em;
 }
 
+/* 内容卡片 */
 .token-section {
-  background: #fff;
-  border: 1px solid #e5e7eb;
-  border-radius: 10px;
+  background: var(--surface);
+  border: 2px solid var(--ink);
+  box-shadow: var(--shadow-hard-lg);
   padding: 14px 16px;
   margin-bottom: 16px;
 }
 
 .token-section h3 {
-  margin: 0 0 10px;
+  margin: 0 0 12px;
+  /* §十二 F4（2026-08-28）：四 tab 区块标题统一 14px（原 12px 小于正文 13px） */
   font-size: 14px;
-  color: #374151;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--ink);
+}
+
+/* v2 M5 R2（TC-M5-04-1）：柱图标题行——h3 左 + agent 维度 tab 右同一行
+ * （窄面板换行兜底；tab 复用 .token-seg 分段样式，深浅主题随既有 token） */
+.token-chart-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  margin-bottom: 12px;
+}
+
+.token-chart-head h3 {
+  margin: 0;
 }
 
 .token-chart {
@@ -335,64 +838,160 @@ body,
   height: auto;
 }
 
-.token-columns {
+/* v2 M3：堆叠柱图三段色（token 化：SVG attribute 不支持 var()，走类；
+   色 = M2 --chart-output/input/cache，深浅主题同 token 可读） */
+.token-chart .stack-seg-output {
+  fill: var(--chart-output);
+}
+
+.token-chart .stack-seg-input {
+  fill: var(--chart-input);
+}
+
+.token-chart .stack-seg-cache {
+  fill: var(--chart-cache);
+}
+
+.token-chart .chart-axis {
+  stroke: var(--line);
+}
+
+.token-chart .chart-label {
+  fill: var(--ink-soft);
+  font-family: var(--font-mono);
+}
+
+.token-chart .chart-label.faint {
+  fill: var(--ink-faint);
+}
+
+/* 堆叠柱图容器（HTML tooltip 绝对定位于此） */
+.stack-chart-wrap {
+  position: relative;
+}
+
+/* 自定义 HTML tooltip（§3.5：日期 + 三值 + 占比 + 总量） */
+.chart-tip {
+  position: absolute;
+  transform: translateX(-50%);
+  pointer-events: none;
+  background: var(--surface-2);
+  border: 2px solid var(--ink);
+  box-shadow: var(--shadow-hard);
+  padding: 6px 10px;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--ink);
+  white-space: nowrap;
+  z-index: 4;
+}
+
+.chart-tip-title {
+  font-weight: 700;
+  margin-bottom: 2px;
+}
+
+/* §二十六：三行数值网格——标签列左对齐、数字列右对齐（共享列宽跨行对齐右缘）；
+   white-space: pre 防 grid item 块化后行首/行尾空格折叠（en 分隔空格）。
+   子 span 须各自独占一行：JSX 剥除换行空白，若同行排列则其间空格会经 pre
+   保留成匿名 grid item、破坏三列布局（committer P3-5） */
+.chart-tip-rows {
   display: grid;
-  grid-template-columns: 5fr 7fr;
-  gap: 16px;
-  align-items: start;
+  grid-template-columns: max-content max-content max-content;
+  white-space: pre;
+  color: var(--ink-soft);
 }
 
-.project-pie {
+.chart-tip-num {
+  text-align: right;
+}
+
+/* 图例三项（仅说明不可交互，§3.5） */
+.chart-legend {
   display: flex;
   gap: 16px;
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.legend-item {
+  display: inline-flex;
   align-items: center;
+  gap: 6px;
 }
 
-.project-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  flex: 1;
-  font-size: 13px;
-}
-
-.project-list li {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 0;
-  border-bottom: 1px dashed #f3f4f6;
-}
-
-.project-dot {
+.legend-dot {
   width: 10px;
   height: 10px;
-  border-radius: 3px;
   flex: none;
 }
 
-.project-name {
-  flex: 1;
+.legend-dot.legend-output {
+  background: var(--chart-output);
+}
+
+.legend-dot.legend-input {
+  background: var(--chart-input);
+}
+
+.legend-dot.legend-cacheRead {
+  background: var(--chart-cache);
+}
+
+/* v2 M3：筛选 chip 行容器（M5 R2 修订：agent 维度上移为标题行 tab 单选，
+   此容器只承载模型复选框一组——两级筛选第二级，随 tab 联动收窄） */
+.filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  margin-bottom: 12px;
+}
+
+.filter-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.model-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 2px solid var(--line);
+  background: var(--surface-2);
+  padding: 3px 8px;
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.model-chip:has(input:checked) {
+  border-color: var(--ink);
+  background: var(--surface);
+}
+
+.model-chip input {
+  margin: 0;
+}
+
+.model-chip-name {
+  color: var(--ink);
+  font-family: var(--font-mono);
+  max-width: 180px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: #374151;
 }
 
-.project-pct {
-  color: #6b7280;
-  min-width: 48px;
-  text-align: right;
-}
-
-.project-cost {
-  color: #111827;
-  min-width: 64px;
-  text-align: right;
+.model-chip-total {
+  color: var(--ink-faint);
+  font-family: var(--font-mono);
+  font-size: 11px;
 }
 
 .token-empty {
-  color: #9ca3af;
+  color: var(--ink-faint);
   font-size: 13px;
 }
 
@@ -415,17 +1014,43 @@ body,
   background: transparent;
   cursor: pointer;
   text-align: left;
-  border-radius: 6px;
+  color: var(--ink);
 }
 
 .session-row:hover {
-  background: #f9fafb;
+  background: var(--surface-2);
 }
 
-.session-id {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  color: #6b7280;
-  min-width: 110px;
+/* v2 M3（§3.6）：首列 = 会话标题（flex 省略；title 属性 tooltip 提供完整信息） */
+.session-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink);
+}
+
+/* v2 M5（§5.6）：agent 标识微列（oc / cc 等宽小字徽标，i18n title 全名） */
+.session-agent {
+  flex: none;
+  min-width: 22px;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--ink-soft);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 1px 3px;
+  background: var(--surface-2);
+}
+
+/* v2 M5（TC-M5-07）：例程会话 ⚡ 徽标（title 属性「定时任务例程」） */
+.session-task-badge {
+  margin-right: 4px;
+  color: var(--accent);
 }
 
 .session-project {
@@ -433,23 +1058,25 @@ body,
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: #374151;
+  color: var(--ink-soft);
 }
 
 .session-tokens {
   min-width: 64px;
   text-align: right;
-  color: #111827;
+  color: var(--ink);
+  font-family: var(--font-mono);
 }
 
 .session-cost {
   min-width: 64px;
   text-align: right;
-  color: #6b7280;
+  color: var(--ink-soft);
+  font-family: var(--font-mono);
 }
 
 .session-caret {
-  color: #9ca3af;
+  color: var(--ink-faint);
   width: 14px;
   text-align: center;
 }
@@ -460,8 +1087,7 @@ body,
   gap: 6px 12px;
   margin: 0;
   padding: 8px 12px;
-  background: #f9fafb;
-  border-radius: 6px;
+  background: var(--surface-2);
   font-size: 12px;
 }
 
@@ -470,17 +1096,16 @@ body,
 }
 
 .session-detail dt {
-  color: #9ca3af;
+  color: var(--ink-faint);
 }
 
 .session-detail dd {
   margin: 0;
-  color: #374151;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--ink);
+  font-family: var(--font-mono);
 }
 
-/* fireworks 窗口：透明画布（M4 粒子烟花，TC-RM-09/16）
-   Windows 回退（TC-RM-16，M8 实机）：若透明异常改为不透明近桌面深色（DESIGN §12） */
+/* fireworks 窗口：透明画布（无文案，不涉及主题） */
 .fireworks-canvas {
   display: block;
   width: 100vw;
@@ -488,11 +1113,8 @@ body,
   background: transparent;
 }
 
-/* ---- 提醒配置（M4，TC-RM-07/11/13） ---- */
-
-.reminders {
-  max-width: 860px;
-}
+/* ---- 提醒配置（M2 轻量翻新；表单重做并入 M4） ---- */
+/* §十二 F5（2026-08-28）：删除 max-width:860px 钉宽——与其余 tab 一致全宽自适应 */
 
 .reminder-toolbar {
   display: flex;
@@ -504,25 +1126,36 @@ body,
 .reminder-check {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   font-size: 13px;
-  color: #374151;
+  color: var(--ink-soft);
   cursor: pointer;
   white-space: nowrap;
 }
 
 .reminder-check.compact {
   font-size: 12px;
-  color: #6b7280;
+  color: var(--ink-faint);
 }
 
 .reminder-paused-badge {
-  padding: 3px 10px;
-  border-radius: 999px;
-  background: #fef3c7;
-  border: 1px solid #fcd34d;
-  color: #92400e;
+  padding: 4px 10px;
+  background: var(--surface-2);
+  border: 2px solid var(--accent);
+  color: var(--accent-ink);
   font-size: 12px;
+  white-space: nowrap;
+}
+
+/* v2 M2：todo 派生行「已停用（插件关闭）」徽标（可见但惰性，TC-UI-07-3） */
+.reminder-plugin-off {
+  flex: none;
+  padding: 2px 8px;
+  font-size: 11px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  color: var(--ink-faint);
+  white-space: nowrap;
 }
 
 .reminder-list {
@@ -531,12 +1164,17 @@ body,
   padding: 0;
 }
 
+/* 列表行：10px 8px 行距节奏 + 中线对齐（label 弹性吸收宽度波动）。
+ * R1-supplement-4：wrap 允许——固定内容（kind/meta/checkbox/操作组）总宽
+ * 逼近容器时（实测 ~818/824px），操作组整组折行到第二行右贴（margin-left:
+ * auto 在折行后仍生效），信息零丢失、规格零缩小；空间充足时仍单行。 */
 .reminder-item {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
-  padding: 8px 6px;
-  border-bottom: 1px dashed #f3f4f6;
+  gap: 10px 12px;
+  padding: 10px 8px;
+  border-bottom: 1px dashed var(--line);
   font-size: 13px;
 }
 
@@ -545,54 +1183,42 @@ body,
 }
 
 .reminder-kind {
-  min-width: 64px;
-  color: #374151;
+  flex: none;
+  min-width: 76px;
+  color: var(--ink-soft);
+  white-space: nowrap;
 }
 
 .reminder-label {
   flex: 1;
+  min-width: 120px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: #111827;
+  color: var(--ink);
   font-weight: 500;
 }
 
 .reminder-meta {
-  color: #6b7280;
+  color: var(--ink-faint);
   font-size: 12px;
   white-space: nowrap;
+  font-family: var(--font-mono);
 }
 
 .reminder-actions {
   display: inline-flex;
-  gap: 6px;
+  gap: 8px;
+  margin-left: auto;
+  flex: none;
 }
 
-.reminder-actions .seg,
-.reminder-templates .seg {
-  padding: 4px 10px;
-  border: 1px solid #e5e7eb;
-  border-radius: 6px;
-  background: #fff;
-  font-size: 12px;
-  color: #374151;
-  cursor: pointer;
-}
-
-.reminder-actions .seg.danger {
-  color: #dc2626;
-}
-
-.reminder-actions .seg:hover,
-.reminder-templates .seg:hover {
-  background: #f3f4f6;
-}
+/* （.seg 按钮规格由基类 .seg 提供——R1-supplement-3） */
 
 .reminder-form {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
 }
 
 .reminder-templates {
@@ -605,15 +1231,15 @@ body,
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
-  gap: 12px;
+  gap: 12px 16px;
 }
 
 .reminder-form-row label {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
   font-size: 12px;
-  color: #6b7280;
+  color: var(--ink-soft);
 }
 
 .reminder-form-row label.grow {
@@ -621,42 +1247,59 @@ body,
   min-width: 240px;
 }
 
+/* 行内 checkbox：与 32px 输入框底缘对齐（表单行 align-items: flex-end） */
 .reminder-form-row label.reminder-check {
   flex-direction: row;
   align-items: center;
-  padding-bottom: 6px;
+  gap: 8px;
+  padding-bottom: 7px;
+  white-space: nowrap;
 }
 
+/* 输入类控件统一 32px 高（控件规格基线；§十二 F13：datetime-local 补入——
+   原列表漏列导致「一次」分支控件走浏览器默认样式大小突兀） */
 .reminder-form input[type="text"],
 .reminder-form input[type="number"],
 .reminder-form input[type="time"],
+.reminder-form input[type="date"],
+.reminder-form input[type="datetime-local"],
 .reminder-form select {
-  padding: 6px 8px;
-  border: 1px solid #e5e7eb;
-  border-radius: 6px;
+  padding: 5px 10px;
+  min-height: 32px;
+  border: 2px solid var(--line);
+  border-radius: 2px;
   font-size: 13px;
-  background: #fff;
-  color: #111827;
+  background: var(--surface);
+  color: var(--ink);
 }
 
 .reminder-form input[type="text"] {
   width: 100%;
 }
 
+/* 锁定态（todo 派生规则编辑时锁类型/间隔/时刻——craft-floor states：
+ * 禁用须可辨，不只是不响应） */
+.reminder-form input:disabled,
+.reminder-form select:disabled {
+  color: var(--ink-faint);
+  background: var(--surface-2);
+  cursor: not-allowed;
+}
+
 .reminder-hint {
   margin: 0;
   font-size: 12px;
-  color: #92400e;
-  background: #fffbeb;
-  border: 1px solid #fde68a;
-  border-radius: 6px;
-  padding: 6px 10px;
+  line-height: 1.7;
+  color: var(--accent-ink);
+  background: var(--surface-2);
+  border: 1px dashed var(--line);
+  padding: 8px 12px;
 }
 
 .reminder-form-error {
   margin: 0;
   font-size: 12px;
-  color: #b91c1c;
+  color: var(--danger);
 }
 
 .reminder-form-actions {
@@ -664,10 +1307,71 @@ body,
   gap: 8px;
 }
 
+/* ---- v2 M4 R1 补充（用户 2026-08-25 二次裁定）：新建/保存按钮**并入表单
+ * 末行字段行右端**（无独立动作行）+ accent 强调色。独立类——
+ * .reminder-form-actions 为 Todo 插件页共用，保持原样零波及。 ---- */
+/* 行内形态：margin-left:auto 在 flex 行（reminder-form-row / task-weekdays）
+ * 内推到右端；inline-flex 随内容宽。 */
+.task-form-actions {
+  display: inline-flex;
+  gap: 8px;
+  margin-left: auto;
+  /* reminder-form-row 为 align-items:flex-end——按钮组底缘与输入框底缘对齐
+   *（.seg 基类 28px vs 输入 32px，padding 补齐到同一基线） */
+  align-self: flex-end;
+  padding-bottom: 2px;
+}
+
+/* task-weekdays 为 align-items:center——按钮组居中随行（覆盖默认底对齐） */
+.task-weekdays .task-form-actions {
+  align-self: center;
+  padding-bottom: 0;
+}
+
+/* todo 编辑态（无字段行）：flex-column 表单的直接子项，margin-left:auto
+ * 在列向同样推到右缘 = 右下角 */
+.reminder-form > .task-form-actions {
+  display: flex;
+}
+
+.task-form-actions .seg,
+.task-form-actions .primary {
+  min-height: 32px;
+  padding: 5px 16px;
+  font-size: 13px;
+}
+
+/* 主按钮（新建/保存例程）：M2 accent 强调（浅色蜜橘 / 深色项圈青——各主题
+ * 自己的强调色，非默认 ink 主按钮），前景 surface（浅色橙底暖白字 / 深色
+ * 青底炭字，两主题对比均达标），hover 加深走 accent-ink；硬阴影对齐 M2
+ * 按钮语言（与激活 tab 的 accent 阴影同族）。 */
+.task-form-actions .primary {
+  background: var(--accent);
+  color: var(--surface);
+  border: 2px solid var(--accent);
+  box-shadow: var(--shadow-hard);
+  cursor: pointer;
+}
+
+.task-form-actions .primary:hover {
+  background: var(--accent-ink);
+  border-color: var(--accent-ink);
+  color: var(--surface);
+}
+
+/* 主按钮：32px 与输入框齐高（视觉权重对齐表单） */
+.reminder-form-actions .seg,
 .reminder-form-actions .primary {
-  background: #6366f1;
-  color: #fff;
-  border-color: #6366f1;
+  min-height: 32px;
+  padding: 5px 16px;
+  font-size: 13px;
+}
+
+.reminder-form-actions .primary {
+  background: var(--ink);
+  color: var(--bg);
+  border: 2px solid var(--ink);
+  cursor: pointer;
 }
 
 .reminder-stats {
@@ -680,9 +1384,9 @@ body,
 .reminder-stats li {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 4px 0;
-  border-bottom: 1px dashed #f3f4f6;
+  gap: 16px;
+  padding: 8px 4px;
+  border-bottom: 1px dashed var(--line);
 }
 
 .reminder-toast {
@@ -690,21 +1394,306 @@ body,
   bottom: 20px;
   right: 20px;
   padding: 10px 16px;
-  background: #111827;
-  color: #f9fafb;
-  border-radius: 8px;
+  background: var(--ink);
+  color: var(--bg);
   font-size: 13px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  box-shadow: var(--shadow-hard);
 }
 
-/* ---- M7 Todo 插件（内置 built-in-todo，TC-TD-01/02） ---- */
+/* ---- v2 M4：定时任务（Tasks.tsx——徽标/模板块/星期/历史区，落 M2 token） ---- */
 
+/* 动作徽标（🔔 notify / ⚡ exec / 📋 todo 派生——§十二 F10 💧→🔔）：固定宽不让行距跳动 */
+.task-badge {
+  flex: none;
+  width: 22px;
+  text-align: center;
+  font-size: 14px;
+}
+
+/* opencode 例程模板块（§4.6）：surface-2 底 + 虚线边（hint 同族容器） */
+.task-tpl-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--surface-2);
+  border: 1px dashed var(--line);
+}
+
+.task-tpl-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+/* Part B：模板 chips 单选行（复用 seg 按钮基底 + active 选中态） */
+.task-tpl-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 6px 0;
+}
+
+.seg.tpl-chip.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.task-tpl-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* --auto 勾选后的危险色警示（R7：危险须可辨） */
+.task-tpl-row .danger-check,
+.task-tpl-row .danger-check input {
+  color: var(--danger);
+}
+
+.task-danger-hint {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--danger);
+}
+
+/* §二十三：弯引号警示行（文案 + 一键修正按钮同行） */
+.task-smartquote-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.task-smartquote-row .seg {
+  flex-shrink: 0;
+  font-size: 11px;
+  padding: 2px 8px;
+}
+
+/* 修正按钮 primary：accent 强调同 M2 主按钮语言（二轮微调——`.primary`
+ * 的 accent 样式原本只挂在 actions 容器下，此处需独立生效）。
+ * 附带修复：.task-tpl-row 的「OpenCode 例程」填充按钮 seg primary 同为
+ * 死类（M4 起样式从未生效），一并启用。 */
+.task-smartquote-row .seg.primary,
+.task-tpl-row .seg.primary {
+  background: var(--accent);
+  color: var(--surface);
+  border: 2px solid var(--accent);
+  cursor: pointer;
+}
+
+.task-smartquote-row .seg.primary:hover,
+.task-tpl-row .seg.primary:hover {
+  background: var(--accent-ink);
+  border-color: var(--accent-ink);
+  color: var(--surface);
+}
+
+/* 等宽多行 command / 指令 / 输出（exec 的技术字面量） */
+.task-textarea,
+.task-output {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  border: 2px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 10px;
+}
+
+.task-textarea:focus,
+.task-output:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.task-command-label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+/* 星期过滤勾选行（daily） */
+.task-weekdays {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  font-size: 12px;
+}
+
+.task-weekdays-label {
+  color: var(--ink-soft);
+}
+
+.task-weekday-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+}
+
+/* 执行历史区（§4.7 折叠面板 + 分页 + 状态色点） */
+.task-history-toggle {
+  font-weight: 600;
+}
+
+.task-history-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.task-history-controls select {
+  padding: 5px 10px;
+  min-height: 28px;
+  border: 2px solid var(--line);
+  border-radius: 2px;
+  font-size: 12px;
+  background: var(--surface);
+  color: var(--ink);
+}
+
+/* 分页控件（Part A：自顶部 controls 行移至历史块底部居中——筛选下拉独占顶部） */
+.task-history-pagination {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+/* 行内任务名（004 label 快照；flex:none + 限宽 ellipsis——防被 summary 的
+   flex:1 挤没；旧行 null → 未记录占位，faint 色） */
+.task-history-name {
+  flex: none;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.task-history-name.is-unrecorded {
+  color: var(--ink-faint);
+  font-weight: 400;
+}
+
+.task-history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.task-history-item {
+  border-bottom: 1px dashed var(--line);
+}
+
+/* 行：整行可点展开（button 复位 + flex 布局） */
+.task-history-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 8px 4px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+}
+
+.task-history-row:hover {
+  background: var(--surface-2);
+}
+
+/* 状态色点（ok 绿 · failed 红 · skipped 灰 · running 蓝，M2 token 同源） */
+.task-status-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ink-faint);
+}
+
+.task-status-dot.status-ok {
+  background: var(--ok);
+}
+
+.task-status-dot.status-failed {
+  background: var(--danger);
+}
+
+.task-status-dot.status-skipped {
+  background: var(--ink-faint);
+}
+
+/* running 蓝（§4.7 设计字面；M2 token 无蓝——两主题固定 #4a7fb5） */
+.task-status-dot.status-running {
+  background: #4a7fb5;
+}
+
+.task-history-time {
+  color: var(--ink-faint);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+
+.task-history-summary {
+  flex: 1;
+  min-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-history-status {
+  color: var(--ink-faint);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+
+/* 展开详情：补跑延迟 + 输出尾部（等宽，2KB 内） */
+.task-history-detail {
+  padding: 4px 4px 12px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.task-detail-label {
+  margin: 0;
+  font-size: 11px;
+  color: var(--ink-faint);
+}
+
+.task-output {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 180px;
+  overflow: auto;
+}
+
+/* ---- M7 Todo 插件 ---- */
 .todo-plugin-meta {
   font-size: 12px;
-  color: #6b7280;
-  padding: 4px 2px 10px;
-  border-bottom: 1px dashed #e5e7eb;
-  margin-bottom: 8px;
+  line-height: 1.7;
+  color: var(--ink-faint);
+  padding: 2px 2px 12px;
+  border-bottom: 1px dashed var(--line);
+  margin-bottom: 14px;
 }
 
 .todo-list {
@@ -713,27 +1702,25 @@ body,
   padding: 0;
 }
 
+/* 列表行与提醒页同节奏（10px 8px）；操作组贴右；wrap 同 reminder-item
+ * （R1-supplement-4：四按钮操作组在窄内容下整组折行，不溢出）。 */
 .todo-item {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
-  padding: 8px 6px;
-  border-bottom: 1px dashed #f3f4f6;
+  gap: 10px 12px;
+  padding: 10px 8px;
+  border-bottom: 1px dashed var(--line);
   font-size: 13px;
 }
 
 .todo-item.done .todo-title {
   text-decoration: line-through;
-  color: #9ca3af;
+  color: var(--ink-faint);
 }
 
 .todo-item.done {
   opacity: 0.7;
-}
-
-.todo-check input {
-  width: 16px;
-  height: 16px;
 }
 
 .todo-main {
@@ -741,11 +1728,11 @@ body,
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 4px;
 }
 
 .todo-title {
-  color: #111827;
+  color: var(--ink);
   font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -753,7 +1740,7 @@ body,
 }
 
 .todo-notes {
-  color: #6b7280;
+  color: var(--ink-faint);
   font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -763,43 +1750,46 @@ body,
 .todo-meta {
   display: flex;
   align-items: center;
-  gap: 10px;
-  color: #6b7280;
+  gap: 4px 12px;
+  color: var(--ink-faint);
   font-size: 12px;
   flex-wrap: wrap;
 }
 
 .todo-priority {
-  padding: 1px 6px;
-  border-radius: 8px;
-  background: #f3f4f6;
-  color: #6b7280;
+  padding: 2px 8px;
+  font-size: 11px;
+  background: var(--surface-2);
+  color: var(--ink-soft);
+  white-space: nowrap;
 }
 
 .todo-priority.p2 {
-  background: #fef3c7;
-  color: #b45309;
+  background: var(--surface-2);
+  color: var(--accent-ink);
+  border: 1px solid var(--accent);
 }
 
 .todo-priority.p3 {
-  background: #fee2e2;
-  color: #b91c1c;
+  color: var(--danger);
+  border: 1px solid var(--danger);
 }
 
 .todo-tags code {
   margin-right: 4px;
-  padding: 1px 5px;
-  border-radius: 6px;
-  background: #eef2ff;
-  color: #4338ca;
+  padding: 2px 6px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  color: var(--ink-soft);
   font-size: 11px;
+  font-family: var(--font-mono);
 }
 
 .todo-actions {
   display: inline-flex;
-  gap: 6px;
+  gap: 8px;
+  margin-left: auto;
+  flex: none;
 }
 
-.todo-actions .seg {
-  padding: 4px 10px;
-}
+/* （.seg 按钮规格由基类 .seg 提供——R1-supplement-3） */

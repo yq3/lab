@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>方向 C · 安静升级（现有风格修整）</title>
+<style>
+  :root {
+    --bg: #f5f6f8;
+    --surface: #fff;
+    --ink: #111827;
+    --ink-soft: #6b7280;
+    --ink-faint: #9ca3af;
+    --line: #e5e7eb;
+    --accent: #6366f1;
+    --chart-output: #6366f1;
+    --chart-input: #a5b4fc;
+    --chart-cache: #e0e7ff;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    background: var(--bg);
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", system-ui, sans-serif;
+    color: var(--ink);
+    padding: 20px;
+    -webkit-font-smoothing: antialiased;
+  }
+  .panel { width: 900px; }
+
+  .hd { display: flex; align-items: center; gap: 12px; padding-bottom: 14px; }
+  .mini-cat {
+    width: 24px; height: 26px; flex: none;
+    background-image: url("spritesheet.png");
+    background-size: 192px 234px;
+    background-position: 0 0;
+    image-rendering: pixelated;
+  }
+  .hd-title { font-size: 17px; font-weight: 700; }
+  .hd-sub { font-size: 11px; color: var(--ink-faint); font-family: var(--mono); margin-top: 2px; }
+  .hd-state {
+    margin-left: auto; display: inline-flex; align-items: center; gap: 8px;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 999px;
+    padding: 4px 12px; font-size: 12px; color: var(--ink-soft);
+    box-shadow: 0 1px 3px rgba(0,0,0,.06);
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+
+  .tabs { display: flex; gap: 4px; margin: 6px 0 16px; border-bottom: 1px solid var(--line); }
+  .tab {
+    appearance: none; border: none; background: transparent;
+    padding: 8px 14px; font-size: 14px; color: var(--ink-soft); cursor: pointer;
+    font-family: inherit; border-bottom: 2px solid transparent; margin-bottom: -1px;
+  }
+  .tab.on { color: var(--ink); border-bottom-color: var(--accent); font-weight: 600; }
+
+  .controls { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--surface); }
+  .seg button {
+    appearance: none; border: none; background: transparent; padding: 5px 14px;
+    font-size: 13px; color: var(--ink-soft); cursor: pointer; font-family: inherit;
+  }
+  .seg button.on { background: var(--accent); color: #fff; }
+  .dates { font-size: 12px; color: var(--ink-faint); font-family: var(--mono); }
+
+  .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 14px; }
+  .kpi {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+    padding: 12px 14px; box-shadow: 0 1px 3px rgba(0,0,0,.05);
+  }
+  .kpi-label { font-size: 11px; color: var(--ink-faint); }
+  .kpi-value { font-family: var(--mono); font-size: 22px; font-weight: 700; margin-top: 4px; }
+
+  .card {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+    box-shadow: 0 1px 3px rgba(0,0,0,.05); padding: 14px 16px; margin-bottom: 14px;
+  }
+  .card-title { font-size: 13px; font-weight: 600; color: var(--ink); margin-bottom: 12px; }
+  .legend { display: flex; gap: 14px; font-size: 11px; color: var(--ink-soft); margin-bottom: 10px; }
+  .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; }
+  .bars { display: flex; align-items: flex-end; gap: 18px; height: 140px; padding: 0 4px; border-bottom: 1px solid var(--line); }
+  .bar { flex: 1; display: flex; flex-direction: column-reverse; }
+  .bar > i { display: block; }
+  .bar .b-cache { background: var(--chart-cache); border-radius: 2px 2px 0 0; }
+  .bar .b-input  { background: var(--chart-input); }
+  .bar .b-output { background: var(--chart-output); border-radius: 0 0 2px 2px; }
+  .bar-x { display: flex; gap: 18px; padding: 6px 4px 0; }
+  .bar-x span { flex: 1; text-align: center; font-size: 10px; color: var(--ink-faint); font-family: var(--mono); }
+
+  .bottom { display: grid; grid-template-columns: 1fr 300px; gap: 14px; align-items: start; }
+  .sessions { list-style: none; padding: 0; }
+  .sess {
+    display: flex; align-items: center; gap: 10px; padding: 8px 6px;
+    border-bottom: 1px dashed #f3f4f6; font-size: 13px; cursor: pointer; border-radius: 6px;
+  }
+  .sess:hover { background: #f9fafb; }
+  .caret { color: var(--ink-faint); width: 12px; }
+  .s-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .s-proj { font-size: 11px; color: var(--ink-soft); background: #f3f4f6; border-radius: 4px; padding: 1px 6px; }
+  .s-num { font-family: var(--mono); font-size: 12px; color: var(--ink-soft); }
+  .s-num.strong { color: var(--ink); font-weight: 700; }
+  .sess-detail {
+    display: grid; grid-template-columns: repeat(4, auto); gap: 6px 20px;
+    margin: 0 6px 10px 28px; padding: 10px 12px;
+    background: #f9fafb; border-radius: 6px; font-size: 11px; color: var(--ink-soft);
+  }
+  .sess-detail b { display: block; color: var(--ink-faint); font-weight: 400; font-size: 10px; margin-bottom: 2px; }
+  .sess-detail span { font-family: var(--mono); color: var(--ink); }
+
+  .preview { text-align: center; }
+  .preview-title { font-size: 11px; color: var(--ink-faint); margin-bottom: 10px; }
+  .desk {
+    width: 264px; height: 264px; margin: 0 auto; position: relative;
+    background: repeating-conic-gradient(#e8eaee 0% 25%, #f0f2f5 0% 50%) 0 0 / 24px 24px;
+    border: 1px solid var(--line); border-radius: 10px;
+  }
+  .cat-working {
+    position: absolute; left: 50%; bottom: 34px; transform: translateX(-50%);
+    width: 96px; height: 104px;
+    background-image: url("spritesheet.png");
+    background-size: 768px 936px;
+    background-position: -192px -728px;
+    image-rendering: pixelated;
+  }
+  .bubble {
+    position: absolute; left: 50%; top: 18px; transform: translateX(-50%);
+    max-width: 230px; background: rgba(255,255,255,.96); border: 1px solid var(--line);
+    border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,.18);
+    padding: 6px 12px; font-size: 12px; white-space: nowrap;
+  }
+  .bubble::after {
+    content: ""; position: absolute; left: 26px; bottom: -5px;
+    width: 10px; height: 10px; background: rgba(255,255,255,.96);
+    border-right: 1px solid var(--line); border-bottom: 1px solid var(--line);
+    transform: rotate(45deg);
+  }
+  .preview-note { font-size: 11px; color: var(--ink-faint); margin-top: 10px; line-height: 1.7; }
+</style>
+</head>
+<body>
+<div class="panel">
+
+  <div class="hd">
+    <div class="mini-cat"></div>
+    <div>
+      <div class="hd-title">PulsePet <span style="color:var(--ink-faint);font-weight:400">·</span> 控制面板</div>
+      <div class="hd-sub">v2.0.0-mock · direction C</div>
+    </div>
+    <div class="hd-state"><span class="dot"></span>claude-code · working</div>
+  </div>
+
+  <div class="tabs">
+    <button class="tab on">Token</button>
+    <button class="tab">提醒</button>
+    <button class="tab">Todo</button>
+    <button class="tab">设置</button>
+  </div>
+
+  <div class="controls">
+    <div class="seg">
+      <button class="on">今日</button><button>7 天</button><button>30 天</button><button>自定义</button>
+    </div>
+    <span class="dates">08-17 → 08-23</span>
+  </div>
+
+  <div class="kpis">
+    <div class="kpi"><div class="kpi-label">总量</div><div class="kpi-value">12.4M</div></div>
+    <div class="kpi"><div class="kpi-label">输入</div><div class="kpi-value">3.1M</div></div>
+    <div class="kpi"><div class="kpi-label">输出</div><div class="kpi-value">0.8M</div></div>
+    <div class="kpi"><div class="kpi-label">费用</div><div class="kpi-value">$12.40</div></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">每日用量</div>
+    <div class="legend">
+      <span><i style="background:var(--chart-output)"></i>output</span>
+      <span><i style="background:var(--chart-input)"></i>input</span>
+      <span><i style="background:var(--chart-cache)"></i>cache read</span>
+    </div>
+    <div class="bars">
+      <div class="bar"><i class="b-cache" style="height:43px"></i><i class="b-input" style="height:15px"></i><i class="b-output" style="height:3px"></i></div>
+      <div class="bar"><i class="b-cache" style="height:53px"></i><i class="b-input" style="height:19px"></i><i class="b-output" style="height:4px"></i></div>
+      <div class="bar"><i class="b-cache" style="height:37px"></i><i class="b-input" style="height:12px"></i><i class="b-output" style="height:3px"></i></div>
+      <div class="bar"><i class="b-cache" style="height:81px"></i><i class="b-input" style="height:29px"></i><i class="b-output" style="height:7px"></i></div>
+      <div class="bar"><i class="b-cache" style="height:73px"></i><i class="b-input" style="height:24px"></i><i class="b-output" style="height:5px"></i></div>
+      <div class="bar"><i class="b-cache" style="height:97px"></i><i class="b-input" style="height:35px"></i><i class="b-output" style="height:8px"></i></div>
+      <div class="bar"><i class="b-cache" style="height:48px"></i><i class="b-input" style="height:16px"></i><i class="b-output" style="height:4px"></i></div>
+    </div>
+    <div class="bar-x">
+      <span>08-17</span><span>08-18</span><span>08-19</span><span>08-20</span><span>08-21</span><span>08-22</span><span>08-23</span>
+    </div>
+  </div>
+
+  <div class="bottom">
+    <div class="card" style="margin-bottom:0">
+      <div class="card-title">会话</div>
+      <ul class="sessions">
+        <li class="sess"><span class="caret">▾</span><span class="s-title">V2 范围讨论与裁定</span><span class="s-proj">lab</span><span class="s-num strong">4.7M</span><span class="s-num">$5.12</span></li>
+        <li class="sess-detail">
+          <div><b>模型</b><span>glm-5.3</span></div>
+          <div><b>input</b><span>1.1M</span></div>
+          <div><b>output</b><span>362K</span></div>
+          <div><b>cache read</b><span>3.2M</span></div>
+        </li>
+        <li class="sess"><span class="caret">▸</span><span class="s-title">修复拖拽跨屏问题</span><span class="s-proj">lab</span><span class="s-num">2.1M</span><span class="s-num">$1.83</span></li>
+        <li class="sess"><span class="caret">▸</span><span class="s-title">排查宠物不动</span><span class="s-proj">pulse-pet</span><span class="s-num">0.9M</span><span class="s-num">$0.65</span></li>
+      </ul>
+    </div>
+
+    <div class="preview">
+      <div class="preview-title">宠物窗口预览</div>
+      <div class="desk">
+        <div class="cat-working"></div>
+        <div class="bubble">该喝水啦 💧</div>
+      </div>
+      <div class="preview-note">现有 v1 风格修整：统一间距/层级/圆角<br>（对照用，非推荐方向）</div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

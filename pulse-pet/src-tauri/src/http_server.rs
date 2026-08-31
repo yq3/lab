@@ -15,25 +15,44 @@
 //! （经 Tauri event 推给前端），不明文落盘（TC-SEC-06）。
 
 use crate::plog;
+use std::collections::HashMap;
 use std::io::Read;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
+use crate::agents;
 use crate::runtime;
 use crate::session_state::{Kind, SessionStateMachine};
 
-/// 显示状态变化回调（lib.rs 里封成 Tauri event emit）。
-pub type StateChangeCallback = Arc<dyn Fn(Kind) + Send + Sync>;
+/// 显示状态变化回调（lib.rs 里封成 Tauri event emit；携带归属 agent，
+/// v2 M1 `pulsepet://state` payload `{kind, agent}`，V2-DESIGN §1.5）。
+pub type StateChangeCallback = Arc<dyn Fn(Kind, &str) + Send + Sync>;
 
-/// idle 事件回调（M3 token 汇报：`/state` 收到 `kind == idle` 时以 session_id 调用，
-/// lib.rs 里做 opencode.db 查询 + 气泡下发 + success 状态注入，DESIGN §4.3）。
-pub type IdleHook = Arc<dyn Fn(&str) + Send + Sync>;
+/// idle 事件回调（M3 token 汇报：`/state` 收到 `kind == idle` 时以
+/// `(agent, session_id)` 调用；v2 M1 起分流——仅 opencode 走 token 汇报，
+/// lib.rs 里做 opencode.db 查询 + 气泡下发 + success 状态注入，DESIGN §4.3 /
+/// V2-DESIGN §1.5 / TC-INT-11）。
+pub type IdleHook = Arc<dyn Fn(&str, &str) + Send + Sync>;
 
-/// 显示状态去重通知器：仅当合并后的显示状态真正变化时回调一次。
+/// per-agent 最近事件时刻（v2 M1 AgentActivity，V2-DESIGN §1.5 P2-3：
+/// `lastEventAt` 的数据源——不能复用 `SessionRecord.last_event_at`（per-session
+/// 且回收即删，30s 后丢失）。事件 apply 时更新，`integrations_status` 读取；
+/// managed state，lib.rs 在窗口创建循环之前 `app.manage()`（issue #9）。
+pub type AgentActivity = Arc<Mutex<HashMap<String, SystemTime>>>;
+
+/// 新建空的 AgentActivity（lib.rs 与测试共用）。
+pub fn new_agent_activity() -> AgentActivity {
+    Arc::new(Mutex::new(HashMap::new()))
+}
+
+/// 显示状态去重通知器：仅当合并后的显示状态 `(kind, agent)` 真正变化时回调一次。
+/// v2 M2（P1-1 拉前，V2-DESIGN §2.4/§2.7）：去重键从 kind 改为 `(kind, agent)`
+/// ——同 kind 换 agent 也发事件（面板状态芯片的 agent 跟随依赖此改造；按 kind
+/// 去重时 kind 长期不变期 agent 错值会永久停留）。
 pub struct DisplayNotifier {
-    last: Mutex<Option<Kind>>,
+    last: Mutex<Option<(Kind, String)>>,
     on_change: StateChangeCallback,
 }
 
@@ -45,16 +64,17 @@ impl DisplayNotifier {
         }
     }
 
-    /// 计算当前显示状态，变化时触发回调。
+    /// 计算当前显示状态，`(kind, agent)` 变化时以 `(kind, agent)` 触发回调。
+    /// v2 M6：display 注入 `Instant::now()`（两层合并成为时间函数，V2-DESIGN §6.1）。
     pub fn notify(&self, state: &Arc<Mutex<SessionStateMachine>>) {
         let display = {
             let st = state.lock().unwrap_or_else(|p| p.into_inner());
-            st.display()
+            st.display(Instant::now())
         };
         let mut last = self.last.lock().unwrap_or_else(|p| p.into_inner());
-        if *last != Some(display) {
-            *last = Some(display);
-            (self.on_change)(display);
+        if *last != Some((display.kind, display.agent.clone())) {
+            *last = Some((display.kind, display.agent.clone()));
+            (self.on_change)(display.kind, &display.agent);
         }
     }
 }
@@ -127,17 +147,26 @@ impl Default for RateLimiter {
 }
 
 /// 一条合法 `/state` 事件（apply 到状态机）。
-/// `agent/project/detail` 为可选元数据：v1 校验通过但不落盘（M3 token 统计用 project、
-/// M4 气泡用 detail），故标注 allow(dead_code)。
+/// `project/detail` 为可选元数据。v2 M3 起 `detail` 透传回调（`DetailHook`，
+/// N8：仅字符串非空校验、不落盘不解析——tpl 合法性与再净化在前端桥层）。
+/// `agent` v2 M1 起为白名单消费值。
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct StateEvent {
     pub session_id: String,
     pub kind: Kind,
     pub agent: String,
+    /// v1 起校验不落盘（未来元数据扩展位）。
+    #[allow(dead_code)]
     pub project: Option<String>,
     pub detail: Option<String>,
 }
+
+/// v2 M3（V2-DESIGN §3.7.2）：状态事件携带非空 detail 时的透传回调
+/// （lib.rs 接 `emit_to("pet", "pulsepet://tool-bubble")`；App 侧过滤，
+/// Rust 不判开关）。
+/// v2 M6（V2-DESIGN §6.2）：回调签名 `(detail, agent)`——`/state` 请求已带
+/// agent，透传链路 M3 只透传 detail，本里程碑补齐（气泡徽标 [oc]/[cc] 数据源）。
+pub type DetailHook = Arc<dyn Fn(&str, &str) + Send + Sync>;
 
 /// 路由处理结果：要么直接响应，要么是一条待 apply 的合法事件。
 pub enum HandleOutcome {
@@ -241,7 +270,10 @@ fn get_str(obj: &serde_json::Map<String, serde_json::Value>, key: &str) -> Optio
     obj.get(key).and_then(|v| v.as_str()).map(|s| s.to_string())
 }
 
-/// 解析并校验 `/state` body：`sessionId/kind/agent` 必填、`kind` 合法。
+/// 解析并校验 `/state` body：`sessionId/kind/agent` 必填、`kind` 合法、
+/// `agent` 已注册（v2 M1 白名单语义，未知值 400——防 typo 幽灵 session，
+/// TC-INT-10-1；v2 registry 收敛为查 agents::AGENTS 注册表，新增 agent
+/// 一行注册即自动放行）。
 fn parse_state_event(body: &[u8]) -> Result<StateEvent, String> {
     let v: serde_json::Value =
         serde_json::from_slice(body).map_err(|_| "invalid json".to_string())?;
@@ -250,6 +282,9 @@ fn parse_state_event(body: &[u8]) -> Result<StateEvent, String> {
     let kind_str = get_str(obj, "kind").ok_or("missing kind")?;
     let agent = get_str(obj, "agent").ok_or("missing agent")?;
     let kind = Kind::parse(&kind_str).ok_or("invalid kind")?;
+    if agents::find(&agent).is_none() {
+        return Err(format!("invalid agent: {agent}"));
+    }
     let project = get_str(obj, "project");
     let detail = get_str(obj, "detail");
     Ok(StateEvent {
@@ -301,7 +336,9 @@ pub fn start(
     state: Arc<Mutex<SessionStateMachine>>,
     notifier: Arc<DisplayNotifier>,
     idle_hook: IdleHook,
+    detail_hook: DetailHook,
     token: String,
+    activity: AgentActivity,
     config: HttpConfig,
 ) -> Result<HttpServerHandle, String> {
     std::fs::create_dir_all(&config.runtime_dir)
@@ -340,7 +377,16 @@ pub fn start(
                         let _ = request.respond(json_response(429, r#"{"error":"rate limited"}"#));
                         continue;
                     }
-                    handle_incoming(request, &token, &state, &notifier, &idle_hook, config.max_body);
+                    handle_incoming(
+                        request,
+                        &token,
+                        &state,
+                        &notifier,
+                        &idle_hook,
+                        &detail_hook,
+                        &activity,
+                        config.max_body,
+                    );
                 }
                 Ok(None) => continue, // accept 超时，回到循环检查停机标志
                 Err(e) => {
@@ -363,6 +409,8 @@ fn handle_incoming(
     state: &Arc<Mutex<SessionStateMachine>>,
     notifier: &Arc<DisplayNotifier>,
     idle_hook: &IdleHook,
+    detail_hook: &DetailHook,
+    activity: &AgentActivity,
     max_body: usize,
 ) {
     let method = request.method().as_str().to_string();
@@ -391,18 +439,50 @@ fn handle_incoming(
         max_body,
     ) {
         HandleOutcome::Respond { status, body } => {
+            // 拒绝类必记（v2 M1：agent 白名单 400 等；错误串含原因与非法值，
+            // 如 "invalid agent: claude"）。正常 200 事件路径不逐条打日志
+            //（高频，防冲刷 1MB 轮转日志）；401/429 属客户端异常行为也记，
+            // 便于发现误配插件/扫描。
+            if status == 400 || status == 401 || status == 413 {
+                plog!("[pulsepet] {method} {path} rejected ({status}): {body}");
+            }
             let _ = request.respond(json_response(status, &body));
         }
         HandleOutcome::State(ev) => {
             {
+                // v2 M1 复合 key：`agent:sessionId` 落状态机（TC-INT-10-2）
                 let mut st = state.lock().unwrap_or_else(|p| p.into_inner());
-                st.apply_event(&ev.session_id, ev.kind, Instant::now());
+                st.apply_event(&ev.agent, &ev.session_id, ev.kind, Instant::now());
             }
-            // M3 token 汇报（TC-TK-10/11/12）：idle 时先让 hook 查库并可能注入
-            // success 状态，再统一 notify——前端只收到一次合并后的状态事件，
-            // 避免 idle→success 抖动。
+            // AgentActivity 更新 per-agent 最近事件时刻（lastEventAt 数据源，P2-3）；
+            // 首次见到新 agent 记一条（一次性事件，排障时确认接入打通的第一信号）
+            let first_seen_agent = {
+                let mut act = activity.lock().unwrap_or_else(|p| p.into_inner());
+                let first = !act.contains_key(&ev.agent);
+                act.insert(ev.agent.clone(), SystemTime::now());
+                first
+            };
+            if first_seen_agent {
+                plog!(
+                    "[pulsepet] first event from agent '{}' (session {}), activity tracking started",
+                    ev.agent,
+                    ev.session_id
+                );
+            }
+            // M3 token 汇报（TC-TK-10/11/12）：idle 时先让 hook（按 agent 分流，
+            // TC-INT-11）查库并可能注入 success 状态，再统一 notify——前端只收到
+            // 一次合并后的状态事件，避免 idle→success 抖动。
             if ev.kind == Kind::Idle {
-                idle_hook(&ev.session_id);
+                idle_hook(&ev.agent, &ev.session_id);
+            }
+            // v2 M3（§3.7.2，N8）：含非空 detail 的状态事件 → 透传回调（lib.rs
+            // emit_to("pet", "pulsepet://tool-bubble")）。仅字符串非空校验，
+            // 不解析不落盘；App 侧过滤（Rust 不判开关）。
+            // v2 M6（§6.2）：agent 一并透传（(detail, agent)）。
+            if let Some(d) = ev.detail.as_deref() {
+                if !d.trim().is_empty() {
+                    detail_hook(d, &ev.agent);
+                }
             }
             notifier.notify(state);
             let _ = request.respond(json_response(200, r#"{"action":null}"#));
@@ -513,7 +593,10 @@ mod tests {
 
     #[test]
     fn body_at_limit_is_accepted() {
-        let body = format!(r#"{{"sessionId":"s","kind":"idle","agent":"a","detail":"{}"}}"#, "x".repeat(16 * 1024 - 60));
+        // 恰 16KB（"opencode" 值替换旧用例的 "a" 后按模板实际字节长校准 padding：
+        // 模板固定部分 62 字节）
+        let body = format!(r#"{{"sessionId":"s","kind":"idle","agent":"opencode","detail":"{}"}}"#, "x".repeat(16 * 1024 - 62));
+        assert_eq!(body.len(), 16 * 1024);
         match handle_request("POST", "/state", Some(TOKEN), TOKEN, body.as_bytes(), 16 * 1024) {
             HandleOutcome::State(_) => {}
             HandleOutcome::Respond { status, .. } => panic!("expected accept, got {status}"),
@@ -551,12 +634,16 @@ mod tests {
 
     // ---- 集成测试：真实启动 server，用 TcpStream 打请求 ----
 
-    fn start_test_server(rate_limit: u32) -> HttpServerHandle {
+    fn start_test_server(
+        rate_limit: u32,
+    ) -> (HttpServerHandle, Arc<Mutex<SessionStateMachine>>, AgentActivity) {
         let tmp = std::env::temp_dir().join(format!("pulsepet-http-test-{}", std::process::id()));
         std::fs::create_dir_all(&tmp).unwrap();
         let state = Arc::new(Mutex::new(SessionStateMachine::new()));
-        let notifier = Arc::new(DisplayNotifier::new(Arc::new(|_| {})));
-        let idle_hook: IdleHook = Arc::new(|_| {});
+        let notifier = Arc::new(DisplayNotifier::new(Arc::new(|_, _| {})));
+        let idle_hook: IdleHook = Arc::new(|_, _| {});
+        let detail_hook: DetailHook = Arc::new(|_, _| {});
+        let activity = new_agent_activity();
         let cfg = HttpConfig {
             runtime_dir: tmp,
             preferred_port: 0, // 随机端口
@@ -565,7 +652,17 @@ mod tests {
             rate_window: Duration::from_secs(1),
             accept_timeout: Duration::from_millis(200),
         };
-        start(state, notifier, idle_hook, TOKEN.to_string(), cfg).unwrap()
+        let h = start(
+            state.clone(),
+            notifier,
+            idle_hook,
+            detail_hook,
+            TOKEN.to_string(),
+            activity.clone(),
+            cfg,
+        )
+        .unwrap();
+        (h, state, activity)
     }
 
     fn raw_request(port: u16, req: &str) -> (u16, String) {
@@ -597,7 +694,7 @@ mod tests {
 
     #[test]
     fn integration_routes_and_auth() {
-        let h = start_test_server(1000);
+        let (h, _, _) = start_test_server(1000);
         // /health 无鉴权 200
         let (s, _) = raw_request(h.port, "GET /health HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
         assert_eq!(s, 200);
@@ -608,10 +705,10 @@ mod tests {
         );
         assert_eq!(s, 401);
         // /state 错 token 401
-        let (s, _) = post_state(h.port, "wrong", r#"{"sessionId":"s","kind":"idle","agent":"a"}"#);
+        let (s, _) = post_state(h.port, "wrong", r#"{"sessionId":"s","kind":"idle","agent":"opencode"}"#);
         assert_eq!(s, 401);
         // /state 对 token 200 {action:null}
-        let (s, body) = post_state(h.port, TOKEN, r#"{"sessionId":"s","kind":"idle","agent":"a"}"#);
+        let (s, body) = post_state(h.port, TOKEN, r#"{"sessionId":"s","kind":"idle","agent":"opencode"}"#);
         assert_eq!(s, 200);
         assert_eq!(body, r#"{"action":null}"#);
         // 未知路由 404
@@ -629,16 +726,16 @@ mod tests {
 
     #[test]
     fn integration_body_limit_and_validation() {
-        let h = start_test_server(1000);
+        let (h, _, _) = start_test_server(1000);
         // 缺 kind → 400
-        let (s, _) = post_state(h.port, TOKEN, r#"{"sessionId":"s","agent":"a"}"#);
+        let (s, _) = post_state(h.port, TOKEN, r#"{"sessionId":"s","agent":"opencode"}"#);
         assert_eq!(s, 400);
         // kind 非法 → 400
-        let (s, _) = post_state(h.port, TOKEN, r#"{"sessionId":"s","kind":"oops","agent":"a"}"#);
+        let (s, _) = post_state(h.port, TOKEN, r#"{"sessionId":"s","kind":"oops","agent":"opencode"}"#);
         assert_eq!(s, 400);
         // 超 16KB → 413（服务不崩）
         let big = "x".repeat(16 * 1024 + 1);
-        let (s, _) = post_state(h.port, TOKEN, &format!(r#"{{"sessionId":"s","kind":"idle","agent":"a","detail":"{big}"}}"#));
+        let (s, _) = post_state(h.port, TOKEN, &format!(r#"{{"sessionId":"s","kind":"idle","agent":"opencode","detail":"{big}"}}"#));
         assert_eq!(s, 413);
         h.shutdown();
     }
@@ -646,11 +743,11 @@ mod tests {
     #[test]
     fn integration_rate_limit_shared() {
         // rate_limit=2，快速 6 连 → 前 2 个 200，其后 429（全局共享，非 per-session）
-        let h = start_test_server(2);
+        let (h, _, _) = start_test_server(2);
         let mut allowed = 0;
         let mut rejected = 0;
         for _ in 0..6 {
-            let (s, _) = post_state(h.port, TOKEN, r#"{"sessionId":"s","kind":"idle","agent":"a"}"#);
+            let (s, _) = post_state(h.port, TOKEN, r#"{"sessionId":"s","kind":"idle","agent":"opencode"}"#);
             match s {
                 200 => allowed += 1,
                 429 => rejected += 1,
@@ -666,7 +763,7 @@ mod tests {
     fn integration_single_use_connection() {
         // TC-EV-14「一次性」：插件每次请求带 `Connection: close`，tiny_http 响应后即
         // 关闭连接（EOF），不 keep-alive。
-        let h = start_test_server(1000);
+        let (h, _, _) = start_test_server(1000);
         let mut stream = TcpStream::connect(("127.0.0.1", h.port)).unwrap();
         stream
             .set_read_timeout(Some(Duration::from_secs(5)))
@@ -692,7 +789,7 @@ mod tests {
     fn integration_accept_timeout_cycles_do_not_kill_server() {
         // accept_timeout=200ms；空转 >3 个超时周期后服务仍正常响应新连接
         //（锁定「recv_timeout 超时 → 循环继续」语义，防止回归成超时/错误即退出）。
-        let h = start_test_server(1000);
+        let (h, _, _) = start_test_server(1000);
         std::thread::sleep(Duration::from_millis(700));
         let (s, _) = raw_request(
             h.port,
@@ -707,7 +804,7 @@ mod tests {
         // 客户端发送不完整请求后挂起（模拟插件进程被杀/网络断开的半开连接）：
         // 客户端关闭（对应插件侧 AbortSignal 3s 兜底的 close）后，服务恢复响应
         // 新连接（accept 错误记录日志并继续，P3-①）。
-        let h = start_test_server(1000);
+        let (h, _, _) = start_test_server(1000);
         let mut dangling = TcpStream::connect(("127.0.0.1", h.port)).unwrap();
         dangling
             .set_read_timeout(Some(Duration::from_secs(5)))
@@ -729,8 +826,8 @@ mod tests {
 
     #[test]
     fn integration_idle_event_invokes_idle_hook_with_session_id() {
-        // M3 token 汇报链路：/state kind=idle → idle_hook(sessionId)（TC-TK-10 入口）；
-        // 非 idle 事件不触发。
+        // M3 token 汇报链路：/state kind=idle → idle_hook(agent, sessionId)
+        // （TC-TK-10 入口）；非 idle 事件不触发。
         let tmp = std::env::temp_dir().join(format!(
             "pulsepet-http-idle-{}-{}",
             std::process::id(),
@@ -741,14 +838,14 @@ mod tests {
         ));
         std::fs::create_dir_all(&tmp).unwrap();
         let state = Arc::new(Mutex::new(SessionStateMachine::new()));
-        let notifier = Arc::new(DisplayNotifier::new(Arc::new(|_| {})));
-        let seen = Arc::new(Mutex::new(Vec::<String>::new()));
+        let notifier = Arc::new(DisplayNotifier::new(Arc::new(|_, _| {})));
+        let seen = Arc::new(Mutex::new(Vec::<(String, String)>::new()));
         let seen_hook = seen.clone();
-        let idle_hook: IdleHook = Arc::new(move |sid: &str| {
+        let idle_hook: IdleHook = Arc::new(move |agent: &str, sid: &str| {
             seen_hook
                 .lock()
                 .unwrap_or_else(|p| p.into_inner())
-                .push(sid.to_string());
+                .push((agent.to_string(), sid.to_string()));
         });
         let cfg = HttpConfig {
             runtime_dir: tmp,
@@ -758,11 +855,23 @@ mod tests {
             rate_window: Duration::from_secs(1),
             accept_timeout: Duration::from_millis(200),
         };
-        let h = start(state, notifier, idle_hook, TOKEN.to_string(), cfg).unwrap();
+        let h = start(
+            state,
+            notifier,
+            idle_hook,
+            Arc::new(|_, _| {}),
+            TOKEN.to_string(),
+            new_agent_activity(),
+            cfg,
+        )
+        .unwrap();
         // 非 idle → 不触发
         post_state(h.port, TOKEN, r#"{"sessionId":"ses_a","kind":"working","agent":"opencode"}"#);
-        assert!(seen.lock().unwrap().is_empty(), "working 不应触发 idle hook");
-        // idle → 触发且带对 sessionId
+        assert!(
+            seen.lock().unwrap().is_empty(),
+            "working 不应触发 idle hook"
+        );
+        // idle → 触发且带对 (agent, sessionId)
         post_state(h.port, TOKEN, r#"{"sessionId":"ses_a","kind":"idle","agent":"opencode"}"#);
         // hook 在响应前的同步路径上调用；小窗口等待兜底
         for _ in 0..50 {
@@ -773,9 +882,167 @@ mod tests {
         }
         assert_eq!(
             seen.lock().unwrap().as_slice(),
-            ["ses_a"],
-            "idle 事件应以 sessionId 触发 idle hook"
+            [("opencode".to_string(), "ses_a".to_string())],
+            "idle 事件应以 (agent, sessionId) 触发 idle hook"
         );
         h.shutdown();
+    }
+
+    /// v2 M3（§3.7.2，N8/TC-M3-14-4）：含非空 detail 的状态事件 → detail_hook
+    /// 原样透传字符串（不解析——含 `:` 的 tpl 协议串照传）；无/空 detail 不触发。
+    /// v2 M6（§6.2，TC-M6-03-1）：agent 随 (detail, agent) 一并透传。
+    #[test]
+    fn integration_state_detail_forwards_to_detail_hook() {
+        let tmp = std::env::temp_dir().join(format!("pulsepet-http-det-{}", std::process::id()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let state = Arc::new(Mutex::new(SessionStateMachine::new()));
+        let notifier = Arc::new(DisplayNotifier::new(Arc::new(|_, _| {})));
+        let seen = Arc::new(Mutex::new(Vec::<(String, String)>::new()));
+        let seen_hook = seen.clone();
+        let detail_hook: DetailHook = Arc::new(move |d: &str, agent: &str| {
+            seen_hook
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .push((d.to_string(), agent.to_string()));
+        });
+        let cfg = HttpConfig {
+            runtime_dir: tmp,
+            preferred_port: 0,
+            max_body: 16 * 1024,
+            rate_limit: 1000,
+            rate_window: Duration::from_secs(1),
+            accept_timeout: Duration::from_millis(200),
+        };
+        let h = start(
+            state,
+            notifier,
+            Arc::new(|_, _| {}),
+            detail_hook,
+            TOKEN.to_string(),
+            new_agent_activity(),
+            cfg,
+        )
+        .unwrap();
+        // 带 detail 的状态事件（任意 kind——工具播报挂在 tool.execute.before →
+        // editing/working/testing）→ 原样透传（含 ":" 不解析）
+        post_state(h.port, TOKEN, r#"{"sessionId":"ses_a","kind":"editing","agent":"opencode","detail":"edit:V2-DESIGN.md"}"#);
+        // 无 detail / 空 detail / 纯空白 detail → 不触发
+        post_state(h.port, TOKEN, r#"{"sessionId":"ses_a","kind":"working","agent":"opencode"}"#);
+        post_state(h.port, TOKEN, r#"{"sessionId":"ses_a","kind":"working","agent":"opencode","detail":""}"#);
+        post_state(h.port, TOKEN, r#"{"sessionId":"ses_a","kind":"working","agent":"opencode","detail":"   "}"#);
+        for _ in 0..50 {
+            if !seen.lock().unwrap().is_empty() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(
+            seen.lock().unwrap().as_slice(),
+            [("edit:V2-DESIGN.md".to_string(), "opencode".to_string())],
+            "仅非空 detail 触发且 (detail, agent) 原样透传（M6 徽标数据源）"
+        );
+        h.shutdown();
+    }
+
+    // ---- v2 M1：agent 白名单 / 复合 key / AgentActivity（TC-INT-10） ----
+
+    #[test]
+    fn state_unknown_agent_returns_400() {
+        // TC-INT-10-1：白名单外值（如 typo 的 "claude"）→ 400，防幽灵 session
+        for agent in ["claude", "ClaudeCode", "codex", "", "a"] {
+            let body = format!(r#"{{"sessionId":"s","kind":"idle","agent":"{agent}"}}"#);
+            match handle_request("POST", "/state", Some(TOKEN), TOKEN, body.as_bytes(), 16 * 1024) {
+                HandleOutcome::Respond { status, body } => {
+                    assert_eq!(status, 400, "agent {agent:?} 应被拒绝，body: {body}");
+                }
+                _ => panic!("expected 400 for agent {agent:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn state_whitelist_accepts_both_agents() {
+        // TC-INT-10-1：注册表内 agent 合法（v2 registry：遍历 agents::AGENTS，
+        // 新增 agent 自动纳入本用例）
+        for spec in agents::AGENTS {
+            let agent = spec.id;
+            let body = format!(r#"{{"sessionId":"s","kind":"editing","agent":"{agent}"}}"#);
+            match handle_request("POST", "/state", Some(TOKEN), TOKEN, body.as_bytes(), 16 * 1024) {
+                HandleOutcome::State(ev) => assert_eq!(ev.agent, agent),
+                _ => panic!("expected state event for agent {agent}"),
+            }
+        }
+    }
+
+    #[test]
+    fn integration_composite_key_and_agent_activity() {
+        // TC-INT-10-2/4：两合法 agent 各自以复合 key 落状态机（同 sessionId 不串）；
+        // AgentActivity 更新 per-agent 最近事件时刻。
+        let (h, state, activity) = start_test_server(1000);
+        let (s, _) = post_state(h.port, TOKEN, r#"{"sessionId":"ses_1","kind":"editing","agent":"opencode"}"#);
+        assert_eq!(s, 200);
+        let (s, _) = post_state(h.port, TOKEN, r#"{"sessionId":"ses_1","kind":"error","agent":"claude-code"}"#);
+        assert_eq!(s, 200);
+        // 等待后台线程处理（响应返回时已 apply，但 activity 断言前稍等兜底）
+        std::thread::sleep(Duration::from_millis(100));
+        {
+            let st = state.lock().unwrap();
+            let d = st.display(Instant::now());
+            assert_eq!(d.kind, Kind::Error, "error 应覆盖 editing（跨 agent 合并）");
+            assert_eq!(d.agent, "claude-code");
+        }
+        let act = activity.lock().unwrap();
+        assert!(act.contains_key("opencode"), "AgentActivity 应记录 opencode");
+        assert!(act.contains_key("claude-code"), "AgentActivity 应记录 claude-code");
+        assert_eq!(act.len(), 2);
+        h.shutdown();
+    }
+
+    // ---- v2 M2（TC-UI-06）：DisplayNotifier 去重键 (kind, agent) 拉前 ----
+
+    #[test]
+    fn notifier_dedups_on_kind_and_agent_pair() {
+        use std::sync::Mutex as StdMutex;
+        let fired = Arc::new(StdMutex::new(Vec::<(String, String)>::new()));
+        let sink = fired.clone();
+        let notifier = DisplayNotifier::new(Arc::new(move |kind, agent| {
+            sink.lock().unwrap().push((kind.as_str().to_string(), agent.to_string()));
+        }));
+        let state = Arc::new(Mutex::new(SessionStateMachine::new()));
+        let idle_to = Duration::from_secs(30);
+        let transient_to = Duration::from_secs(30);
+
+        // 同 (kind, agent) 重复 notify → 只发一次
+        {
+            let mut st = state.lock().unwrap();
+            st.apply_event("opencode", "s1", Kind::Idle, Instant::now());
+        }
+        notifier.notify(&state);
+        notifier.notify(&state);
+        assert_eq!(*fired.lock().unwrap(), vec![("idle".into(), "opencode".into())]);
+
+        // 同 kind 换 agent（TC-UI-06：整日 idle 期间另一 agent 会话起事件——
+        // 先让旧 session 走完 30s idle 回收，display 唯一归属新 agent）→ 仍发事件。
+        // M1 按 kind 去重时此事件被吞（芯片 agent 永久停留）——P1-1 拉前修复的钉子。
+        {
+            let mut st = state.lock().unwrap();
+            st.tick(
+                Instant::now() + Duration::from_secs(31),
+                transient_to,
+                idle_to,
+            );
+            st.apply_event("claude-code", "s2", Kind::Idle, Instant::now() + Duration::from_secs(31));
+        }
+        notifier.notify(&state);
+        assert_eq!(
+            *fired.lock().unwrap(),
+            vec![
+                ("idle".into(), "opencode".into()),
+                ("idle".into(), "claude-code".into()),
+            ],
+            "同 kind 换 agent 必须发事件（状态芯片 agent 跟随）"
+        );
+        notifier.notify(&state);
+        assert_eq!(fired.lock().unwrap().len(), 2, "同 (kind, agent) 二元组去重");
     }
 }

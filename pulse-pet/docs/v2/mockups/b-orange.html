@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>方向 B3 · 像素夜灯（深色 · 暖橘）</title>
+<style>
+  :root {
+    --bg: #211d19;
+    --surface: #2b2620;
+    --surface-2: #352f28;
+    --ink: #f1e9db;
+    --ink-soft: #b3a896;
+    --ink-faint: #7d7466;
+    --line: #463f35;
+    --accent: #e0763c;
+    --accent-ink: #f08e57;
+    --ok: #7fb58a;
+    --danger: #d9524d;
+    --chart-output: #e0763c;
+    --chart-input: #9a5b4a;
+    --chart-cache: #4e463b;
+    --shadow-hard: 2px 2px 0 rgba(0, 0, 0, 0.45);
+    --shadow-hard-lg: 3px 3px 0 rgba(0, 0, 0, 0.35);
+    --pet-world-surface: #f6efe2;
+    --pet-world-line: #17130f;
+    --pet-world-shadow: 2px 2px 0 rgba(23, 19, 15, 0.8);
+    --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    background: var(--bg);
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", system-ui, sans-serif;
+    color: var(--ink);
+    padding: 20px;
+    -webkit-font-smoothing: antialiased;
+  }
+  .panel { width: 900px; }
+
+  .hd {
+    display: flex; align-items: center; gap: 12px;
+    padding-bottom: 14px; border-bottom: 2px solid var(--ink-faint);
+  }
+  .mini-cat {
+    width: 24px; height: 26px; flex: none;
+    background-image: url("spritesheet.png");
+    background-size: 192px 234px;
+    background-position: 0 0;
+    image-rendering: pixelated;
+    filter: brightness(.94) saturate(.92);
+  }
+  .hd-title { font-size: 17px; font-weight: 700; letter-spacing: .02em; }
+  .hd-sub { font-size: 11px; color: var(--ink-faint); font-family: var(--font-mono); margin-top: 2px; }
+  .hd-state {
+    margin-left: auto; display: inline-flex; align-items: center; gap: 8px;
+    border: 2px solid var(--ink-faint); background: var(--surface);
+    padding: 4px 10px; box-shadow: 2px 2px 0 rgba(0,0,0,.45);
+    font-size: 12px; color: var(--ink-soft);
+  }
+  .dot { width: 8px; height: 8px; background: var(--accent); flex: none; }
+
+  .tabs { display: flex; gap: 8px; margin: 14px 0 16px; }
+  .tab {
+    appearance: none; border: 2px solid var(--line); background: var(--surface);
+    padding: 6px 16px; font-size: 13px; color: var(--ink-soft); cursor: pointer;
+    font-family: inherit;
+  }
+  .tab.on {
+    border-color: var(--accent); color: var(--ink); font-weight: 700;
+    box-shadow: 2px 2px 0 rgba(232,161,60,.35);
+    position: relative; top: -1px;
+  }
+
+  .controls { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+  .seg { display: inline-flex; border: 2px solid var(--ink-faint); background: var(--surface); }
+  .seg button {
+    appearance: none; border: none; background: transparent; padding: 5px 14px;
+    font-size: 13px; color: var(--ink-soft); cursor: pointer; font-family: inherit;
+    border-right: 1px solid var(--line);
+  }
+  .seg button:last-child { border-right: none; }
+  .seg button.on { background: var(--accent); color: #241d12; font-weight: 700; }
+  .dates { font-size: 12px; color: var(--ink-faint); font-family: var(--font-mono); }
+
+  .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 14px; }
+  .kpi {
+    background: var(--surface); border: 2px solid var(--line);
+    padding: 12px 14px; box-shadow: 3px 3px 0 rgba(0,0,0,.35);
+  }
+  .kpi.first { border-color: var(--accent); }
+  .kpi-label { font-size: 11px; color: var(--ink-faint); letter-spacing: .08em; }
+  .kpi-value { font-family: var(--font-mono); font-size: 22px; font-weight: 700; margin-top: 4px; color: var(--ink); }
+  .kpi.first .kpi-value { color: var(--accent-ink); }
+
+  .card {
+    background: var(--surface); border: 2px solid var(--line);
+    box-shadow: 3px 3px 0 rgba(0,0,0,.35); padding: 14px 16px; margin-bottom: 14px;
+  }
+  .card-title { font-size: 12px; font-weight: 700; letter-spacing: .08em; color: var(--ink-soft); margin-bottom: 12px; }
+  .legend { display: flex; gap: 14px; font-size: 11px; color: var(--ink-soft); margin-bottom: 10px; }
+  .legend i { display: inline-block; width: 9px; height: 9px; margin-right: 5px; }
+  .bars { display: flex; align-items: flex-end; gap: 18px; height: 140px; padding: 0 4px; border-bottom: 2px solid var(--line); }
+  .bar { flex: 1; display: flex; flex-direction: column-reverse; }
+  .bar > i { display: block; }
+  .bar .b-cache { background: var(--chart-cache); }
+  .bar .b-input  { background: var(--chart-input); }
+  .bar .b-output { background: var(--chart-output); }
+  .bar.today { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .bar-x { display: flex; gap: 18px; padding: 6px 4px 0; }
+  .bar-x span { flex: 1; text-align: center; font-size: 10px; color: var(--ink-faint); font-family: var(--font-mono); }
+
+  .bottom { display: grid; grid-template-columns: 1fr 300px; gap: 14px; align-items: start; }
+  .sessions { list-style: none; padding: 0; }
+  .sess {
+    display: flex; align-items: center; gap: 10px; padding: 8px 6px;
+    border-bottom: 1px dashed var(--line); font-size: 13px; cursor: pointer;
+  }
+  .sess:hover { background: var(--surface-2); }
+  .caret { color: var(--ink-faint); width: 12px; }
+  .s-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .s-proj { font-size: 11px; color: var(--ink-soft); border: 1px solid var(--line); padding: 1px 6px; background: var(--surface-2); }
+  .s-num { font-family: var(--font-mono); font-size: 12px; color: var(--ink-soft); }
+  .s-num.strong { color: var(--ink); font-weight: 700; }
+  .sess-detail {
+    display: grid; grid-template-columns: repeat(4, auto); gap: 6px 20px;
+    margin: 0 6px 10px 28px; padding: 10px 12px;
+    background: var(--surface-2); font-size: 11px; color: var(--ink-soft);
+  }
+  .sess-detail b { display: block; color: var(--ink-faint); font-weight: 400; font-size: 10px; margin-bottom: 2px; }
+  .sess-detail span { font-family: var(--font-mono); color: var(--ink); }
+
+  .preview { text-align: center; }
+  .preview-title { font-size: 11px; color: var(--ink-faint); letter-spacing: .08em; margin-bottom: 10px; }
+  .desk {
+    width: 264px; height: 264px; margin: 0 auto; position: relative;
+    background: repeating-conic-gradient(#3a342c 0% 25%, #322c26 0% 50%) 0 0 / 24px 24px;
+    border: 2px solid var(--ink-faint);
+  }
+  .cat-working {
+    position: absolute; left: 50%; bottom: 34px; transform: translateX(-50%);
+    width: 96px; height: 104px;
+    background-image: url("spritesheet.png");
+    background-size: 768px 936px;
+    background-position: -192px -728px;
+    image-rendering: pixelated;
+  }
+  .bubble {
+    position: absolute; left: 50%; top: 18px; transform: translateX(-50%);
+    max-width: 230px; background: var(--pet-world-surface); border: 2px solid var(--pet-world-line);
+    box-shadow: var(--pet-world-shadow);
+    padding: 7px 12px; font-size: 13px; white-space: nowrap; color: #29241d;
+  }
+  .bubble::after {
+    content: ""; position: absolute; left: 24px; bottom: -8px;
+    width: 8px; height: 8px; background: var(--pet-world-surface);
+    border-right: 2px solid var(--pet-world-line); border-bottom: 2px solid var(--pet-world-line);
+    transform: rotate(45deg);
+  }
+  .bubble b { color: #b4531c; }
+  .preview-note { font-size: 11px; color: var(--ink-faint); margin-top: 10px; line-height: 1.7; }
+</style>
+</head>
+<body>
+<div class="panel">
+
+  <div class="hd">
+    <div class="mini-cat"></div>
+    <div>
+      <div class="hd-title">PulsePet <span style="color:var(--ink-faint);font-weight:400">·</span> 控制面板</div>
+      <div class="hd-sub">v2.0.0-mock · direction B3 · 暖橘</div>
+    </div>
+    <div class="hd-state"><span class="dot"></span>claude-code · working</div>
+  </div>
+
+  <div class="tabs">
+    <button class="tab on">Token</button>
+    <button class="tab">提醒</button>
+    <button class="tab">Todo</button>
+    <button class="tab">设置</button>
+  </div>
+
+  <div class="controls">
+    <div class="seg">
+      <button class="on">今日</button><button>7 天</button><button>30 天</button><button>自定义</button>
+    </div>
+    <span class="dates">08-17 → 08-23</span>
+  </div>
+
+  <div class="kpis">
+    <div class="kpi first"><div class="kpi-label">总量 TOTAL</div><div class="kpi-value">12.4M</div></div>
+    <div class="kpi"><div class="kpi-label">输入 INPUT</div><div class="kpi-value">3.1M</div></div>
+    <div class="kpi"><div class="kpi-label">输出 OUTPUT</div><div class="kpi-value">0.8M</div></div>
+    <div class="kpi"><div class="kpi-label">费用 COST</div><div class="kpi-value">$12.40</div></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">每日用量</div>
+    <div class="legend">
+      <span><i style="background:var(--chart-output)"></i>output</span>
+      <span><i style="background:var(--chart-input)"></i>input</span>
+      <span><i style="background:var(--chart-cache)"></i>cache read</span>
+    </div>
+    <div class="bars">
+      <div class="bar"><i class="b-cache" style="height:43px"></i><i class="b-input" style="height:15px"></i><i class="b-output" style="height:3px"></i></div>
+      <div class="bar"><i class="b-cache" style="height:53px"></i><i class="b-input" style="height:19px"></i><i class="b-output" style="height:4px"></i></div>
+      <div class="bar"><i class="b-cache" style="height:37px"></i><i class="b-input" style="height:12px"></i><i class="b-output" style="height:3px"></i></div>
+      <div class="bar"><i class="b-cache" style="height:81px"></i><i class="b-input" style="height:29px"></i><i class="b-output" style="height:7px"></i></div>
+      <div class="bar"><i class="b-cache" style="height:73px"></i><i class="b-input" style="height:24px"></i><i class="b-output" style="height:5px"></i></div>
+      <div class="bar"><i class="b-cache" style="height:97px"></i><i class="b-input" style="height:35px"></i><i class="b-output" style="height:8px"></i></div>
+      <div class="bar today"><i class="b-cache" style="height:48px"></i><i class="b-input" style="height:16px"></i><i class="b-output" style="height:4px"></i></div>
+    </div>
+    <div class="bar-x">
+      <span>08-17</span><span>08-18</span><span>08-19</span><span>08-20</span><span>08-21</span><span>08-22</span><span>08-23</span>
+    </div>
+  </div>
+
+  <div class="bottom">
+    <div class="card" style="margin-bottom:0">
+      <div class="card-title">会话</div>
+      <ul class="sessions">
+        <li class="sess"><span class="caret">▾</span><span class="s-title">V2 范围讨论与裁定</span><span class="s-proj">lab</span><span class="s-num strong">4.7M</span><span class="s-num">$5.12</span></li>
+        <li class="sess-detail">
+          <div><b>模型</b><span>glm-5.3</span></div>
+          <div><b>input</b><span>1.1M</span></div>
+          <div><b>output</b><span>362K</span></div>
+          <div><b>cache read</b><span>3.2M</span></div>
+        </li>
+        <li class="sess"><span class="caret">▸</span><span class="s-title">修复拖拽跨屏问题</span><span class="s-proj">lab</span><span class="s-num">2.1M</span><span class="s-num">$1.83</span></li>
+        <li class="sess"><span class="caret">▸</span><span class="s-title">排查宠物不动</span><span class="s-proj">pulse-pet</span><span class="s-num">0.9M</span><span class="s-num">$0.65</span></li>
+      </ul>
+    </div>
+
+    <div class="preview">
+      <div class="preview-title">宠物窗口预览</div>
+      <div class="desk">
+        <div class="cat-working"></div>
+        <div class="bubble">该喝水啦 <b>💧</b></div>
+      </div>
+      <div class="preview-note">气泡保持暖白（贴近猫毛色）确保桌面可读<br>深色面板 + 琥珀台灯色强调</div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

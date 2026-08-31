@@ -9,8 +9,9 @@
  *   自然日 completed_at 统计，Rust 侧算好）；jumping 二级庆祝 v1 不做。
  *
  * 走 Tauri event（§8.3：不引入新通道）；仅 pet 路由注册；非 Tauri 环境
- * （vitest/浏览器 dev）静默返回。气泡顶替旧提醒气泡时由 petStore 按
- * 'auto' 回报旧 log（M4 P2 ④ 完成联动打断路径已覆盖）。
+ * （vitest/浏览器 dev）静默返回。v2 M2 起庆祝气泡 = info 级
+ * source="celebration" 经排队模型展示——info 不会顶替 critical（规则⑥），
+ * 同级按 FIFO 排队，与提醒气泡互不干扰（V2-DESIGN §2.6）。
  */
 
 import { usePetStore } from "../pet/petStore";
@@ -32,9 +33,14 @@ export function initTodoBridge(): void {
     await listen("todo://completed", (event) => {
       const e = parseTodoCompleted(event.payload);
       if (!e) return;
-      // waving 覆盖 + 气泡（全清文案优先；showBubble 内部净化）
+      // waving 覆盖 + 气泡（全清文案优先；pushBubble 内部净化）。
+      // v2 M2：info 级 + source="celebration"（排队模型 §2.6.2）。
       usePetStore.getState().startCelebration();
-      usePetStore.getState().showBubble(celebrationText(e));
+      usePetStore.getState().pushBubble({
+        text: celebrationText(e),
+        level: "info",
+        source: "celebration",
+      });
     });
     console.log("[pulsepet] todo bridge ready (pet)");
   })();

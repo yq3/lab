@@ -853,3 +853,195 @@ D31 落地后切换到任一 agent 即报错：`Agent Supervised-Coding's config
 5. ~~支持多技术栈时，引入 per-target 测试命令配置（如 `opencode-test-config.json`），替代静态 bash 白名单~~（已被 D37 取代：bash 默认放行后无白名单可替代）
 6. 新领域监督模式（`supervised-design` 等）按 D21 模式族扩展，subagent 按需复用（D23 默认开放）
 7. **用户直连通道实施（D35，已定稿）**：supervised-coding 调用预告附 taskId + 可粘贴直连命令、3 个 subagent prompt 增直连协议（只答询、只读代码、要改引导回主线）、§7 使用指南补 B/C/A 三通道用法——方案全文见 D35
+
+---
+
+## 10. 第二版演进（v11 起，2026-08-22）
+
+> v10 之后的演进只在本节追加记录，不改写上文（含 §1-§9 与 D1-D37）；与上文冲突时以本节为准。
+
+### D38. Vision 图像识别 subagent（2026-08-22，第二版首项演进）
+
+**问题**：4 个角色全是纯文本语言模型，GUI 验证中 tester 只能 screencapture + OCR（D32/D37 放行的命令）——字符提取尚可，语义判断（控件状态、渲染效果、布局异常）无能为力。 tester prompt 中"screencapture 截屏/OCR"是明确的缺口。
+
+**设计**（新增 `.opencode/agent/vision.md`，其余配置零改动）：
+
+- `mode: subagent`，`model: zhipuai-coding-plan/glm-4.6v`（coding plan 内视觉模型：attachment: true、128K ctx、reasoning toggle；按 token 计费 0.3/0.9 每百万。备选 `glm-5v-turbo` 零成本、200K ctx，frontmatter 一行可切）
+- 纯只读：`edit: deny` + `bash: deny`，只用 read 工具读图（原生支持 png/jpg/PDF）；路径不可读时如实报告，禁止猜测内容
+- 无状态单次调用：**不进检查点协议**（无 xxxTaskId 字段、无会话续接），结果即弃
+- 结构化输出 5 小节：图片概况 / 文本提取（原文照抄+大致区域）/ 视觉元素 / 针对所提问题的观察结论 / 低置信度标注
+- 调用方式：调用方 Task 时传**图片绝对路径 + 具体问题**，Vision 自己读图（文本模型调用方读图无意义）
+- 委派入口：Coder/Tester/Committer 均无 task 权限限制（D23 默认开放），三者皆可自动委派；**supervised-coding 不调用**（task 白名单 `"*": deny` 未加 Vision——用户决策：编排者用不到，不加）
+- D28 闸门不涉及：调用预告只约束 supervised-coding 对 Coder/Tester/Committer 的调用；Vision 的委派发生在三个 subagent 层，天然不在闸门内（低风险纯只读，也无需扩展闸门）
+
+**Vision vs OCR 选型**（已作为简短指引写入 3 个 subagent prompt）：
+
+| 场景 | 选择 |
+|---|---|
+| 语义判断（控件状态、渲染效果、布局异常、中文 UI 截图理解） | Vision |
+| 断言"某段文字存在"（便宜、确定性） | OCR |
+| 字符级精确提取、精确像素坐标、CI 确定性断言、批量/离线 | OCR |
+| 通用优先级 | DOM/accessibility 断言 > 测试钩子 > OCR > Vision（像素识别是最后手段） |
+
+**验证记录**（2026-08-22 实测，均经 Task 委派真实调用 glm-4.6v）：
+
+1. 128×128 小图标（hexo fluid.png）：文本 "Fluid"/"H" 提取正确，5 小节格式遵守
+2. 5MB retina 桌面截屏（pulse-pet/images/截屏2026-08-20 18.57.24.png）：中文 UI 全量提取准确（窗口标题、标签页、提醒规则文案、按钮状态 √启用/□烟花 未勾选），连桌面截屏文件名都逐个识别；控件状态语义区分正确
+3. **定向提问对比实验**：泛问"描述截图"→ 烟花效果仅一句带过（"中央有彩色烟花效果"）；定向问"烟花位置/形态/是壁纸还是叠加特效"→ 完整分析（中央偏上、放射状、数百粒子+拖尾、多色，判断为实时叠加特效并给出层次/动态感/设置项三重依据）。**结论：委派时问题质量决定输出深度，第 4 小节（针对问题的结论）才是核心价值**——该教训已体现在 3 个 subagent prompt 的指引措辞中（"问题要问准"）
+
+**已知限制**：
+
+- 桌面等敏感目录受 macOS TCC 拦截（`Operation not permitted`，且 Glob 会表象为"空目录"）：需在系统设置为 opencode 宿主终端授予"桌面文件夹"访问权，或把图拷到仓库/已放行的临时目录（D37 的 external_directory 白名单目录可用）
+- 字符级精确性与像素坐标不如专用 OCR；LLM 输出有随机性，CI 确定性断言仍走 OCR
+- 4.6v 按 token 计费，coding plan 额度抵扣情况待长期观察；不划算时切 `glm-5v-turbo`（零成本）
+
+### D39. playwright-cli skill：浏览器自动化走 CLI+Skill，弃 MCP（2026-08-22）
+
+**问题**：D38 选型表的首选层"DOM/accessibility 断言"一直无工具支撑——coder/tester 验证 web UI 只能截图走 OCR/Vision。补齐该层时评估了 Playwright MCP 与 playwright-cli 两条路线。
+
+**选型**（微软官方 README 明示 coding agent 用 CLI+Skill 更合适）：
+
+| | Playwright MCP | playwright-cli + skill（选定） |
+|---|---|---|
+| token 开销 | 工具 schema 常驻每个 agent 的 context；交互全量 accessibility tree 进 context | 无 schema；快照为精简 YAML，`find` 只返回匹配节点片段 |
+| 接入成本 | 需写 opencode.json 的 mcp 配置 | 零配置：走 bash 命令，Coder/Tester 的 bash 权限天然放行 |
+| 适用 | 探索性自动化、长时自治循环 | 高吞吐 coding agent（大代码库 + 测试 + 推理共享有限 context） |
+
+对 subagent 架构尤其关键：Coder/Tester 每次 Task 都是全新 context，MCP 的 schema 常驻是每会话重复开销；CLI 调用零常驻成本。
+
+**安装**（已执行，commit 2945794）：
+
+- `npm install -g @playwright/cli@0.1.18`（~/.npm-global，用系统 Chrome，无需下载浏览器；附带 FFmpeg 供录屏）
+- `playwright-cli install --skills=agents` → `.agents/skills/playwright-cli/`（SKILL.md + 9 个 references：test-generation/tracing/request-mocking/storage-state/session-management 等）
+
+**为什么放 `.agents/skills/` 而非 `.opencode/skills/`**：`.agents/skills/` 是 Agent Skills 开放标准（agentskills.io，Anthropic 发起）的中立路径，跨工具可发现——opencode 官方支持已验证；Codex 源码实锤（`codex-rs/ext/skills/src/host_roots.rs` 从 cwd 向上扫 `.agents/skills/`）；Claude Code 未确认是否扫此路径，需要时跑 `playwright-cli install --skills`（装到 `.claude/skills/`）即可，CLI 自带两处版本一致性校验。自建 skill 仍放 `.opencode/skills/`（与本仓 `.opencode/agent/` 结构一致）。
+
+**配套变更**：`.gitignore` 增加 `.playwright/`（CLI 的 workspace 配置目录，安装时创建的空占位）与 `.playwright-cli/`（运行缓存：快照 yml / 截图 png / traces / console log）——均为机器本地状态，不随 git。
+
+**与 D38 选型表的衔接**：本 skill 把"DOM/accessibility 断言"层做实（snapshot 拿带 ref 的 accessibility 树 → `click/fill/check e<n>` 精确操作 → 输出等价 Playwright 代码）；视觉观感验证（布局协调、配色、设计稿比对）仍需截图走 Vision，两层互补不互替。
+
+**prompt 指引（同日补）**：coder.md / tester.md 的【图像识别选型】各加 1 条首位 bullet，点明 web UI 验证的时机与通道——理由：① 选型表顶层"DOM 断言"原本无工具指向，悬空；② skill 发现靠一行描述是概率触发，Tester（deepseek-v4-flash）任务框架是"用例转测试"，不点破连接大概率继续走截屏 OCR 老路；③ tester 的 edit 白名单 `**/*.spec.*` 恰好容纳 playwright 生成的 `*.spec.ts`，持久测试合规。committer 不加（bash 全 deny 跑不了 CLI，其角色审查证据不执行验证）。指引只写"何时用"，"怎么用"归 skill 本体。
+
+**验证记录**（2026-08-22 实测）：
+
+1. example.com：`open → snapshot`（输出几十行精简 YAML，含 ref 编号）→ `click e6`（回显等价代码 `getByRole('link', ...)`）→ `close`，链路全通
+2. TodoMVC 有头演示：`open --headed` → `type "买牛奶"`/Enter → `type "写周报"`/Enter → `find --regex "买牛奶|写周报"` 定位 → `check f1e21` 勾选完成项 → `screenshot` 截图留证；中文输入、regex 搜索、勾选交互均正常
+
+**已知限制**：
+
+- CLI 年轻（v0.1.x），命令面可能随版本变化；skill 与工具版本不匹配时 CLI 会提示重装命令
+- 默认无头；观察 agent 操作需 `--headed`、`playwright-cli show` 可视化面板，或多会话隔离用 `-s=<name>`
+- 依赖系统 Chrome；浏览器未装的环境需另行处理
+
+### D40. 嵌套委派修复：subagent 调 Vision 需过双闸门（2026-08-22，D38 修正）
+
+**实跑反馈**：tester 报告无 task 工具，D38"subagent 可直接 Task 委派 Vision"落空。探测确认自定义 Tester 与内置 explore 均无 task 工具——平台级限制，与 agent 配置无关（D23 当时只验证了权限默认开放，漏了工具挂载默认收紧这层）。
+
+**双闸门机制**（v1.18.19 源码验证）：
+
+1. **挂载闸**（`agent/subagent-permissions.ts`）：subagent 被 task 工具孵化时，若自身配置**没有任何显式 `task` 权限规则**（`canTask` 只查规则存在、不看 action）→ 自动注入 `task: deny *` → task 工具从工具列表移除
+2. **执行闸**（`tool/task.ts`）：调用时 `depth >= subagent_depth`（默认 1）→ throw；该配置只拦执行，不影响工具挂载
+
+**修复**（缺一不可，均已落地）：
+
+1. `.opencode/opencode.json` 重建（D36 曾删除，此处更正其"零额外配置"结论）：`{"subagent_depth": 2}`——主→Coder/Tester/Committer 第 1 层→Vision 第 2 层；Vision 无法再嵌套（depth 2 ≥ 2 被执行闸拦截）
+2. coder/tester/committer frontmatter 显式声明 task 权限：`{"*": deny, "Vision": allow}`——既过 canTask 检查使工具挂载，又把可委派对象收窄到 Vision（Coder/Tester/Committer 互不可调，架构与 D23 设想一致）
+3. supervised-coding 仍不动（它不调 Vision，白名单无需加）；vision.md 不加 task 规则（无规则 → 平台默认 deny → Vision 看不到 task 工具，天然无嵌套）
+
+**验证记录**（`opencode run` 全新进程 A/B，排除运行中 TUI 旧配置干扰）：
+
+- 基线 A：默认配置 + 无显式 task 权限 → Tester 无 task 工具（复现 bug）
+- B：仅注入 `subagent_depth: 2`（OPENCODE_CONFIG_CONTENT）→ 仍无（证明挂载闸独立于深度闸）
+- 终验 E2E：真配置 + 显式 task 权限 → build→Tester（有 task 工具）→Tester 委派 Vision 读仓库内截图→ 结构化分析完整回传（图表轴标签/弹窗中文分类标签/数值全部提取）
+
+**附带发现**：
+
+- `OPENCODE_CONFIG_CONTENT` 注入的配置**不走严格校验**（typo 键不报错）——判断配置键是否被当前版本支持必须用真配置文件（未知顶级键 ConfigInvalidError 拒启）
+- Vision 读**工作区外**图片触发 `external_directory` ask：TUI 交互模式下用户可批准；无头 `opencode run` 会挂死。tester 委派时截图应放仓库内或 D37 已放行的目录（external_directory 规则会继承进 Vision 会话，`subagent-permissions.ts` 把父会话的 external_directory 与 deny 规则并入子会话）
+
+### D41. 双前端设计 skill 并存：frontend-design + impeccable（2026-08-22）
+
+**问题**：coder 生成的 UI 有模板味（AI 设计三大俗：奶油底衬线陶土色 / 近黑底荧光绿 / 报纸风零圆角）；且 UI 打磨缺少体系化手段（批评、定向调整、发布前收尾各自靠临时 prompt）。
+
+**选型**（两个都装，定位互补）：
+
+| | frontend-design（Anthropic） | impeccable（pbakaus，v4.1.1） |
+|---|---|---|
+| 形态 | 纯 SKILL.md 设计哲学（8KB） | skill + 23 命令 + 59 条确定性检测 + live 浏览器迭代 |
+| 作用方式 | **被动**：生成新 UI 时自动加载，管"下限"（不落俗套） | **主动**：`/impeccable <command> <target>` 定向迭代，管"上限" |
+| 典型场景 | coder 写新页面/组件的品味兜底 | `/impeccable init` 建上下文 → `critique`/`polish`/`bolder`/`harden` 等针对性打磨 |
+
+**分流机制**：两者靠 description 天然分流（"building new UI"（生成时）vs "user wants to ... improve"（用户要求改进））；impeccable 额外有 `user-invocable` + `argument-hint` frontmatter，opencode 注册为 `/impeccable` slash 命令（确定性出口，零歧义）。残余重叠最坏结果是双加载，内容互补无冲突。
+
+**路径约定精确化（修正 D39 表述）**：
+
+- 纯 SKILL.md、无 provider 差异的第三方 skill（playwright-cli、frontend-design）→ `.agents/skills/`（跨工具约定，Codex 等亦发现）
+- **带 provider 编译的（impeccable）→ 跟安装器走 `.opencode/skills/`**（opencode 主路径；`--providers=opencode --scope=project` 安装）
+- 关键坑（实测踩过）：**两处同名的 impeccable 是不同 provider 构建，不可互换不可并存**——opencode 构建（`user-invocable`/`argument-hint`、`/` 前缀、脚本路径指 `.opencode/`）vs Codex 构建（`$` 前缀、多 "Codex sub-agent gate" 段与 `agents/` 专用目录、脚本路径指 `.agents/`）。opencode 要求 skill 名跨位置唯一，同名双装有加载冲突风险，发现重复立即删非 opencode 构建
+
+**升级姿势**：`impeccable update`（全局 CLI 保留，更新 `.opencode/` 的 opencode 构建）。警惕安装器"检测到的 harness"自动扩展：交互默认值会按检测列表安装，误装 Codex 构建到 `.agents/` + `.codex/hooks.json` 的事故已发生并清理（见踩坑 2）。
+
+**踩坑三条（都实测）**：
+
+1. `npx impeccable install` 在非交互 shell 挂起——npx 首次下载的 "Ok to proceed? (y)" 确认卡死，须用 `npx -y`；本次改走全局装安装器（588ms 完成）
+2. **`impeccable install --help` 非只读**：走交互安装流程并接受默认值，实际执行了安装（多装 Codex 构建 + `.codex/hooks.json`）——把它当只读帮助命令用是错的
+3. puppeteer postinstall 被 allow-scripts 拦截：仅影响浏览器扩展功能，skill/detector 不依赖；live 模式需要时再 `npm approve-scripts`
+
+**验证记录**（2026-08-22）：
+
+1. frontend-design：`gh api` 取 SKILL.md（8.3KB，SHA-256 与上游一致）+ LICENSE.txt → `.agents/skills/frontend-design/`
+2. impeccable：安装器输出 "Installed impeccable into: .opencode (project)"；detector CLI 可跑（`node .opencode/skills/impeccable/scripts/detector/detect-antipatterns.mjs --help`，零 LLM 零 API key）
+3. 清理后盘点：`.agents/skills/` = {frontend-design, playwright-cli}，`.opencode/skills/` = {impeccable}，`.codex` 已删
+4. 待新会话验证：skill 列表三者齐全 + `/impeccable` 命令可补全（当前会话 skill 列表是启动快照，测不了）
+
+### D42. Reviewer 通用方案审查 subagent（2026-08-22）
+
+**空白**：设计方案（DESIGN.md）、测试用例（TEST-CASES.md）等**方案文档本身的质量审查**此前无专门角色——Committer 审代码 diff + CASE_BUG 裁定（用例预期与实现矛盾时才介入用例），D18 预留过"上下文膨胀时拆独立 approver"的演进方向。
+
+**定位**（用户决策）：
+
+- **独立于 supervised-coding 工作流**：不进状态机、不进检查点协议、不占用调用预告——调用通道是用户在 build/plan 模式主动 cue（@mention 直连，D35 已验证 @mention 不受 `permission.task` 约束；或 build/plan 用 task 委派，二者作为 primary 默认有 task 工具，零配置改动）
+- **与 Committer 分工**：Reviewer 审方案文档（自洽性/完整性/可行性/可测性/风险），Committer 审代码 + CASE_BUG 裁定，互不重叠，committer.md 不改
+- **模型 deepseek-v4-pro + reasoningEffort: max**：方案文档多为 glm 系模型产出，审查者跨族正交（D11 盲点正交理论，与 Committer 同款配置）
+
+**权限设计**：
+
+- `edit: deny`（纯审查只产出意见）；`bash: ask`（读仓库现状不足时可跑只读探查/验证命令核实现状，逐条弹用户确认——P1"授权不能自动"）
+- `task: {"*": deny, "Vision": allow}`：审 UI 设计稿等需要看图时委派 Vision（复用 D40 结论：显式 task 规则过挂载闸，`subagent_depth: 2` 已就位）
+
+**输出契约**（对齐 Committer 的 P1/P2 风格）：问题清单（严重度 + 文档位置 + 修改建议）/ 需澄清项 / verdict（APPROVED / NEEDS_CHANGES，有 P1 即 NEEDS_CHANGES）。审查维度写入 prompt：自洽性、完整性（边界/异常路径遗漏）、可行性（对照仓库现状，须引用实读代码为证）、可测性、风险点。
+
+**命名说明**：reviewer 之名曾在 D24 改名为 committer（代码审查者）；本 reviewer 是**新角色**（方案文档审查），非回归——角色名与动作/状态分离原则（D24）不变。
+
+**接入面**：supervised-coding / coder / tester / committer 的 task 权限均不放开（他们不调用 Reviewer）；opencode.json 不改。未来若要进工作流（如 spec 确认后强制方案审查），再走决策记录修订。
+
+### D43. tester 图像选型修订：原生读图优先，Vision 子代理降备胎（2026-08-28）
+
+**背景**：08-27 14:13 tester 模型 deepseek-v4-flash → glm-5.3-flash（工作区未提交改动），但 D38/D39 的【图像识别选型】未同步——决策树只有 DOM→OCR→委派 Vision 三条路，无"自己读图"选项。事后研究（opencode.db 只读查询）证实：glm-5.3-flash 三个 Tester 会话（v2-m6/polish/pet-size）**原生读图 0 次、Vision 调用 0 次**，多模态能力全程闲置；期间 m6 派工词还因 m5 Vision 流卡死事故显式禁用了 Vision 子代理，语义判断通道实际为空。
+
+**修订**（tester.md【图像识别选型】两处）：
+
+- 语义判断 → 优先 read 截图自判（若当前模型支持图片输入），结论须写明依据、高风险断言与 OCR/DOM 双通道互证
+- Vision 子代理降为备胎：模型读不出图时才委派；优先级变为 DOM > 钩子 > OCR > 直接读图 > Vision
+
+**理由**（三代实证）：A 时代纯脚本管线环境敏感（v1-M1 无头假阴性损失 2 轮+人工介入）；B 时代 Vision 有语义价值但工程代价高（37.6s/次延迟、5.1k token/次无状态重复上下文、1 次幻觉需交叉核验、2 次流卡死）；C 时代 DOM/OCR 确定性通道成熟后图像验证需求本身萎缩（m6 图像类 bash 命令 17 次 vs m4 403 次）。文案不硬编码模型名（用"若当前模型支持图片输入"自描述），避免下次换模型再产生同样的提示词滞后。
+
+**边界**：OCR 行不动（"文字存在"仍走 OCR，确定性+坐标）；vision.md 与 frontmatter `"Vision": allow` 保留（备胎）；coder.md 不改（glm-5.3 多模态可用性未验证，观察后再定）；原生多模态端到端链路（zhipuai-coding-plan 经 opencode read 传图）未实测，首次真实任务自然验证——读不出图时按备胎条款降级，指引自洽。
+
+### D44. Vision 权限补全：depth-2 零 ask 不变量，修嵌套委派挂死（2026-08-30，D38/D40 修正）
+
+**问题**（实跑复现）：Coder/Tester/Committer 委派 Vision 读**其他工作区**的图片（不在仓库内、也不在 D37 放行的临时目录）时流程永久挂死。根因：vision.md 权限只有 `edit: deny` + `bash: deny`，无 `external_directory` 规则 → Vision 的 read 触发工作区外默认 `ask`；而 ask 能否冒泡到 TUI 取决于嵌套深度——depth-1 正常（coder 的 `git push*` ask 即依赖此机制），**depth-2 的权限申请用户不可见** → Task 调用无限等待。D40 附带发现已记录同类风险（当时结论"截图放仓库内或已放行目录"只是规避，未修根因），D43 提及的 m5 Vision 流卡死事故即此坑首次显形；D43 将 Vision 降为备胎后仍会触发——glm-5.3-flash 读不出图才委派，此时图片路径不受控。
+
+**修订**（vision.md frontmatter 权限补全，确立不变量：**depth-2 agent 零 ask、零用户交互，潜在阻塞一律 fail-fast**）：
+
+- `external_directory: {"*": allow}`：读任意工作区外路径不再触发 ask。风险评估：Vision 纯只读（edit/bash 全禁、task 因 D40 挂载闸不挂载），最坏情况是读了不该读的文件，与 D32/D37"防误操作、非防对抗"哲学一致
+- `question` / `webfetch` / `websearch`（flat deny）：杜绝其余可能在 depth-2 等待用户的工具，触发即工具报错而非静默挂死；Vision 本用不到，零功能损失
+- prompt 正文不动（"路径不可读时直接报告"条款继续覆盖 macOS TCC 等非权限类失败）；tester/coder/committer/reviewer 不动（depth-1 ask 正常冒泡）；`subagent_depth: 2` 不动
+
+**验证记录**（2026-08-30 实测，headless `opencode run` 全新进程，测试图放 /var/folders 工作区外）：
+
+1. build→Vision（depth-1）读工作区外截图：正常返回 5 小节结构化分析（修复前 headless 遇 ask 必挂死，D40）
+2. build→Committer→Vision（depth-2，生产等价链路——deepseek 无多模态必须委派）：同样无阻塞完整回传，曾经的挂死组合（嵌套 Vision + 工作区外路径 + 无头）已消除
+3. 委派 Vision 自报工具清单：`glob, grep, read, skill`——question/webfetch/websearch 已从工具列表移除（deny 真实生效，排除 frontmatter 未知字段被静默路由进 options 的假阳性）；bash/edit/write/task 亦不在列，只读面干净
+
+**边界说明**：Vision 不可 `opencode run --agent Vision` 直调（subagent 非 primary，CLI 回退 build），验证一律走委派路径；外部读放行后，D40"截图放仓库内或已放行目录"的规避条款不再必要，委派时截图可放任意绝对路径。

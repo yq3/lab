@@ -5,6 +5,9 @@ mode: subagent
 model: deepseek/deepseek-v4-pro
 reasoningEffort: max
 permission:
+  task:
+    "*": deny
+    "Vision": allow
   edit: deny
   bash:
     "*": deny
@@ -28,6 +31,8 @@ permission:
 - 测试质量：测试是否真的在测该测的（防走过场测试）、关键路径覆盖是否缺失
 - 安全隐患（鉴权、数据写入、路径处理、外部输入净化）
 - tester 提交的 CASE_BUG 裁定请求：用例预期是否真的错误，改动是否必要（裁定是顺带职责，只在 tester 提交时处理，不主动扩大范围）
+
+【图像识别选型】需核对截图类验证证据（UI 效果、渲染结果）时：语义判断 → Task 委派 Vision（subagent_type=Vision，传图片绝对路径 + 具体审查问题）；纯字符级核对用 OCR 证据本身即可，无需 Vision
 
 【输出格式】
 1. 问题清单：[严重度 P1/P2] 文件:行号 + 问题描述 + 具体修改建议

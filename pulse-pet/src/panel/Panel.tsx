@@ -1,45 +1,66 @@
-import { useEffect, useState } from "react";
-import TokenStats from "./TokenStats";
-import Reminders from "./Reminders";
-import Settings from "./Settings";
+import { useEffect, useMemo, useState } from "react";
 import Todo from "./plugins/Todo";
+import { usePanelStore, initPanelStore } from "./panelStore";
+import { buildTabs, resolveTabId, type PluginRenderMap, type TabDef } from "./registry";
+import { usePluginStore } from "../lib/plugin-store";
+import { initThemeBridge } from "../lib/theme";
 import { PANEL_TAB_EVENT, normalizeTab } from "../lib/interaction";
 import { isTauriRuntime } from "../lib/token-stats";
 import { t, useLangStore } from "../lib/i18n";
+import { specOf } from "../lib/agents";
 
 /**
- * 控制面板（DESIGN §2.3：设置 / Token / Todo / 提醒）。
- *
- * M3：Token 统计标签页落地（TC-TK-08/09）。
- * M4：提醒标签页落地（规则 CRUD + 全局烟花开关 + 历史统计，TC-RM-07/11/13）。
- * M5：设置标签页落地"选择宠物"下拉（TC-SP-11 + TC-APP-12）。
- * M6：设置标签页接通"点击穿透"开关；监听 `panel://tab`（宠物右键菜单
- *      「设置…」/ Rust panel_open(tab)）直达指定 tab。
- * M7：Todo 插件标签页落地（内置 built-in-todo，TC-TD-01/02）。
- * M8：i18n——tab 标签/标题随语言（订阅 useLangStore 触发重渲染）。
+ * 控制面板（v2 M2 面板壳，V2-DESIGN §2.4/§2.5；2026-08-24 修订）：
+ * - 顶栏 = 「PulsePet · 控制面板」标题 + agent 状态芯片**两段布局**
+ *   （修订：mini 猫移除；芯片 `● {agent} · {kind}` 等宽字体，agent/kind
+ *   不翻译——P1-1 拉前的独立消费方，panelStore 供数）；
+ * - tab 栏 = 注册表驱动（核心三静态 + 插件按 enabled 动态，禁用即隐藏；
+ *   激活 tab 带 accent 硬阴影上浮）；`panel://tab` 直达保留，目标禁用回退
+ *   首个可用；正查看的 tab 被禁用 → 立即切首个可用（hook 内处理）；
+ * - 主题 data-theme 挂载点（panel 窗专属；initThemeBridge 拉偏好 + 订阅
+ *   ui://theme / prefers-color-scheme 即时联动）。
  */
-type TabId = "token" | "reminders" | "settings" | "todo";
 
-const TABS: { id: TabId; labelKey: string; milestone?: string }[] = [
-  { id: "token", labelKey: "panel.tab.token" },
-  { id: "reminders", labelKey: "panel.tab.reminders" },
-  { id: "todo", labelKey: "panel.tab.todo", milestone: "M7" },
-  { id: "settings", labelKey: "panel.tab.settings" },
-];
+/** 插件 render 映射表（前端静态绑定，无动态代码加载——§2.5）。 */
+const PLUGIN_RENDERERS: PluginRenderMap = {
+  "built-in-todo": Todo,
+};
+
+/** 注册表 hook：插件快照 → tabs；当前 tab 被禁用自动回退首个可用。 */
+function useTabs(tab: string, setTab: (id: string) => void): TabDef[] {
+  const plugins = usePluginStore((s) => s.plugins);
+  const tabs = useMemo(() => buildTabs(plugins ?? [], PLUGIN_RENDERERS), [plugins]);
+  // 正查看的 tab 被禁用 → 立即切首个可用（TC-UI-07-2）
+  useEffect(() => {
+    const resolved = resolveTabId(tab, tabs);
+    if (resolved !== tab) setTab(resolved);
+  }, [tabs, tab, setTab]);
+  return tabs;
+}
 
 export default function Panel() {
-  const [tab, setTab] = useState<TabId>("token");
+  const [tab, setTab] = useState("token");
+  const tabs = useTabs(tab, setTab);
+  const { kind, agent } = usePanelStore();
   useLangStore((s) => s.lang); // M8 i18n：语言变化时整棵 tab 栏/标题重渲染
 
-  // M6：外部直达 tab（PetMenu「设置…」→ Rust panel_open("settings") → 本事件）
+  // 面板壳初始化：主题（panel 窗专属）+ 显示状态 + 插件快照
+  useEffect(() => {
+    void initThemeBridge();
+    void initPanelStore();
+    if (isTauriRuntime()) void usePluginStore.getState().load();
+  }, []);
+
+  // M6：外部直达 tab（PetMenu「设置…」→ Rust panel_open(tab) → 本事件）；
+  // v2 M2：目标为禁用 tab 时回退首个可用（resolveTabId，TC-UI-07-5）
   useEffect(() => {
     if (!isTauriRuntime()) return;
     let unlisten: (() => void) | undefined;
     let alive = true;
     void import("@tauri-apps/api/event").then(({ listen }) =>
       listen(PANEL_TAB_EVENT, (event) => {
-        const t = normalizeTab((event.payload as { tab?: unknown } | null)?.tab);
-        if (t) setTab(t);
+        const target = normalizeTab((event.payload as { tab?: unknown } | null)?.tab);
+        if (target) setTab(target); // 不在注册表时由 useTabs 回退 effect 处理
       }),
     ).then((un) => {
       if (alive) unlisten = un;
@@ -51,27 +72,54 @@ export default function Panel() {
     };
   }, []);
 
+  const active = tabs.find((x) => x.id === tab) ?? tabs[0];
+  const ActiveView = active?.render;
+  // 状态芯片文案：agent 空（sessions 全空）→ 优雅降级只显示 kind（TC-UI-03-4）；
+  // v2 M4（N4/TC-M4-10-5）：伪 session 的 agent=="task" → 显示「定时任务」
+  //（panel.agentTask）——技术字面量 task 对用户不可读。
+  // §二十一（2026-08-30）：已注册 agent 品牌名查表（opencode→OpenCode /
+  // claude-code→Claude Code，走 labelKey）；未知 agent 原名兜底不变。
+  const agentSpec = agent && agent !== "task" ? specOf(agent) : undefined;
+  const agentText =
+    agent === "task"
+      ? t("panel.agentTask")
+      : agentSpec
+        ? t(agentSpec.labelKey)
+        : (agent ?? "");
+  const statusText = agent ? `${agentText} · ${kind}` : kind;
+
   return (
     <div className="panel">
-      <h1>{t("panel.title")}</h1>
+      <header className="panel-header">
+        <h1 className="panel-title">{t("panel.title")}</h1>
+        <span
+          className="panel-status-chip"
+          aria-label={t("panel.statusAria", { text: statusText })}
+        >
+          <span className="chip-dot" aria-hidden="true" />
+          {statusText}
+        </span>
+      </header>
       <nav className="panel-tabs" role="tablist">
-        {TABS.map((tabDef) => (
-          <button
-            key={tabDef.id}
-            role="tab"
-            aria-selected={tab === tabDef.id}
-            className={tab === tabDef.id ? "panel-tab active" : "panel-tab"}
-            onClick={() => setTab(tabDef.id)}
-          >
-            {t(tabDef.labelKey)}
-            {tabDef.milestone && <span className="tab-milestone">{tabDef.milestone}</span>}
-          </button>
-        ))}
+        {tabs.map((tabDef) => {
+          const on = tabDef.id === active?.id;
+          return (
+            <button
+              key={tabDef.id}
+              role="tab"
+              aria-selected={on}
+              className={on ? "panel-tab active" : "panel-tab"}
+              onClick={() => setTab(tabDef.id)}
+            >
+              {/* v2 M4 R1 补充：labelKey 非空（核心 tab + 覆盖键的插件 tab，
+                  如 built-in-todo → panel.tab.todo）走 i18n；其余插件 tab
+                  直显 manifest title（数据值不翻译） */}
+              {tabDef.labelKey ? t(tabDef.labelKey) : (tabDef.label ?? tabDef.id)}
+            </button>
+          );
+        })}
       </nav>
-      {tab === "token" && <TokenStats />}
-      {tab === "reminders" && <Reminders />}
-      {tab === "todo" && <Todo />}
-      {tab === "settings" && <Settings />}
+      {ActiveView && <ActiveView />}
     </div>
   );
 }

@@ -42,10 +42,14 @@ describe("normalizeTab 面板 tab 白名单（PetMenu 设置入口 → panel 设
   it("合法 tab 原样返回；非法 → null", () => {
     expect(normalizeTab("settings")).toBe("settings");
     expect(normalizeTab("token")).toBe("token");
-    expect(normalizeTab("reminders")).toBe("reminders");
+    expect(normalizeTab("tasks")).toBe("tasks"); // v2 M4：reminders → tasks
     expect(normalizeTab("todo")).toBe("todo"); // M7 起存在（TC-TD-01）
     expect(normalizeTab("about")).toBeNull();
     expect(normalizeTab(42 as unknown as string)).toBeNull();
     expect(normalizeTab(null as unknown as string)).toBeNull();
+  });
+
+  it("v2 M4（TC-M4-02）：旧值 reminders 直达兼容 → 映射 tasks", () => {
+    expect(normalizeTab("reminders")).toBe("tasks");
   });
 });

@@ -60,6 +60,170 @@ describe("字典完备性", () => {
       }
     }
   });
+
+  // v2 M3（§3.9 键名清单 + 实施细项增补，TC-M3-17）：新键双语齐备
+  it("M3 新键 zh/en 均存在（含实施细项微调键）", async () => {
+    const { DICT } = await import("./i18n");
+    const m3Keys = [
+      "token.preset.today",
+      "token.kpi.total",
+      "token.col.model",
+      "token.model.unknown",
+      "token.project.global",
+      "token.project.unknown",
+      "token.chart.tip",
+      "token.chart.tipRowName",
+      "token.chart.tipRowPct",
+      "token.chart.noModels",
+      "menu.todayToken",
+      "toolb.read",
+      "toolb.edit",
+      "toolb.bash",
+      "toolb.search",
+      "toolb.web",
+      "settings.toolBroadcast",
+      "settings.toolBroadcastFail",
+    ];
+    for (const k of m3Keys) {
+      expect(DICT.zh[k], `zh 缺键 ${k}`).toBeTruthy();
+      expect(DICT.en[k], `en 缺键 ${k}`).toBeTruthy();
+    }
+  });
+
+  // §十二 F6（2026-08-28）：交互与播报合并区——旧区名键清退 + 新键齐备
+  // 二轮微调：sectionInteraction 改值「交互管理」；卡片文案拆 name + Desc 两键；
+  // 「当前渲染」行移除 → current/fellBack 清退。
+  // 审查 P3-6：themeLabel 不入清退清单——该键 F6 增、F16 删同批净零（HEAD 无此键），
+  // 断言恒真无防护力；真实清退面 = interaction/sectionPet/current/fellBack
+  it("F6+二轮：interaction/sectionPet/current/fellBack 已清退，合并区与拆分键齐备", async () => {
+    const { DICT } = await import("./i18n");
+    for (const k of [
+      "settings.interaction",
+      "settings.sectionPet",
+      "settings.current",
+      "settings.fellBack",
+    ]) {
+      expect(!(`${k}` in DICT.zh), `zh 应无 ${k}`).toBe(true);
+      expect(!(`${k}` in DICT.en), `en 应无 ${k}`).toBe(true);
+    }
+    for (const k of [
+      "settings.sectionInteraction",
+      "settings.passThrough",
+      "settings.passThroughDesc",
+      "settings.toolBroadcast",
+      "settings.toolBroadcastDesc",
+      "settings.size",
+    ]) {
+      expect(DICT.zh[k], `zh 缺键 ${k}`).toBeTruthy();
+      expect(DICT.en[k], `en 缺键 ${k}`).toBeTruthy();
+    }
+    // 二轮微调钉值：区名 + 大小 label
+    expect(DICT.zh["settings.sectionInteraction"]).toBe("交互管理");
+    expect(DICT.en["settings.sectionInteraction"]).toBe("Interaction");
+    expect(DICT.zh["settings.size"]).toBe("宠物大小");
+    expect(DICT.en["settings.size"]).toBe("Pet size");
+  });
+
+  // 用户 2026-08-25 裁定修订：cache read 升独立第二卡（总量/cache read/input/
+  // output），首卡「含 cache read X」副行随之取消——totalSub 键清退
+  it("token.kpi.totalSub 已清退（cache read 独立卡取代副行小字）", async () => {
+    const { DICT } = await import("./i18n");
+    expect(!("token.kpi.totalSub" in DICT.zh), "zh 应无 totalSub").toBe(true);
+    expect(!("token.kpi.totalSub" in DICT.en), "en 应无 totalSub").toBe(true);
+  });
+
+  // 用户 2026-08-25 14:05 裁定：移除主动层悬停卡（三层降两层）——悬停卡错误态
+  // 专用键 todayUnavailable 清退（TC-M3-17 清退断言）
+  it("token.todayUnavailable 已清退（悬停卡移除，无消费方）", async () => {
+    const { DICT } = await import("./i18n");
+    expect(!("token.todayUnavailable" in DICT.zh), "zh 应无 todayUnavailable").toBe(true);
+    expect(!("token.todayUnavailable" in DICT.en), "en 应无 todayUnavailable").toBe(true);
+  });
+
+  // v2 M4 R1 补充（用户 2026-08-25 五点 UI 裁定）：tab/表单 zh 显示名改「例程」
+  // 「待办」——钉住键值防回退（en：Routines / Todo）
+  it("M4 R1 补充改名键：tasks 例程 / todo 待办（zh）+ Routines / Todo（en）", async () => {
+    const { DICT } = await import("./i18n");
+    expect(DICT.zh["panel.tab.tasks"]).toBe("例程");
+    expect(DICT.en["panel.tab.tasks"]).toBe("Routines");
+    expect(DICT.zh["panel.tab.todo"]).toBe("待办");
+    expect(DICT.en["panel.tab.todo"]).toBe("Todo");
+    expect(DICT.zh["reminders.form.newTitle"]).toBe("新建例程");
+    expect(DICT.en["reminders.form.newTitle"]).toBe("New routine");
+    expect(DICT.zh["reminders.form.editTitle"]).toBe("编辑例程 #{n}");
+    expect(DICT.zh["tasks.rules.title"]).toBe("例程（{n}）");
+    expect(DICT.en["tasks.rules.title"]).toBe("Routines ({n})");
+  });
+
+  // v2 M4 R1 补充 2（用户 2026-08-25 二次裁定）：状态芯片 agentTask 同步例程
+  it("M4 R1 补充 2：panel.agentTask 例程（zh）/ Routine（en）", async () => {
+    const { DICT } = await import("./i18n");
+    expect(DICT.zh["panel.agentTask"]).toBe("例程");
+    expect(DICT.en["panel.agentTask"]).toBe("Routine");
+  });
+
+  // v2 M5（TC-M5-10）：新键 zh/en 集合一致 + 关键键值钉住
+  // R2（2026-08-27）：token.agent.all 新增（agent tab「全部」项）；
+  // token.chart.noAgents 随单选交互清退（始终恰有一项选中，空态不可达）
+  it("M5 新键 zh/en 均存在（token.agent.* / taskBadge / degraded）", async () => {
+    const { DICT } = await import("./i18n");
+    const m5Keys = [
+      "token.agent.opencode",
+      "token.agent.claudeCode",
+      "token.agent.all",
+      "token.taskBadge",
+      "token.degraded",
+      "token.aria.agent",
+    ];
+    for (const k of m5Keys) {
+      expect(DICT.zh[k], `zh 缺键 ${k}`).toBeTruthy();
+      expect(DICT.en[k], `en 缺键 ${k}`).toBeTruthy();
+      expect(DICT.zh[k].length > 0 && DICT.en[k].length > 0, `${k} 两语言非空`).toBe(true);
+    }
+    // 徽标全名（品牌名不翻译——zh/en 同值合法）
+    expect(DICT.zh["token.agent.claudeCode"]).toBe("Claude Code");
+    expect(DICT.en["token.agent.claudeCode"]).toBe("Claude Code");
+    // R2：agent tab「全部」项文案钉住（zh/en 互异，防粘贴错语言）
+    expect(DICT.zh["token.agent.all"]).toBe("全部");
+    expect(DICT.en["token.agent.all"]).toBe("All");
+    // R2：agent tab 组 aria-label（维度单选，非复选筛选）
+    expect(DICT.zh["token.aria.agent"]).toBe("agent 维度");
+    expect(DICT.en["token.aria.agent"]).toBe("Agent dimension");
+    // 可翻译键 zh/en 互异（防粘贴错语言）
+    for (const k of ["token.taskBadge", "token.degraded"]) {
+      expect(DICT.zh[k], `${k} zh/en 应互异`).not.toBe(DICT.en[k]);
+    }
+    expect(DICT.zh["token.taskBadge"]).toBe("定时任务例程");
+    expect(DICT.en["token.taskBadge"]).toBe("Scheduled routine");
+  });
+
+  // §十二 F3（2026-08-28）：费用口径标注随 UI 移除，键清退（仿 noAgents 先例）
+  it("token.costOpencodeOnly 已清退（费用口径标注移除，F3）", async () => {
+    const { DICT } = await import("./i18n");
+    expect(!("token.costOpencodeOnly" in DICT.zh), "zh 应无 costOpencodeOnly").toBe(true);
+    expect(!("token.costOpencodeOnly" in DICT.en), "en 应无 costOpencodeOnly").toBe(true);
+  });
+
+  // v2 M5 R2（TC-M5-04-4）：agent 空集空态随单选交互不可达 → noAgents 键清退
+  it("token.chart.noAgents 已清退（agent 单选 tab 恒有一项选中，空态不可达）", async () => {
+    const { DICT } = await import("./i18n");
+    expect(!("token.chart.noAgents" in DICT.zh), "zh 应无 noAgents").toBe(true);
+    expect(!("token.chart.noAgents" in DICT.en), "en 应无 noAgents").toBe(true);
+  });
+
+  // §二十六（2026-08-31）：tooltip 三行数字列右对齐——tipRow 单模板串拆
+  // name/pct 两键（数字不经 i18n）。钉住分隔符语言差异（zh 全角无空格 /
+  // en 半角带空格）——en 空格依赖 .chart-tip-rows 的 white-space: pre 保留
+  // （grid item 块化折叠风险的守卫钉，V2-OPEN-ITEMS §二十六）
+  it("§二十六 tipRow 已清退，tipRowName/tipRowPct 齐备且分隔符钉值", async () => {
+    const { DICT } = await import("./i18n");
+    expect(!("token.chart.tipRow" in DICT.zh), "zh 应无 tipRow").toBe(true);
+    expect(!("token.chart.tipRow" in DICT.en), "en 应无 tipRow").toBe(true);
+    expect(DICT.zh["token.chart.tipRowName"]).toBe("{name}：");
+    expect(DICT.zh["token.chart.tipRowPct"]).toBe("（{pct}%）");
+    expect(DICT.en["token.chart.tipRowName"]).toBe("{name}: ");
+    expect(DICT.en["token.chart.tipRowPct"]).toBe(" ({pct}%)");
+  });
 });
 
 describe("systemLangSafe：默认语言跟随系统", () => {
@@ -80,5 +244,13 @@ describe("changeLanguage：非 Tauri 环境仅更新本地 store", () => {
     expect(useLangStore.getState().lang).toBe("en");
     await changeLanguage("zh");
     expect(useLangStore.getState().lang).toBe("zh");
+  });
+});
+
+describe("v2 M6 新键（TC-M6-06-4）", () => {
+  it("token.hoverAgent zh/en 均有（分布行标签；完备性测试之上的显式钉）", async () => {
+    const { DICT } = await import("./i18n");
+    expect(DICT.zh["token.hoverAgent"]).toBe("今日 agent 分布");
+    expect(DICT.en["token.hoverAgent"]).toBe("Today's tokens by agent");
   });
 });

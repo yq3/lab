@@ -98,6 +98,13 @@ fn register_items(
 
 pub fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     let (menu, pause_reminders, interaction_item) = build_menu(app)?;
+    // 托盘图标平台分叉（V2-OPEN-ITEMS F15 后续）：Windows 用"灰底 tile + 猫"
+    // （复刻 macOS 26 dock 系统合成底观感，任务栏/托盘小尺寸下更醒目）；
+    // macOS 菜单栏保持紧裁满幅猫（32x32.png），且 icns 不得换 tile——
+    // 否则系统合成底会"方块套方块"。
+    #[cfg(windows)]
+    let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/tray-tile.png"))?;
+    #[cfg(not(windows))]
     let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/32x32.png"))?;
 
     // 句柄登记进 TrayItems（热键/设置通道切换后同步勾选态用）

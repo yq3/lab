@@ -1,14 +1,21 @@
 import { describe, expect, it } from "vitest";
 import {
+  // v2 registry：AGENT_OPENCODE 常量已删（迁 agents.ts 表）；夹具直接用
+  // 字面量钉 wire 值
+  dayLabelsBetween,
   formatCost,
   formatTokens,
   localDayEndMs,
   localDayStartMs,
   parseStatsError,
   rangeForPreset,
+  resolveQueryRange,
   sumRows,
   type TokenRow,
 } from "./token-stats";
+
+/** 夹具默认 agent（原 AGENT_OPENCODE 常量位）。 */
+const AGENT_OPENCODE = "opencode";
 
 function row(overrides: Partial<TokenRow> = {}): TokenRow {
   return {
@@ -23,6 +30,10 @@ function row(overrides: Partial<TokenRow> = {}): TokenRow {
     tokens_cache_write: 0,
     time_created: null,
     time_updated: null,
+    model_id: null,
+    project_name: null,
+    title: null,
+    agent: AGENT_OPENCODE,
     ...overrides,
   };
 }
@@ -73,6 +84,101 @@ describe("rangeForPreset：时间跨度（含当天，TC-TK-08）", () => {
     expect(toMs).toBe(now.getTime());
     const from = new Date(fromMs);
     expect(from.getDate()).toBe(18); // 跨月由 Date 自行回退（7-18）
+  });
+
+  // ---- v2 M3（§3.3，TC-M3-04）：today preset ----
+
+  it("today：from = 本地今天 0 点、to = now（与 token_stats_today 同 0 点起点）", () => {
+    // 注入固定时刻：正午
+    const noon = new Date(2026, 7, 16, 12, 34, 56, 789);
+    const r = rangeForPreset("today", noon);
+    expect(r.toMs).toBe(noon.getTime());
+    const from = new Date(r.fromMs);
+    expect([from.getFullYear(), from.getMonth(), from.getDate()]).toEqual([2026, 7, 16]);
+    expect([from.getHours(), from.getMinutes(), from.getSeconds(), from.getMilliseconds()]).toEqual(
+      [0, 0, 0, 0],
+    );
+    // 跨午夜边界前 1ms：起点仍是当天 0 点
+    const late = new Date(2026, 7, 16, 23, 59, 59, 999);
+    const fromLate = new Date(rangeForPreset("today", late).fromMs);
+    expect(fromLate.getDate()).toBe(16);
+    // 午夜后第一毫秒：起点翻到次日 0 点
+    const next = new Date(2026, 7, 17, 0, 0, 0, 0);
+    const fromNext = new Date(rangeForPreset("today", next).fromMs);
+    expect(fromNext.getDate()).toBe(17);
+    expect(fromNext.getHours()).toBe(0);
+  });
+});
+
+// ---- §十二 F2 审查 P3-5：dayLabelsBetween 直测（标签生成函数自身） ----
+
+describe("dayLabelsBetween：窗口日标签全列表（F2 补零柱数据源）", () => {
+  it("两端含、顺序升序（单日=1 枚；3 天=3 枚）", () => {
+    const one = dayLabelsBetween(
+      new Date(2026, 7, 28, 9, 0).getTime(),
+      new Date(2026, 7, 28, 18, 0).getTime(),
+    );
+    expect(one).toEqual(["2026-08-28"]);
+    const three = dayLabelsBetween(
+      new Date(2026, 7, 26, 23, 0).getTime(),
+      new Date(2026, 7, 28, 0, 30).getTime(),
+    );
+    expect(three).toEqual(["2026-08-26", "2026-08-27", "2026-08-28"]);
+  });
+
+  it("跨月步进正确（7 天窗口含月末月初）", () => {
+    const labels = dayLabelsBetween(
+      new Date(2026, 6, 29).getTime(), // 2026-07-29
+      new Date(2026, 7, 4, 12, 0).getTime(), // 2026-08-04
+    );
+    expect(labels[0]).toBe("2026-07-29");
+    expect(labels[6]).toBe("2026-08-04");
+    expect(labels).toHaveLength(7);
+  });
+
+  it("from > to（倒置区间）→ 空列表（防御，不产生负步进死循环）", () => {
+    const labels = dayLabelsBetween(
+      new Date(2026, 7, 28).getTime(),
+      new Date(2026, 7, 26).getTime(),
+    );
+    expect(labels).toEqual([]);
+  });
+});
+
+// ---- v2 M4 R3（tester R2 P2）：查询窗口解析——preset 随调用时刻前进 ----
+
+describe("resolveQueryRange：load 时重算查询窗口（挂载定格回归钉子）", () => {
+  const T0 = new Date(2026, 7, 26, 10, 0, 0, 0);
+  const T1 = new Date(2026, 7, 26, 18, 30, 0, 0); // 同日 8.5h 后（活跃会话越过定格 toMs）
+
+  it("preset（today/7d/30d）：后一次调用的 toMs 随时刻前进（越过旧 toMs 的会话不落窗外）", () => {
+    const first = resolveQueryRange("today", "", "", T0);
+    const second = resolveQueryRange("today", "", "", T1);
+    expect(first.toMs).toBe(T0.getTime());
+    expect(second.toMs).toBe(T1.getTime());
+    expect(second.toMs).toBeGreaterThan(first.toMs);
+    // fromMs 锚定不变（同日 0 点）
+    expect(second.fromMs).toBe(first.fromMs);
+    // 7d 同语义
+    const a = resolveQueryRange("7d", "", "", T0);
+    const b = resolveQueryRange("7d", "", "", T1);
+    expect(b.toMs).toBeGreaterThan(a.toMs);
+  });
+
+  it("custom：用户指定区间语义不变——now 前进不改变 from/to（整天边界含当天）", () => {
+    const fromStr = "2026-08-20";
+    const toStr = "2026-08-26";
+    const a = resolveQueryRange("custom", fromStr, toStr, T0);
+    const b = resolveQueryRange("custom", fromStr, toStr, T1);
+    expect(a).toEqual(b);
+    expect(a.fromMs).toBe(localDayStartMs(fromStr));
+    expect(a.toMs).toBe(localDayEndMs(toStr));
+  });
+
+  it("custom 从至倒填自动归位（min/max，既有语义保留）", () => {
+    const r = resolveQueryRange("custom", "2026-08-26", "2026-08-20", T0);
+    expect(r.fromMs).toBe(localDayStartMs("2026-08-20"));
+    expect(r.toMs).toBe(localDayEndMs("2026-08-26"));
   });
 });
 
@@ -147,7 +253,18 @@ describe("sumRows：KPI 汇总", () => {
     expect(kpi.cost).toBeCloseTo(0.6, 9);
   });
 
-  it("空列表全 0", () => {
-    expect(sumRows([])).toEqual({ input: 0, output: 0, cacheRead: 0, cost: 0 });
+  it("v2 M3（TC-M3-07-3）：total = in + out + cache_read，reasoning 不参与任何汇总", () => {
+    const rows = [
+      row({ tokens_input: 100, tokens_output: 10, tokens_cache_read: 5, tokens_reasoning: 999 }),
+      row({ tokens_input: 200, tokens_output: 20, tokens_cache_read: 6, tokens_reasoning: 888 }),
+    ];
+    const kpi = sumRows(rows);
+    expect(kpi.total, "total = (100+10+5) + (200+20+6)，reasoning 不计").toBe(341);
+    // 若误把 reasoning 计入（341 + 999 + 888），total 会是 2228——341 钉住排除
+    expect(kpi.total).not.toBe(341 + 999 + 888);
+  });
+
+  it("空列表全 0（含 total）", () => {
+    expect(sumRows([])).toEqual({ total: 0, input: 0, output: 0, cacheRead: 0, cost: 0 });
   });
 });

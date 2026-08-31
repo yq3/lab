@@ -1,12 +1,14 @@
 import { useEffect, useRef } from "react";
 import { computeCanvasSize, computeFrameRect } from "../lib/scaling";
+import { computePetScale, frameRectAtScale } from "../lib/pet-scale";
+import { PET_SIZES } from "../lib/size-bridge";
 import { SpriteAnimator } from "../lib/sprite";
 import { DragClickGuard, shouldRotateOnClick } from "../lib/pet-drag";
 import { startPetDrag } from "../lib/interaction";
 import type { NormalizedState } from "../lib/state";
 import { usePetStore } from "./petStore";
 
-const CSS_SIZE = 220;
+/** 占位精灵帧尺寸（128×128 PNG；§十一档位化后 canvas 尺寸来自 store）。 */
 const FRAME_W = 128;
 const FRAME_H = 128;
 
@@ -81,9 +83,15 @@ export default function PetCanvas() {
   const ackReminder = usePetStore((s) => s.ackReminderBubble);
   const raw = usePetStore((s) => s.raw);
   const atlas = usePetStore((s) => s.atlas);
+  // §十一归一化：atlasMeta.idle 是缩放基准（与 atlas 同时 setAtlas 更新）
+  const atlasMeta = usePetStore((s) => s.atlasMeta);
+  const atlasMetaRef = useRef(atlasMeta);
+  atlasMetaRef.current = atlasMeta;
   const passThrough = usePetStore((s) => s.passThrough);
   const openContextMenu = usePetStore((s) => s.openContextMenu);
   const closeContextMenu = usePetStore((s) => s.closeContextMenu);
+  // §十一：大小档位（变化 → 下方渲染 effect 以 [size] 依赖重建并重设 canvas）
+  const size = usePetStore((s) => s.size);
 
   // M6 拖拽/点击判定状态机（R2：拖拽尾巴的补发 click 不再触发状态轮换；
   // 纯逻辑在 lib/pet-drag.ts，单测覆盖拖拽/纯点击/平台差异兜底路径）
@@ -94,7 +102,8 @@ export default function PetCanvas() {
   const passThroughRef = useRef(passThrough);
   passThroughRef.current = passThrough;
 
-  // rAF 循环读取最新的 sprite/raw，避免每帧重建 effect
+  // rAF 循环读取最新的 sprite/raw，避免每帧重建 effect；§十一：档位（size）
+  // 变化是低频事件，直接进 deps 重建 effect——canvas 尺寸/监听器随之重设
   const spriteRef = useRef(sprite);
   spriteRef.current = sprite;
   const rawRef = useRef(raw);
@@ -155,6 +164,9 @@ export default function PetCanvas() {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
+    // §十一：当前档位的逻辑尺寸（PET_SIZES 与 Rust pet_size.rs 锁步）
+    const cssSize = PET_SIZES[size];
+
     let rafId = 0;
     let disposed = false;
     let media: MediaQueryList | null = null;
@@ -162,11 +174,11 @@ export default function PetCanvas() {
 
     const resize = () => {
       const dpr = window.devicePixelRatio || 1;
-      const size = computeCanvasSize(CSS_SIZE, dpr);
-      canvas.width = size;
-      canvas.height = size;
-      canvas.style.width = `${CSS_SIZE}px`;
-      canvas.style.height = `${CSS_SIZE}px`;
+      const px = computeCanvasSize(cssSize, dpr);
+      canvas.width = px;
+      canvas.height = px;
+      canvas.style.width = `${cssSize}px`;
+      canvas.style.height = `${cssSize}px`;
     };
 
     // 监听 dpr 变化（拖到不同缩放比的屏幕）重设画布尺寸（TC-SP-03）。
@@ -186,13 +198,16 @@ export default function PetCanvas() {
 
     const drawPlaceholder = (now: number) => {
       const dpr = window.devicePixelRatio || 1;
-      const canvasW = computeCanvasSize(CSS_SIZE, dpr);
+      const canvasW = computeCanvasSize(cssSize, dpr);
       const canvasH = canvasW;
       const img = imgRef.current;
       // M7：庆祝期占位画面切到 success（挥手语义最贴近；TC-TD-04）
       const celebrating = celebrationActive(celebrationRef.current);
       const sprite = celebrating ? "success" : spriteRef.current;
       ctx.clearRect(0, 0, canvasW, canvasH);
+      // 占位路径用平滑插值（committer P3-5：atlas sheet 构建失败回退本路径
+      // 时 ctx 可能残留 nearest——128→220 放大锯齿；此处显式复位）
+      ctx.imageSmoothingEnabled = true;
 
       if (!img) {
         // P2-3：素材缺失时的纯色兜底——画一个居中圆（宠物轮廓占位），不崩、不白屏。
@@ -222,13 +237,13 @@ export default function PetCanvas() {
 
     const drawAtlas = (now: number) => {
       const dpr = window.devicePixelRatio || 1;
-      const canvasW = computeCanvasSize(CSS_SIZE, dpr);
+      const canvasW = computeCanvasSize(cssSize, dpr);
       const canvasH = canvasW;
       ctx.clearRect(0, 0, canvasW, canvasH);
 
       const sheet = sheetRef.current;
-      const size = atlasSizeRef.current;
-      if (!sheet || !size) {
+      const frame = atlasSizeRef.current; // 帧尺寸（committer P3-6：避免遮蔽组件级 size 档位）
+      if (!sheet || !frame) {
         drawPlaceholder(now); // sheet 构建失败兜底
         return;
       }
@@ -239,17 +254,32 @@ export default function PetCanvas() {
         : rawRef.current;
       animator.setState(effective, now);
       const { row, col } = animator.currentFrame(now);
-      const { dx, dy, dw, dh } = computeFrameRect(canvasW, canvasH, size.fw, size.fh);
+      // §十一归一化：有 idle 度量 → 锚定缩放（"内置猫现状"= 中档基准，
+      // petdex 满帧素材向内置靠拢）；缺失（空兜底数据/旧 DTO）→ 全帧适配
+      //（原 min 行为，占位降级语义不变）
+      const scaleLogical = computePetScale(
+        cssSize,
+        frame.fw,
+        frame.fh,
+        atlasMetaRef.current?.idle ?? null,
+      );
+      // nearest 像素锐化（§11.2：归一化会放大内置素材，平滑插值发糊）；
+      // canvas.width 赋值会重置上下文状态，故每帧设置（仅 atlas 路径）
+      ctx.imageSmoothingEnabled = false;
+      const rect =
+        scaleLogical !== null
+          ? frameRectAtScale(canvasW, canvasH, frame.fw, frame.fh, scaleLogical * dpr)
+          : computeFrameRect(canvasW, canvasH, frame.fw, frame.fh);
       ctx.drawImage(
         sheet,
-        col * size.fw,
-        row * size.fh,
-        size.fw,
-        size.fh,
-        dx,
-        dy,
-        dw,
-        dh,
+        col * frame.fw,
+        row * frame.fh,
+        frame.fw,
+        frame.fh,
+        rect.dx,
+        rect.dy,
+        rect.dw,
+        rect.dh,
       );
     };
 
@@ -267,7 +297,7 @@ export default function PetCanvas() {
       if (media) media.removeEventListener("change", onDprChange);
       window.removeEventListener("resize", onDprChange);
     };
-  }, []);
+  }, [size]);
 
   // M6 交互（TC-WIN-01/02/03）：主键按下记录起点，位移超阈值 → 原生窗口拖拽
   // （跨屏由系统处理，TC-APP-11）；右键弹 PetMenu。穿透态下 webview 收不到
@@ -275,6 +305,8 @@ export default function PetCanvas() {
   // 点击语义保留：未超阈值的按下-抬起仍是 click（M1 状态轮换 + TC-RM-04 确认）；
   // 拖拽结束后 OS/WKWebView 可能补发一次 click（R2 实测），由 DragClickGuard
   // 识别并吞掉——拖拽绝不附加单击效果，真实单击不受影响。
+  //（v2 M3 主动层悬停卡已按用户 2026-08-25 裁定移除——pointerenter/leave
+  //  接线随组件一并清退，三层快捷查看降为两层。）
   const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (e.button !== 0 || passThroughRef.current) return;
     // R3 P1：先快照菜单开态（此刻 PetMenu 的冒泡关闭尚未执行）

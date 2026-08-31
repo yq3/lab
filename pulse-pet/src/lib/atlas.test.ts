@@ -18,6 +18,7 @@ const OK_META: AtlasMeta = {
   frameW: 192,
   frameH: 208,
   notice: null,
+  idle: null,
 };
 
 describe("parseAtlasMeta", () => {
@@ -59,6 +60,24 @@ describe("parseAtlasMeta", () => {
     expect(parseAtlasMeta({ ...OK_META, cols: 0 })).toBeNull();
     expect(parseAtlasMeta({ ...OK_META, frameW: 0 })).toBeNull();
     expect(parseAtlasMeta({ ...OK_META, currentSource: "unknown" })).toBeNull();
+  });
+
+  it("§十一：idle 度量解析（合法对象 / 缺省 null / 非法 → null）", () => {
+    expect(parseAtlasMeta({ ...OK_META, idle: { x: 56, y: 48, w: 88, h: 108 } })?.idle).toEqual({
+      x: 56,
+      y: 48,
+      w: 88,
+      h: 108,
+    });
+    // 缺省 / null → null（旧 DTO / 全透明兜底，渲染层回退全帧适配）
+    expect(parseAtlasMeta(OK_META)?.idle).toBeNull();
+    expect(parseAtlasMeta({ ...OK_META, idle: null })?.idle).toBeNull();
+    // 非法：零尺寸 / 负坐标 / 非整数 / 缺字段
+    expect(parseAtlasMeta({ ...OK_META, idle: { x: 0, y: 0, w: 0, h: 10 } })?.idle).toBeNull();
+    expect(parseAtlasMeta({ ...OK_META, idle: { x: -1, y: 0, w: 10, h: 10 } })?.idle).toBeNull();
+    expect(parseAtlasMeta({ ...OK_META, idle: { x: 1.5, y: 0, w: 10, h: 10 } })?.idle).toBeNull();
+    expect(parseAtlasMeta({ ...OK_META, idle: { x: 0, y: 0, w: 10 } })?.idle).toBeNull();
+    expect(parseAtlasMeta({ ...OK_META, idle: "big" })?.idle).toBeNull();
   });
 });
 

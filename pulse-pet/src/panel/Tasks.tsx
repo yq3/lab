@@ -1,0 +1,1081 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  ACTION_LOGS_CHANGED_EVENT,
+  REMINDER_TRIGGER_EVENT,
+  REMINDER_TEMPLATES,
+  actionBadge,
+  actionBadgeTitle,
+  deleteReminder,
+  emptyExecState,
+  execBadge,
+  execFromParams,
+  execParamsJson,
+  fetchActionLogs,
+  fetchFireworksGlobal,
+  fetchPaused,
+  fetchReminders,
+  formatInterval,
+  formatLogTime,
+  hasSmartQuotes,
+  isTauriRuntime,
+  kindEmoji,
+  kindLabel,
+  normalizeSmartQuotes,
+  parseWeekdays,
+  renderTaskSummary,
+  ruleToForm,
+  scheduleSummary,
+  setFireworksGlobal,
+  skipTaskOnce,
+  triggerReminderNow,
+  upsertReminder,
+  validateReminderInput,
+  weekdaysToJson,
+  type ActionLogPage,
+  type ActionType,
+  type ExecFormState,
+  type ReminderInput,
+  type ReminderKind,
+  type ReminderRule,
+  type ScheduleKind,
+} from "../lib/reminders";
+import { ROUTINE_TEMPLATES, matchOf, templateOf, tplHintKey } from "../lib/routine-templates";
+import { specOf } from "../lib/agents";
+import { t, useLangStore } from "../lib/i18n";
+import { pluginEnabled, usePluginStore } from "../lib/plugin-store";
+
+/**
+ * 定时任务页（v2 M4，V2-DESIGN §4.7；原 Reminders.tsx 改名重构）：
+ * - 一张列表：动作徽标（🔔 notify / ⚡ exec，title 说明——§十二 F10 💧→🔔）
+ *   + 类别列（§十二 F11：todo 派生行同渲染「📋 待办」）+ 名称 + 调度摘要
+ *   （每 30 分钟 · 09:00-18:00 / 每天 09:00 / 周三、五 09:00 / 一次 · 08-25 21:00）
+ *   + 启用开关 + 行操作（编辑/试一试/跳过本次/删除两步确认）；todo 派生行
+ *   保持 M2 展示（可见惰性 + 📋 徽标；§十二 F12 行内烟花勾选项已移除）；
+ * - 表单按 action_type 条件显隐（完整重做）：notify = kind/文案/调度三分支/
+ *   烟花；exec = 任务名/例程模板注册表块（Part B：chips 多模板）/command 等宽多行/cwd/超时/调度；
+ * - Rust validate 权威 + 前端同规则预检（v1 模式）；
+ * - 执行历史区（折叠面板，routine-exec.md Part A）：action_logs 倒序分页
+ *   10 条/页（页码 + 上一页/下一页在块底部居中，筛选下拉独占顶部）+ 状态
+ *   色点 + 行内任务名（快照，不关联当前 rules）+ 展开「命令（当时）」+
+ *   「工作目录（当时）」块（005 快照——实录与配置恒同值，单命令块）+
+ *   output_tail（等宽）+ scheduled_at 与 started_at 差（补跑延迟）；旧行
+ *   command null →「未记录」、cwd null →「未配置（继承 App 进程目录）」。
+ * - i18n：tasks.* 命名空间（reminders.* 存量保留复用）。
+ */
+
+const KINDS: { id: ReminderKind; labelKey: string }[] = [
+  { id: "hydration", labelKey: "reminders.kind.hydration" },
+  { id: "rest", labelKey: "reminders.kind.rest" },
+  { id: "custom", labelKey: "reminders.kind.custom" },
+];
+
+/** 模板键（与 REMINDER_TEMPLATES 按序对应；label 经 t() 本地化）。 */
+const TEMPLATE_KEYS = ["reminders.tpl.hydration", "reminders.tpl.rest1", "reminders.tpl.rest2"];
+
+/** 调度三分支（§4.7）。 */
+const SCHEDULE_KINDS: { id: ScheduleKind; labelKey: string }[] = [
+  { id: "interval", labelKey: "tasks.schedule.interval" },
+  { id: "daily", labelKey: "tasks.schedule.daily" },
+  { id: "once", labelKey: "tasks.schedule.once" },
+];
+
+// ExecFormState / emptyExecState / execParamsJson / execFromParams 已迁至
+// lib/reminders.ts 导出（Part B：泛化 tplAgent/tpl_flags + 单测面；防
+// lib→panel 反向依赖）。
+
+function emptyForm(): ReminderInput {
+  return {
+    kind: "hydration",
+    label: t(TEMPLATE_KEYS[0]),
+    interval_minutes: 30,
+    start_time: null,
+    end_time: null,
+    enabled: true,
+    use_fireworks: false,
+    action_type: "notify",
+    action_params: null,
+    schedule_kind: "interval",
+    schedule_at: null,
+    schedule_weekdays: null,
+  };
+}
+
+/** 当前语言的模板列表（label 本地化；kind/interval 取 REMINDER_TEMPLATES 权威值）。 */
+function templatesHere() {
+  return REMINDER_TEMPLATES.map((tpl, i) => ({
+    ...tpl,
+    label: t(TEMPLATE_KEYS[i]),
+  }));
+}
+
+/**
+ * "文案仍是模板默认值"判定：跨语言收集 zh/en 两套模板文案——切换语言后
+ * 旧语言的默认文案也能被识别为"模板值"，kind 切换跟随逻辑不误判为用户改过。
+ */
+function allTemplateLabels(): Set<string> {
+  const labels = new Set<string>();
+  for (const tpl of REMINDER_TEMPLATES) labels.add(tpl.label);
+  for (const key of TEMPLATE_KEYS) {
+    labels.add(t(key, undefined, "zh"));
+    labels.add(t(key, undefined, "en"));
+  }
+  return labels;
+}
+
+/** once 时刻 "YYYY-MM-DDTHH:MM" → datetime-local input 值。 */
+function onceToLocalInput(at: string | null | undefined): string {
+  return at ?? "";
+}
+
+export default function Tasks() {
+  const [rules, setRules] = useState<ReminderRule[] | null>(null);
+  // §十二 F14（2026-08-28）：stats state 随「历史统计」区移除清退
+  const [fireworksGlobal, setFwGlobal] = useState(false);
+  const [paused, setPaused] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [editing, setEditing] = useState<ReminderRule | null>(null);
+  const [form, setForm] = useState<ReminderInput>(emptyForm);
+  const [exec, setExec] = useState<ExecFormState>(emptyExecState);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+  /** 两步删除确认：第一次点"删除"变为"确认删除？"，3s 内再点才执行。 */
+  const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
+  /** 执行历史区（§4.7）：折叠面板 + 分页 + 规则过滤。 */
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [history, setHistory] = useState<ActionLogPage | null>(null);
+  const [historyPage, setHistoryPage] = useState(1);
+  const [historyFilter, setHistoryFilter] = useState<number | null>(null);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [expandedLog, setExpandedLog] = useState<number | null>(null);
+  const lang = useLangStore((s) => s.lang); // M8 i18n：语言变化时本页文案重渲染
+  // v2 M2：todo 派生行的「已停用（插件关闭）」徽标数据源（TC-UI-07-3）
+  const plugins = usePluginStore((s) => s.plugins);
+  const todoPluginDisabled = !pluginEnabled(plugins, "built-in-todo");
+
+  const load = useCallback(async () => {
+    if (!isTauriRuntime()) {
+      setError(t("reminders.needApp"));
+      return;
+    }
+    try {
+      // §十二 F14：fetchReminderStats 随统计区移除退出并行拉取
+      const [rs, fw, pa] = await Promise.all([
+        fetchReminders(),
+        fetchFireworksGlobal(),
+        fetchPaused(),
+      ]);
+      setRules(rs);
+      setFwGlobal(fw);
+      setPaused(pa);
+      setError(null);
+    } catch (e) {
+      setError(t("reminders.loadFail", { msg: e instanceof Error ? e.message : String(e) }));
+    }
+  }, []);
+
+  const loadHistory = useCallback(async (page: number, filter: number | null) => {
+    try {
+      const p = await fetchActionLogs(filter, page);
+      setHistory(p);
+      setHistoryError(null);
+    } catch (e) {
+      setHistoryError(
+        t("tasks.history.loadFail", { msg: e instanceof Error ? e.message : String(e) }),
+      );
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  useEffect(() => {
+    if (historyOpen) void loadHistory(historyPage, historyFilter);
+  }, [historyOpen, historyPage, historyFilter, loadHistory]);
+
+  // §二十七：失效广播 → 本页数据自动刷新（无需切 tab）。
+  // - action-logs://changed：exec 开始（running 行）/ 终态回写 / skipped 落库
+  //   → 刷任务列表 +（历史面板开着时）刷当前页历史；
+  // - reminder://trigger：notify 触发（不写 action_logs）→ 只刷任务列表「上次」列。
+  // listener 只注册一次，回调经 ref 读最新开合/分页态（闭包不随渲染更新）。
+  const historyView = useRef({ open: historyOpen, page: historyPage, filter: historyFilter });
+  historyView.current = { open: historyOpen, page: historyPage, filter: historyFilter };
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    let unlisten: (() => void) | undefined;
+    let alive = true;
+    void import("@tauri-apps/api/event")
+      .then(async ({ listen }) => {
+        const unLogs = await listen(ACTION_LOGS_CHANGED_EVENT, () => {
+          void load();
+          const v = historyView.current;
+          if (v.open) void loadHistory(v.page, v.filter);
+        });
+        const unTrig = await listen(REMINDER_TRIGGER_EVENT, () => void load());
+        return () => {
+          unLogs();
+          unTrig();
+        };
+      })
+      .then((un) => {
+        if (alive) unlisten = un;
+        else un();
+      });
+    return () => {
+      alive = false;
+      unlisten?.();
+    };
+  }, [load, loadHistory]);
+
+  /** CRUD 后调度器已在 Rust 侧 reload，前端刷新展示即可（TC-RM-07）。 */
+  const refresh = () => {
+    void load();
+    if (historyOpen) void loadHistory(historyPage, historyFilter);
+  };
+
+  const showToast = (msg: string) => {
+    setToast(msg);
+    setTimeout(() => setToast(null), 3000);
+  };
+
+  const save = async () => {
+    // 提交形态：exec 的 command/cwd/timeout 序列化进 action_params
+    const payload: ReminderInput =
+      form.action_type === "exec"
+        ? { ...form, action_params: execParamsJson(exec) }
+        : { ...form, action_params: null };
+    const err = validateReminderInput(payload);
+    if (err) {
+      setFormError(err);
+      return;
+    }
+    setFormError(null);
+    try {
+      await upsertReminder(editing?.id ?? null, { ...payload, label: payload.label.trim() });
+      setEditing(null);
+      setForm(emptyForm());
+      setExec(emptyExecState());
+      refresh();
+    } catch (e) {
+      setFormError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const remove = async (r: ReminderRule) => {
+    // wry/WKWebView 无 window.confirm 原生对话框（E2E 实测返回假值）→ 应用内两步确认
+    if (confirmDeleteId !== r.id) {
+      setConfirmDeleteId(r.id);
+      setTimeout(() => {
+        setConfirmDeleteId((cur) => (cur === r.id ? null : cur));
+      }, 3000);
+      return;
+    }
+    setConfirmDeleteId(null);
+    try {
+      await deleteReminder(r.id);
+      if (editing?.id === r.id) {
+        setEditing(null);
+        setForm(emptyForm());
+        setExec(emptyExecState());
+      }
+      if (historyFilter === r.id) setHistoryFilter(null);
+      refresh();
+    } catch (e) {
+      showToast(t("reminders.toast.deleteFail", { msg: e instanceof Error ? e.message : String(e) }));
+    }
+  };
+
+  const quickToggle = async (r: ReminderRule, patch: Partial<ReminderInput>) => {
+    try {
+      await upsertReminder(r.id, { ...ruleToForm(r), ...patch });
+      refresh();
+    } catch (e) {
+      showToast(t("reminders.toast.updateFail", { msg: e instanceof Error ? e.message : String(e) }));
+    }
+  };
+
+  const test = async (r: ReminderRule) => {
+    try {
+      const status = await triggerReminderNow(r.id);
+      if (status === "fired") showToast(t("reminders.toast.fired", { label: r.label }));
+      else if (status === "dedup") showToast(t("reminders.toast.dedup"));
+      else showToast(t("reminders.toast.paused"));
+    } catch (e) {
+      showToast(t("reminders.toast.triggerFail", { msg: e instanceof Error ? e.message : String(e) }));
+    }
+  };
+
+  /** 跳过本次（§4.3）：即时推进 next_due，不触发不记录。 */
+  const skipOnce = async (r: ReminderRule) => {
+    try {
+      await skipTaskOnce(r.id);
+      showToast(t("tasks.skipDone"));
+      refresh();
+    } catch (e) {
+      showToast(t("tasks.skipFail", { msg: e instanceof Error ? e.message : String(e) }));
+    }
+  };
+
+  /** A4（M4 P2⑥ 清偿）：全局烟花开关写失败不再静默——报错 + toast + 回读真实值。 */
+  const toggleFireworksGlobal = (enabled: boolean) => {
+    setFwGlobal(enabled);
+    void setFireworksGlobal(enabled)
+      .then(refresh)
+      .catch((e) => {
+        console.error("[pulsepet] set fireworks global failed:", e);
+        showToast(
+          t("reminders.toast.fwGlobalFail", { msg: e instanceof Error ? e.message : String(e) }),
+        );
+        refresh(); // 回读权威值，撤销本地乐观态
+      });
+  };
+
+  const templates = useMemo(templatesHere, [lang]);
+
+  const applyTemplate = (tpl: (typeof templates)[number]) => {
+    setForm((f) => ({
+      ...f,
+      kind: tpl.kind,
+      label: tpl.label,
+      interval_minutes: tpl.interval_minutes,
+    }));
+    setFormError(null);
+  };
+
+  /** 例程模板一键填充（§4.6 → Part B 注册表）：按选中模板拼 command。
+      恒可点（2026-08-30 用户裁定恢复旧行为）：空指令也填充骨架命令
+      （'… "" '），随后输入指令自动重拼，或高级用户直接手改 command——
+      保留「先拿骨架、后自己写」的口子。 */
+  const applyRoutineTemplate = () => {
+    const tpl = templateOf(exec.tplAgent);
+    if (!tpl) return;
+    const name = form.label.trim() || t("tasks.form.namePlaceholder");
+    setExec((e) => ({ ...e, command: tpl.build(name, e.tplInstruction, e.tplFlags) }));
+    setFormError(null);
+  };
+
+  const startEdit = (r: ReminderRule) => {
+    setEditing(r);
+    setForm(ruleToForm(r));
+    setExec(execFromParams(r.action_params));
+    setFormError(null);
+  };
+
+  const setKind = (kind: ReminderKind) => {
+    setForm((f) => {
+      // 文案还是模板默认值时跟随 kind 换默认文案；用户改过则保留
+      const isTemplate = allTemplateLabels().has(f.label);
+      const tpl = templates.find((x) => x.kind === kind);
+      return {
+        ...f,
+        kind,
+        label: isTemplate && tpl ? tpl.label : f.label,
+        interval_minutes: isTemplate && tpl ? tpl.interval_minutes : f.interval_minutes,
+      };
+    });
+  };
+
+  /** 调度类型切换：清无关字段（P2-6 同 Rust normalize）。 */
+  const setScheduleKind = (kind: ScheduleKind) => {
+    setForm((f) => ({
+      ...f,
+      schedule_kind: kind,
+      schedule_at: null,
+      schedule_weekdays: null,
+      // 回到 interval 时恢复合法间隔（daily/once 行 interval 恒 0）
+      interval_minutes: kind === "interval" ? (f.interval_minutes >= 1 ? f.interval_minutes : 30) : 0,
+      // 切离 interval 时清时间窗（防遗留窗口卡住 in_window 误 skipped）
+      start_time: kind === "interval" ? f.start_time : null,
+      end_time: kind === "interval" ? f.end_time : null,
+    }));
+  };
+
+  /**
+   * 动作类型切换（notify ↔ exec）：清调度无关态 + exec 默认间隔调度。
+   * §二十三二轮微调：exec 任务名默认值「任务名示例」——仅当 label 仍是
+   * 模板默认文案（用户没改过）时替换；切回 notify 对称恢复模板默认
+   *（zh/en 双语判定，防跨语言残留）。
+   */
+  const setActionType = (action: ActionType) => {
+    setForm((f) => {
+      let { label } = f;
+      if (action === "exec" && allTemplateLabels().has(label)) {
+        label = t("tasks.form.nameDefault");
+      } else if (
+        action === "notify" &&
+        (label === t("tasks.form.nameDefault", undefined, "zh") ||
+          label === t("tasks.form.nameDefault", undefined, "en"))
+      ) {
+        label = t(TEMPLATE_KEYS[0]);
+      }
+      return {
+        ...f,
+        label,
+        action_type: action,
+        action_params: null,
+        // exec 不消费时间窗（表单不提供；Rust normalize 双保险清空）
+        start_time: action === "exec" ? null : f.start_time,
+        end_time: action === "exec" ? null : f.end_time,
+        use_fireworks: action === "exec" ? false : f.use_fireworks,
+      };
+    });
+    if (action === "exec") setExec(emptyExecState());
+  };
+
+  /** 任务名/文案输入：更新 label；exec 语境同步重拼模板 command（§二十三）。
+      Part B：matchOf 反推模板（重拼只看 command 形态）+ 空指令守卫——
+      编辑回填 tplInstruction 恒空，不再以空指令覆盖原 command。 */
+  const onLabelInput = (value: string) => {
+    setForm((f) => ({ ...f, label: value }));
+    setExec((x) => {
+      if (form.action_type !== "exec") return x;
+      const tpl = matchOf(x.command);
+      if (!tpl || !x.tplInstruction.trim()) return x;
+      return {
+        ...x,
+        command: tpl.build(
+          value.trim() || t("tasks.form.namePlaceholder"),
+          x.tplInstruction,
+          x.tplFlags,
+        ),
+      };
+    });
+  };
+
+  const weekdays = parseWeekdays(form.schedule_weekdays);
+  const toggleWeekday = (day: number) => {
+    const next = weekdays.includes(day)
+      ? weekdays.filter((d) => d !== day)
+      : [...weekdays, day];
+    setForm((f) => ({ ...f, schedule_weekdays: weekdaysToJson(next) }));
+  };
+
+  /**
+   * 表单提交/取消按钮组（用户 2026-08-25 二次裁定：**不占独立动作行**，
+   * 并入实际渲染的最后一行字段行右端——表单按 action_type/schedule_kind
+   * 条件显隐，末行随分支变化：once｜interval+exec → 调度行；interval+notify
+   * → 时间窗行；daily → 星期行；todo 编辑态无字段行 → margin-left:auto 在
+   * flex-column 表单内天然右对齐。accent 非默认色保持上一轮方案）。
+   */
+  const formActions = (
+    <div className="task-form-actions">
+      <button className="seg primary" onClick={() => void save()}>
+        {editing ? t("reminders.form.save") : t("reminders.form.create")}
+      </button>
+      {editing && (
+        <button
+          className="seg"
+          onClick={() => {
+            setEditing(null);
+            setForm(emptyForm());
+            setExec(emptyExecState());
+            setFormError(null);
+          }}
+        >
+          {t("reminders.form.cancel")}
+        </button>
+      )}
+    </div>
+  );
+
+  if (error) {
+    return <div className="token-error">{error}</div>;
+  }
+  if (!rules) {
+    return <p className="token-empty">{t("reminders.loading")}</p>;
+  }
+
+  const totalPages = history ? Math.max(1, Math.ceil(history.total / history.page_size)) : 1;
+
+  return (
+    <div className="reminders">
+      {/* 全局区：烟花总开关 + 暂停状态提示（TC-RM-11/08） */}
+      <div className="reminder-toolbar">
+        <label className="reminder-check">
+          <input
+            type="checkbox"
+            checked={fireworksGlobal}
+            onChange={(e) => toggleFireworksGlobal(e.target.checked)}
+          />
+          {t("reminders.fwGlobal")}
+        </label>
+        {paused && <span className="reminder-paused-badge">{t("reminders.pausedBadge")}</span>}
+      </div>
+
+      {/* 任务列表（一张：notify/exec/todo 派生行同列） */}
+      <section className="token-section">
+        <h3>{t("tasks.rules.title", { n: rules.length })}</h3>
+        {rules.length === 0 && <p className="token-empty">{t("reminders.rules.empty")}</p>}
+        <ul className="reminder-list">
+          {rules.map((r) => (
+            <li key={r.id} className={r.enabled ? "reminder-item" : "reminder-item disabled"}>
+              <span className="task-badge" title={actionBadgeTitle(r)}>
+                {actionBadge(r)}
+              </span>
+              {/* 类别列：§十二 F11（2026-08-28）todo 派生行也渲染（「📋 待办」，
+                  与其他行格式一致）——原条件排除已删；todo 派生行另有
+                  「已停用（插件关闭）」徽标（M2，可见惰性） */}
+              <span className="reminder-kind">{kindEmoji(r.kind)} {kindLabel(r.kind)}</span>
+              {r.kind === "todo" && todoPluginDisabled && (
+                <span className="reminder-plugin-off">{t("plugins.disabledBadge")}</span>
+              )}
+              <span className="reminder-label" title={r.label}>
+                {r.label}
+              </span>
+              {/* 调度摘要（§4.7）：todo 派生行保持 M2 截止展示 */}
+              {r.kind === "todo" ? (
+                <span className="reminder-meta" title={r.start_time ?? undefined}>
+                  {t("reminders.due", {
+                    ts: (r.todo_due_at ?? r.start_time ?? "").replace("T", " ") || t("reminders.dueNone"),
+                  })}
+                </span>
+              ) : (
+                <span className="reminder-meta">{scheduleSummary(r)}</span>
+              )}
+              <span
+                className="reminder-meta"
+                title={r.last_skipped_at ?? r.last_triggered_at ?? t("reminders.lastNever")}
+              >
+                {r.last_triggered_at
+                  ? t("reminders.last", { ts: formatLogTime(r.last_triggered_at) })
+                  : r.last_skipped_at
+                    ? t("reminders.lastNever")
+                    : t("reminders.lastNever")}
+              </span>
+              <label
+                className="reminder-check compact"
+                title={r.enabled ? t("reminders.enabledOn") : t("reminders.enabledOff")}
+              >
+                <input
+                  type="checkbox"
+                  checked={r.enabled}
+                  onChange={(e) => void quickToggle(r, { enabled: e.target.checked })}
+                />
+                {t("reminders.enabled")}
+              </label>
+              {/* §十二 F12（2026-08-28）：todo 派生行的「烟花」勾选项移除（用户
+                  裁定）——烟花随全局总开关（OR 语义不变）；Todo 页无烟花字段、
+                  编辑表单全锁定，此入口原属会被 Todo 侧保存覆盖的半截入口 */}
+              <span className="reminder-actions">
+                <button className="seg" onClick={() => void test(r)}>
+                  {t("reminders.test")}
+                </button>
+                {/* 跳过本次：仅 v2 任务行（todo 派生一次性无"下次"语义） */}
+                {r.kind !== "todo" && (
+                  <button className="seg" onClick={() => void skipOnce(r)}>
+                    {t("tasks.skip")}
+                  </button>
+                )}
+                <button className="seg" onClick={() => startEdit(r)}>
+                  {t("reminders.edit")}
+                </button>
+                <button
+                  className="seg danger"
+                  onClick={() => void remove(r)}
+                  title={confirmDeleteId === r.id ? t("reminders.deleteHint") : t("reminders.delete")}
+                >
+                  {confirmDeleteId === r.id ? t("reminders.deleteConfirm") : t("reminders.delete")}
+                </button>
+              </span>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      {/* 新建 / 编辑表单（按 action_type 条件显隐，§4.7 完整重做） */}
+      <section className="token-section">
+        <h3>
+          {editing
+            ? t("reminders.form.editTitle", { n: editing.id })
+            : t("reminders.form.newTitle")}
+        </h3>
+        <div className="reminder-form">
+          {/* M4 P2 ②：编辑 todo 派生规则时锁类型/间隔/时刻 */}
+          {form.kind === "todo" && (
+            <p className="reminder-hint">{t("reminders.form.todoHint")}</p>
+          )}
+          {form.kind !== "todo" && (
+            <>
+              {/* 动作类型分段（notify/exec；用户 2026-08-25 裁定去图标——
+                  徽标仅保留在列表行） */}
+              <div className="token-seg" role="tablist" aria-label={t("tasks.actionType")}>
+                {(["notify", "exec"] as ActionType[]).map((a) => (
+                  <button
+                    key={a}
+                    className={form.action_type === a ? "seg active" : "seg"}
+                    onClick={() => setActionType(a)}
+                  >
+                    {t(`tasks.action.${a}`)}
+                  </button>
+                ))}
+              </div>
+
+              {/* §二十三二轮微调：exec 任务名上移到执行命令块最顶（独立行；
+                  notify 的「类型 + 文案」行保持在原位） */}
+              {form.action_type === "exec" && (
+                <div className="reminder-form-row">
+                  <label className="grow">
+                    {t("tasks.form.name")}
+                    <input
+                      type="text"
+                      value={form.label}
+                      maxLength={140}
+                      placeholder={t("tasks.form.namePlaceholder")}
+                      onChange={(e) => onLabelInput(e.target.value)}
+                    />
+                  </label>
+                </div>
+              )}
+
+              {/* notify 快捷模板（仅 notify 动作） */}
+              {form.action_type === "notify" && (
+                <div className="reminder-templates">
+                  {templates.map((tpl) => (
+                    <button key={tpl.label} className="seg" onClick={() => applyTemplate(tpl)}>
+                      {tpl.label}（{formatInterval(tpl.interval_minutes)}）
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* 例程模板注册表块（仅 exec；§4.6 → Part B routine-templates.ts）：
+                  chips 单选（默认预选 opencode，切换重置 flags、command 不因切换
+                  而变）+ 共享指令框 + 当前模板声明式 flags + 一键填充（恒可点——
+                  空指令填骨架，输入指令后自动重拼；高级用户可直接手改 command） */}
+              {form.action_type === "exec" && (
+                <div className="task-tpl-block">
+                  <div className="task-tpl-title">{t("tasks.tpl.blockTitle")}</div>
+                  <div className="task-tpl-chips">
+                    {ROUTINE_TEMPLATES.map((tpl) => (
+                      <button
+                        key={tpl.agentId}
+                        className={`seg tpl-chip${exec.tplAgent === tpl.agentId ? " active" : ""}`}
+                        onClick={() =>
+                          setExec((x) => ({ ...x, tplAgent: tpl.agentId, tplFlags: {} }))
+                        }
+                      >
+                        {t(specOf(tpl.agentId)?.labelKey ?? "panel.agentTask")}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="reminder-hint">{t(tplHintKey(exec.tplAgent))}</p>
+                  <textarea
+                    className="task-textarea"
+                    rows={2}
+                    placeholder={t("tasks.form.instruction")}
+                    value={exec.tplInstruction}
+                    onChange={(e) =>
+                      setExec((x) => {
+                        // §二十三 → Part B：指令输入自动重拼（matchOf 启发式 +
+                        // 空指令守卫——常规路径无需手改 command 文本框）
+                        const tpl = matchOf(x.command);
+                        const cmd =
+                          tpl && e.target.value.trim()
+                            ? tpl.build(
+                                form.label.trim() || t("tasks.form.namePlaceholder"),
+                                e.target.value,
+                                x.tplFlags,
+                              )
+                            : x.command;
+                        return { ...x, tplInstruction: e.target.value, command: cmd };
+                      })
+                    }
+                  />
+                  <div className="task-tpl-row">
+                    {templateOf(exec.tplAgent)?.flags.map((f) => (
+                      <label
+                        key={f.key}
+                        className={`reminder-check${exec.tplFlags[f.key] ? " danger-check" : ""}`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={exec.tplFlags[f.key] === true}
+                          onChange={(e) => {
+                            const checked = e.target.checked;
+                            setExec((x) => {
+                              // 已用模板拼过 command：flag 增删同步进 command
+                              const tpl = matchOf(x.command);
+                              const flags = { ...x.tplFlags, [f.key]: checked };
+                              const cmd =
+                                tpl && x.tplInstruction.trim()
+                                  ? tpl.build(
+                                      form.label.trim() || t("tasks.form.namePlaceholder"),
+                                      x.tplInstruction,
+                                      flags,
+                                    )
+                                  : x.command;
+                              return { ...x, tplFlags: flags, command: cmd };
+                            });
+                          }}
+                        />
+                        {t(f.i18nKey)}
+                      </label>
+                    ))}
+                    <button className="seg primary" onClick={applyRoutineTemplate}>
+                      {t("tasks.tpl.fill")}
+                    </button>
+                  </div>
+                  {templateOf(exec.tplAgent)?.flags
+                    .filter((f) => exec.tplFlags[f.key])
+                    .map((f) => (
+                      <p key={f.key} className="task-danger-hint">
+                        {t(`${f.i18nKey}Hint`)}
+                      </p>
+                    ))}
+                </div>
+              )}
+
+              {form.action_type === "notify" && (
+                <div className="reminder-form-row">
+                  <label>
+                    {t("reminders.form.type")}
+                    <select
+                      value={form.kind}
+                      onChange={(e) => setKind(e.target.value as ReminderKind)}
+                    >
+                      {KINDS.map((k) => (
+                        <option key={k.id} value={k.id}>
+                          {t(k.labelKey)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="grow">
+                    {t("reminders.form.label")}
+                    <input
+                      type="text"
+                      value={form.label}
+                      maxLength={140}
+                      placeholder={t("reminders.form.labelPlaceholder")}
+                      onChange={(e) => onLabelInput(e.target.value)}
+                    />
+                  </label>
+                </div>
+              )}
+
+              {/* exec 专属字段（§4.7：command 等宽多行 / cwd / 超时） */}
+              {form.action_type === "exec" && (
+                <>
+                  <label className="task-command-label">
+                    {t("tasks.form.command")}
+                    <textarea
+                      className="task-textarea mono"
+                      rows={3}
+                      value={exec.command}
+                      maxLength={2000}
+                      onChange={(e) => setExec((x) => ({ ...x, command: e.target.value }))}
+                    />
+                  </label>
+                  <p className="reminder-hint">{t("tasks.form.commandHint")}</p>
+                  {/* §二十三：弯引号（IME 引号键）顶替结构引号 → sh 必解析失败；
+                      警示不阻止保存（R3 口径），一键修正仅替 ‘’“” 四字符 */}
+                  {hasSmartQuotes(exec.command) && (
+                    <p className="task-danger-hint task-smartquote-row">
+                      {t("tasks.tpl.smartQuoteWarn")}
+                      <button
+                        type="button"
+                        className="seg primary"
+                        onClick={() =>
+                          setExec((x) => ({ ...x, command: normalizeSmartQuotes(x.command) }))
+                        }
+                      >
+                        {t("tasks.tpl.smartQuoteFix")}
+                      </button>
+                    </p>
+                  )}
+                  <div className="reminder-form-row">
+                    <label className="grow">
+                      {t("tasks.form.cwd")}
+                      <input
+                        type="text"
+                        value={exec.cwd}
+                        placeholder="/path/to/project"
+                        onChange={(e) => setExec((x) => ({ ...x, cwd: e.target.value }))}
+                      />
+                    </label>
+                    <label>
+                      {t("tasks.form.timeout")}
+                      <input
+                        type="number"
+                        min={1}
+                        max={120}
+                        value={exec.timeoutMinutes}
+                        onChange={(e) =>
+                          setExec((x) => ({ ...x, timeoutMinutes: Number(e.target.value) || 10 }))
+                        }
+                      />
+                    </label>
+                  </div>
+                </>
+              )}
+
+              {/* 调度三分支（notify/exec 共用；§4.2 weekly 并入 daily 过滤） */}
+              <div className="reminder-form-row">
+                <div className="token-seg" role="tablist">
+                  {SCHEDULE_KINDS.map((k) => (
+                    <button
+                      key={k.id}
+                      className={(form.schedule_kind ?? "interval") === k.id ? "seg active" : "seg"}
+                      onClick={() => setScheduleKind(k.id)}
+                    >
+                      {t(k.labelKey)}
+                    </button>
+                  ))}
+                </div>
+                {(form.schedule_kind ?? "interval") === "interval" && (
+                  <label>
+                    {t("reminders.form.interval")}
+                    <input
+                      type="number"
+                      min={1}
+                      max={1440}
+                      value={form.interval_minutes}
+                      onChange={(e) =>
+                        setForm((f) => ({ ...f, interval_minutes: Number(e.target.value) || 0 }))
+                      }
+                    />
+                  </label>
+                )}
+                {(form.schedule_kind ?? "interval") === "daily" && (
+                  <label>
+                    {t("tasks.schedule.at")}
+                    <input
+                      type="time"
+                      value={form.schedule_at ?? ""}
+                      onChange={(e) => setForm((f) => ({ ...f, schedule_at: e.target.value || null }))}
+                    />
+                  </label>
+                )}
+                {(form.schedule_kind ?? "interval") === "once" && (
+                  <label>
+                    {t("tasks.schedule.datetime")}
+                    <input
+                      type="datetime-local"
+                      value={onceToLocalInput(form.schedule_at)}
+                      onChange={(e) => {
+                        // datetime-local 值 "YYYY-MM-DDTHH:MM"——与存储格式一致
+                        setForm((f) => ({ ...f, schedule_at: e.target.value || null }));
+                      }}
+                    />
+                  </label>
+                )}
+                <label className="reminder-check">
+                  <input
+                    type="checkbox"
+                    checked={form.enabled}
+                    onChange={(e) => setForm((f) => ({ ...f, enabled: e.target.checked }))}
+                  />
+                  {t("reminders.enabled")}
+                </label>
+                {form.action_type === "notify" && (
+                  <label className="reminder-check">
+                    <input
+                      type="checkbox"
+                      checked={form.use_fireworks}
+                      onChange={(e) => setForm((f) => ({ ...f, use_fireworks: e.target.checked }))}
+                    />
+                    {t("reminders.form.fireworksMode")}
+                  </label>
+                )}
+                {/* 调度行是末行的分支（once / interval+exec——后面无窗口/星期行）：
+                    按钮并入本行右端 */}
+                {((form.schedule_kind ?? "interval") === "once" ||
+                  ((form.schedule_kind ?? "interval") === "interval" &&
+                    form.action_type === "exec")) &&
+                  formActions}
+              </div>
+
+              {/* interval + notify 的时间窗（v1 字段；daily/once/exec 不显示）——
+                  该分支的末行：按钮并入右端 */}
+              {(form.schedule_kind ?? "interval") === "interval" &&
+                form.action_type === "notify" && (
+                  <div className="reminder-form-row">
+                    <label>
+                      {t("reminders.form.start")}
+                      <input
+                        type="time"
+                        value={form.start_time ?? ""}
+                        onChange={(e) => setForm((f) => ({ ...f, start_time: e.target.value || null }))}
+                      />
+                    </label>
+                    <label>
+                      {t("reminders.form.end")}
+                      <input
+                        type="time"
+                        value={form.end_time ?? ""}
+                        onChange={(e) => setForm((f) => ({ ...f, end_time: e.target.value || null }))}
+                      />
+                    </label>
+                    {formActions}
+                  </div>
+                )}
+
+              {/* daily 的星期过滤（不勾 = 每天）——该分支的末行：按钮并入右端 */}
+              {(form.schedule_kind ?? "interval") === "daily" && (
+                <div className="task-weekdays">
+                  <span className="task-weekdays-label">{t("tasks.schedule.weekdays")}</span>
+                  {[1, 2, 3, 4, 5, 6, 7].map((d) => (
+                    <label key={d} className="task-weekday-check">
+                      <input type="checkbox" checked={weekdays.includes(d)} onChange={() => toggleWeekday(d)} />
+                      {t(`tasks.weekday.${d}`)}
+                    </label>
+                  ))}
+                  {formActions}
+                </div>
+              )}
+
+              {form.action_type === "notify" &&
+                (form.schedule_kind ?? "interval") === "interval" &&
+                form.start_time &&
+                form.end_time &&
+                form.start_time > form.end_time && (
+                  <p className="reminder-hint">
+                    {t("reminders.form.crossMidnight", { start: form.start_time, end: form.end_time })}
+                  </p>
+                )}
+            </>
+          )}
+          {formError && <p className="reminder-form-error">{formError}</p>}
+          {/* todo 编辑态：无字段行（锁定表单只留提示）——按钮组 margin-left:auto
+              在 flex-column 表单内天然右对齐（其余分支按钮已并入各自末行） */}
+          {form.kind === "todo" && formActions}
+        </div>
+      </section>
+
+      {/* 执行历史区（§4.7 折叠面板：action_logs 倒序分页 + 过滤 + 展开） */}
+      <section className="token-section">
+        <h3>
+          <button
+            className="seg task-history-toggle"
+            aria-expanded={historyOpen}
+            onClick={() => setHistoryOpen((v) => !v)}
+          >
+            {historyOpen ? "▾" : "▸"} {t("tasks.history.title")}
+          </button>
+        </h3>
+        {historyOpen && (
+          <div className="task-history">
+            <div className="task-history-controls">
+              <select
+                value={historyFilter ?? ""}
+                onChange={(e) => {
+                  setHistoryFilter(e.target.value ? Number(e.target.value) : null);
+                  setHistoryPage(1);
+                }}
+              >
+                <option value="">{t("tasks.history.filterAll")}</option>
+                {rules
+                  .filter((r) => r.action_type === "exec")
+                  .map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {actionBadge(r)} {r.label}
+                    </option>
+                  ))}
+              </select>
+            </div>
+            {historyError && <p className="reminder-form-error">{historyError}</p>}
+            {history && history.rows.length === 0 && (
+              <p className="token-empty">{t("tasks.history.empty")}</p>
+            )}
+            <ul className="task-history-list">
+              {history?.rows.map((log) => {
+                // 补跑延迟：scheduled_at 与 started_at 差（秒）
+                const delaySec =
+                  log.scheduled_at && log.started_at
+                    ? Math.max(
+                        0,
+                        Math.round(
+                          (new Date(log.started_at).getTime() - new Date(log.scheduled_at).getTime()) / 1000,
+                        ),
+                      )
+                    : 0;
+                return (
+                  <li key={log.id} className="task-history-item">
+                    <button
+                      className="task-history-row"
+                      onClick={() => setExpandedLog((cur) => (cur === log.id ? null : log.id))}
+                    >
+                      <span className={`task-status-dot status-${log.status}`} aria-label={log.status} />
+                      <span className="task-history-time">{formatLogTime(log.started_at)}</span>
+                      {/* §十二 F10：notify 历史行徽标 💧 → 🔔（审查 P3-1：与列表
+                          actionBadge 共用 execBadge 助手；历史行无 kind 字段） */}
+                      <span className="task-badge">{execBadge(log.action_type)}</span>
+                      {/* 行内任务名（004 label 快照——不关联当前 rules，规则
+                           改名/删除不影响历史；旧行 null → 未记录占位） */}
+                      <span
+                        className={`task-history-name${log.label ? "" : " is-unrecorded"}`}
+                        title={log.label ?? undefined}
+                      >
+                        {log.label ?? t("tasks.history.unrecorded")}
+                      </span>
+                      <span className="task-history-summary">
+                        {renderTaskSummary(log.summary, log.exit_code)}
+                      </span>
+                      <span className="task-history-status">{t(`tasks.status.${log.status}`)}</span>
+                    </button>
+                    {expandedLog === log.id && (
+                      <div className="task-history-detail">
+                        {delaySec > 0 && (
+                          <p className="reminder-meta">
+                            {t("tasks.history.delay", { sec: delaySec })}
+                          </p>
+                        )}
+                        {/* 命令 + 工作目录（快照，Part C 演进：005 起单命令块
+                            ——命令串逐字节原样传给 sh/powershell（目录经进程
+                            属性生效不进命令串），实录与配置恒同值；旧行
+                            command null → 未记录；cwd null → 未配置（继承
+                            App 进程目录） */}
+                        <p className="task-detail-label">{t("tasks.history.command")}</p>
+                        <pre className="task-output mono">
+                          {log.command ?? t("tasks.history.unrecorded")}
+                        </pre>
+                        <p className="task-detail-label">{t("tasks.history.workdir")}</p>
+                        <pre className="task-output mono">
+                          {log.cwd ?? t("tasks.history.cwdNone")}
+                        </pre>
+                        <p className="task-detail-label">{t("tasks.history.output")}</p>
+                        <pre className="task-output mono">
+                          {log.output_tail ?? "—"}
+                        </pre>
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+            {/* 分页控件（routine-exec.md Part A）：块底部居中，筛选下拉独占顶部 */}
+            <div className="task-history-pagination">
+              <span className="reminder-meta">
+                {t("tasks.history.page", {
+                  page: history?.page ?? 1,
+                  pages: totalPages,
+                  total: history?.total ?? 0,
+                })}
+              </span>
+              <button
+                className="seg"
+                disabled={(history?.page ?? 1) <= 1}
+                onClick={() => setHistoryPage((p) => Math.max(1, p - 1))}
+              >
+                {t("tasks.history.prev")}
+              </button>
+              <button
+                className="seg"
+                disabled={(history?.page ?? 1) >= totalPages}
+                onClick={() => setHistoryPage((p) => p + 1)}
+              >
+                {t("tasks.history.next")}
+              </button>
+            </div>
+          </div>
+        )}
+      </section>
+
+      {/* §十二 F14（2026-08-28）：「历史统计」区移除（用户裁定——无行动价值、
+          与行级信息冗余、v1 M4 记账遗留与 v2 例程页身份错位）；
+          reminder_logs 记账写路径保留（排障/未来功能燃料） */}
+
+      {toast && <div className="reminder-toast">{toast}</div>}
+    </div>
+  );
+}

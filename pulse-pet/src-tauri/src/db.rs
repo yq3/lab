@@ -11,10 +11,22 @@ use tauri::Manager;
 const INIT_SQL: &str = include_str!("../migrations/001-init.sql");
 /// M7（TC-TD-07/08）：reminders.todo_due_at + reminder_logs 去 FK 级联（历史保留）。
 const M7_SQL: &str = include_str!("../migrations/002-m7-todo.sql");
-const SCHEMA_VERSION: i64 = 2;
+/// v2 M4（V2-DESIGN §4.2）：reminders +7 列（动作/调度泛化）+ action_logs 表。
+const M4_SQL: &str = include_str!("../migrations/003-m4-tasks.sql");
+/// 迁移 004（routine-exec.md Part A）：action_logs +3 快照列（label/command/executed_command）。
+const M4B_SQL: &str = include_str!("../migrations/004-action-logs-snapshot.sql");
+/// 迁移 005（routine-exec.md Part C）：action_logs +cwd 快照列、−executed_command（恒同值冗余列删除）。
+const M5_SQL: &str = include_str!("../migrations/005-action-logs-cwd.sql");
+const SCHEMA_VERSION: i64 = 5;
 
 /// 迁移表：(目标版本, SQL)。新增迁移 = 追加文件 + 此表加一行 + bump SCHEMA_VERSION。
-const MIGRATIONS: &[(i64, &str)] = &[(1, INIT_SQL), (2, M7_SQL)];
+const MIGRATIONS: &[(i64, &str)] = &[
+    (1, INIT_SQL),
+    (2, M7_SQL),
+    (3, M4_SQL),
+    (4, M4B_SQL),
+    (5, M5_SQL),
+];
 /// SCHEMA_VERSION 必须与迁移表末位一致（编译期防线，防只改一处：
 /// 追加 MIGRATIONS 行而忘 bump SCHEMA_VERSION 时 const 求值失败，编译报错）。
 const _: () = assert!(MIGRATIONS[MIGRATIONS.len() - 1].0 == SCHEMA_VERSION);
@@ -54,6 +66,15 @@ pub fn migrate(conn: &Connection) -> Result<(), String> {
     }
     if version < 2 {
         migrate_one(conn, 2, M7_SQL)?;
+    }
+    if version < 3 {
+        migrate_one(conn, 3, M4_SQL)?;
+    }
+    if version < 4 {
+        migrate_one(conn, 4, M4B_SQL)?;
+    }
+    if version < 5 {
+        migrate_one(conn, 5, M5_SQL)?;
     }
     debug_assert_eq!(MIGRATIONS.last().map(|(v, _)| *v), Some(SCHEMA_VERSION));
     Ok(())
@@ -133,10 +154,11 @@ mod tests {
             "todos",
             "todo_tags",
             "plugins",
+            "action_logs",
         ] {
             assert!(tables.iter().any(|x| x == t), "missing table {t}");
         }
-        assert_eq!(tables.len(), 6, "unexpected tables: {tables:?}");
+        assert_eq!(tables.len(), 7, "unexpected tables: {tables:?}");
     }
 
     #[test]
@@ -305,13 +327,13 @@ mod tests {
             .unwrap();
         assert_eq!(col, 0, "半途 ALTER 必须随事务回滚");
 
-        // “重启”：migrate 从 v1 续跑 002，成功到 v2 且 schema 完整
+        // “重启”：migrate 从 v1 续跑 002/003，成功到 v3 且 schema 完整
         migrate(&conn).unwrap();
         let v: i64 = conn
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();
         assert_eq!(v, SCHEMA_VERSION);
-        assert_eq!(list_tables(&conn).len(), 6);
+        assert_eq!(list_tables(&conn).len(), 7);
         let col: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM pragma_table_info('reminders') WHERE name = 'todo_due_at'",
@@ -333,5 +355,199 @@ mod tests {
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();
         assert_eq!(v, 0, "PRAGMA user_version 必须随事务回滚（A1 的前提）");
+    }
+
+    // ---- v2 M4（TC-M4-01）：迁移 003 幂等 + v1 存量行兼容 ----
+
+    /// v1 时代的库（001+002 + 存量提醒数据）。
+    fn v2_db_with_legacy_rows() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(INIT_SQL).unwrap();
+        conn.execute_batch(M7_SQL).unwrap();
+        conn.execute_batch("PRAGMA user_version = 2").unwrap();
+        conn.execute(
+            "INSERT INTO reminders (kind, label, interval_minutes, start_time, end_time, enabled, use_fireworks) \
+             VALUES ('hydration', '喝水', 30, '09:00', '18:00', 1, 1)",
+            [],
+        )
+        .unwrap();
+        conn
+    }
+
+    fn columns_of(conn: &Connection, table: &str) -> Vec<String> {
+        let mut stmt = conn
+            .prepare(&format!("SELECT name FROM pragma_table_info('{table}')"))
+            .unwrap();
+        stmt.query_map([], |r| r.get::<_, String>(0))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect()
+    }
+
+    #[test]
+    fn m4_migration_idempotent_steps_and_skip_on_current() {
+        // v2 → 逐步升到当前版本；再跑（已是当前版本）跳过无副作用。
+        // （005 起 SCHEMA_VERSION=5：v3/v4 库亦升到 5——004 的 executed_command
+        // 列在 005 被 DROP，见 routine-exec.md Part C）
+        let conn = v2_db_with_legacy_rows();
+        migrate(&conn).unwrap();
+        assert_eq!(
+            conn.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0)).unwrap(),
+            SCHEMA_VERSION
+        );
+        migrate(&conn).unwrap(); // 幂等
+        assert_eq!(
+            conn.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0)).unwrap(),
+            SCHEMA_VERSION
+        );
+    }
+
+    #[test]
+    fn m4_migration_adds_seven_columns_and_action_logs() {
+        let conn = v2_db_with_legacy_rows();
+        migrate(&conn).unwrap();
+        let cols = columns_of(&conn, "reminders");
+        for c in [
+            "action_type",
+            "action_params",
+            "schedule_kind",
+            "schedule_at",
+            "schedule_weekdays",
+            "snooze_until",
+            "last_skipped_at",
+        ] {
+            assert!(cols.iter().any(|x| x == c), "reminders 缺列 {c}");
+        }
+        assert!(list_tables(&conn).iter().any(|t| t == "action_logs"));
+
+        // v1 存量行自动获默认值（notify / interval），既有列零变化
+        let (action_type, schedule_kind, action_params, snooze, label, interval): (
+            String,
+            String,
+            Option<String>,
+            Option<String>,
+            String,
+            i64,
+        ) = conn
+            .query_row(
+                "SELECT action_type, schedule_kind, action_params, snooze_until, label, interval_minutes \
+                 FROM reminders WHERE id = 1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)),
+            )
+            .unwrap();
+        assert_eq!(action_type, "notify");
+        assert_eq!(schedule_kind, "interval");
+        assert!(action_params.is_none());
+        assert!(snooze.is_none());
+        assert_eq!(label, "喝水");
+        assert_eq!(interval, 30);
+    }
+
+    #[test]
+    fn m4c_migration_adds_cwd_drops_executed_old_rows_null() {
+        // 迁移 004+005（routine-exec.md Part A→C）：action_logs 快照列演进为
+        // label/command/cwd（005 +cwd、−executed_command——恒同值冗余列删除）。
+        // 模拟 v3 时代的库（003 后已有 action_logs 数据）→ migrate 至当前：
+        // cwd 存在、executed_command 不存在，旧行快照列全 NULL（「未记录」口径）。
+        // （原 m4b 改版改名：005 后原名「adds_snapshot_columns」名不副实。）
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(INIT_SQL).unwrap();
+        conn.execute_batch(M7_SQL).unwrap();
+        conn.execute_batch(M4_SQL).unwrap();
+        conn.execute_batch("PRAGMA user_version = 3").unwrap();
+        conn.execute(
+            "INSERT INTO action_logs (reminder_id, action_type, status, summary, started_at) \
+             VALUES (1, 'exec', 'ok', 'task.summary.ok', '2026-08-30T10:00:00+08:00')",
+            [],
+        )
+        .unwrap();
+
+        migrate(&conn).unwrap();
+        assert_eq!(
+            conn.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0)).unwrap(),
+            SCHEMA_VERSION
+        );
+        let cols = columns_of(&conn, "action_logs");
+        for c in ["label", "command", "cwd"] {
+            assert!(cols.iter().any(|x| x == c), "action_logs 缺列 {c}");
+        }
+        assert!(
+            !cols.iter().any(|x| x == "executed_command"),
+            "005 起 executed_command 应已 DROP（恒同值冗余列）"
+        );
+        let (label, command, cwd): (Option<String>, Option<String>, Option<String>) = conn
+            .query_row(
+                "SELECT label, command, cwd FROM action_logs WHERE id = 1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(label, None, "旧行 label 应为 NULL（未记录）");
+        assert_eq!(command, None, "旧行 command 应为 NULL（未记录）");
+        assert_eq!(cwd, None, "旧行 cwd 应为 NULL（未记录）");
+    }
+
+    #[test]
+    #[ignore = "一次性 DB 级演练（routine-exec.md Part C 清单 8）：需 env PULSEPET_DRILL_DB 指向 v4 形态库副本——现网库 005 后已自然升 v5，复跑须手工构造降格副本（tester 验证 2026-08-31 备忘 P3-1）"]
+    fn migrate_drill_real_v4_copy() {
+        // 对真实 v4 存量库副本跑 v4→v5 migrate（现网库 executed_command 已含值，
+        // DROP 与值无关已核实——本钻子做现场确认）。**一次性演练**：前提
+        // user_version==4 与 id72/73 样本断言绑定实施时点的真实库快照；复跑
+        // 需构造降格副本（拷贝现网库后 DROP cwd → ADD executed_command →
+        // 样本行填值 → PRAGMA user_version=4）。用法：
+        //   PULSEPET_DRILL_DB=/tmp/copy.db cargo test -- --ignored migrate_drill
+        let path = std::env::var("PULSEPET_DRILL_DB").expect("需设置 PULSEPET_DRILL_DB");
+        let conn = Connection::open(&path).unwrap();
+        let v: i64 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(v, 4, "演练前提：v4 存量库");
+        let before: i64 = conn
+            .query_row("SELECT COUNT(*) FROM action_logs", [], |r| r.get(0))
+            .unwrap();
+
+        migrate(&conn).unwrap();
+        assert_eq!(
+            conn.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0)).unwrap(),
+            SCHEMA_VERSION
+        );
+        let cols = columns_of(&conn, "action_logs");
+        assert!(cols.iter().any(|x| x == "cwd"), "005 后应含 cwd");
+        assert!(!cols.iter().any(|x| x == "executed_command"), "005 后应无 executed_command");
+        let after: i64 = conn
+            .query_row("SELECT COUNT(*) FROM action_logs", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(after, before, "行数不因迁移变化");
+        // 快照数据完整性：command 快照仍在（executed 与其同值，删除零损失）
+        let kept: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM action_logs WHERE id IN (72, 73) \
+                 AND command IS NOT NULL AND cwd IS NULL",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        println!("[drill] id72/73 command 快照保留且 cwd 未配置命中 {kept} 行（预期 2）");
+        assert_eq!(kept, 2, "演练样本行的 command 快照应完整保留");
+    }
+
+    #[test]
+    fn m4_migration_halfway_failure_rolls_back() {
+        // 003 半途失败（第二条语句非法）→ 整步回滚：版本停 2、半套列不残留
+        let conn = v2_db_with_legacy_rows();
+        let bad = "ALTER TABLE reminders ADD COLUMN action_type TEXT NOT NULL DEFAULT 'notify';\n\
+                   INSERT INTO no_such_table VALUES (1);";
+        assert!(migrate_one(&conn, 3, bad).is_err());
+        assert_eq!(
+            conn.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0)).unwrap(),
+            2,
+            "失败步不得推进版本"
+        );
+        let cols = columns_of(&conn, "reminders");
+        assert!(!cols.iter().any(|x| x == "action_type"), "半途 ALTER 必须随事务回滚");
+        // 重启后续跑成功
+        migrate(&conn).unwrap();
+        assert!(columns_of(&conn, "reminders").iter().any(|x| x == "action_type"));
     }
 }

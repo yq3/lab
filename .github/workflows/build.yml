@@ -26,10 +26,13 @@ jobs:
       PROJECT: ${{ startsWith(github.ref_name, 'pulse-pet-v') && 'pulse-pet' || 'todo-lite' }}
       PRODUCT: ${{ startsWith(github.ref_name, 'pulse-pet-v') && 'PulsePet' || 'todo-lite' }}
     steps:
-      - uses: actions/checkout@v4
+      # v0.1.3 三-2（2026-08-22）：checkout v4 / setup-node v4 的 Node 20 运行时
+      # 已弃用（警告），升大版本至当前最新（v7）；todo-lite 共用本 workflow，
+      # 两项目路径各回归一次 CI（TC-CI-05）。
+      - uses: actions/checkout@v7
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 22
 

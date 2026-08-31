@@ -1,6 +1,6 @@
 {
   "id": "wagging-doggy",
-  "displayName": "wagging-doggy（内置小狗）",
+  "displayName": "wagging-doggy",
   "description": "PulsePet 内置小狗（正面简洁像素风，与小猫同款画法：大垂耳 + 项圈 + 正脸双眼）。codex 格式 atlas 8×9 = 1536×1872，单帧 192×208，9 行姿态；idle 尾巴自然轻摆。作者自绘，CC0。",
   "spritesheetPath": "spritesheet.png"
 }

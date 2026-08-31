@@ -319,12 +319,13 @@ export default function Todo() {
         </ul>
       </section>
 
-      {/* 新建 / 编辑表单 */}
+      {/* 新建 / 编辑表单（R2 P2-2：容器复用 reminder-form——M2 控件规格基线
+          32px/2px 边框/禁用态挂在该选择器下，todo-form 无规则致 UA 默认渲染） */}
       <section className="token-section">
         <h3>
           {editing ? t("todo.form.editTitle", { n: editing.id }) : t("todo.form.newTitle")}
         </h3>
-        <div className="todo-form">
+        <div className="reminder-form">
           <div className="reminder-form-row">
             <label className="grow">
               {t("todo.form.title")}
