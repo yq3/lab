@@ -1003,6 +1003,10 @@ CREATE TABLE action_logs (
 );
 ```
 
+> **004 修订（2026-08-30，routine-exec.md Part A）**：action_logs 追加三快照列 `label` / `command` / `executed_command`——执行历史的语义 = **执行时点的任务内容快照**（规则改名/改命令/删除后历史仍可回查当时内容；`label` 沿用来源列同名；`executed_command` 仅 running 写、skipped 恒 NULL = 未执行；迁移前旧行三列 NULL → 前端「未记录」）。
+>
+> **005 修订（2026-08-30，routine-exec.md Part C）**：快照字段集合演进为 **任务名 / 命令 / 工作目录**——`+cwd TEXT`（当时执行目录时点实录）；`DROP COLUMN executed_command`（命令串逐字节原样传给 sh/powershell、目录经进程属性生效，实录与配置**恒同值**，冗余列删除——004→005 存量行该列与 command 同值，零信息损失；SCHEMA_VERSION=5）。
+
 **与 SCOPE §3.4 的差异（4 枚举 → 3 枚举）**：`weekly-at` 并入 `daily` 的 `schedule_weekdays` 过滤（判定逻辑同为「下一个匹配日的 HH:MM」），枚举更少语义不减；未来「每月 X 日」等加列或并入 weekdays 语义扩展，不动既有列。
 
 **存储约定（P2-6）**：daily/once 行 `interval_minutes` **恒为 0**（validate 强制）；既有代码全部 `interval_minutes > 0` 分派点（暂停顺延/触发推进/force_fire_one）**改按 `schedule_kind == "interval"` 分派**——行为对 daily/once 天然「暂停不顺延、触发后按 kind 推进」。kind 切换（interval↔daily↔once）时 validate 重置无关字段（interval 行清 schedule_at/weekdays；daily/once 行清 start_time/end_time 窗口——防遗留窗口使 collect_due 的 in_window 判定卡住导致误 skipped）。once 的 `schedule_at` 为过去时刻 → validate 拒绝（防创建即意外触发执行命令）。
@@ -1064,7 +1068,8 @@ pub trait ActionExecutor { fn validate(&self, params: &Value) -> Result<(), Stri
 
 ```
 tick 判定到期（daily/once，补跑窗内）
-  → insert action_logs(status='running', started_at, scheduled_at)   ← spawn 时刻写
+  → insert action_logs(status='running', started_at, scheduled_at,
+      label/command/cwd 快照)           ← spawn 时刻写（004/005：执行时点任务内容快照，routine-exec.md Part A/C）
     （并发满 2 时：任务进内存等待队列（RemindersState 新字段 pending_execs），
       不写 running；空位出现（完成回调通知调度器）时出队 spawn；
       排队中无进程无 running 行——App 退出/崩溃时排队任务自然消失无残留）
@@ -1074,6 +1079,7 @@ tick 判定到期（daily/once，补跑窗内）
     生效机制是 idle 回收而非瞬态回退）；零状态机改动）
   → 完成/超时
   → update action_logs(status/summary/exit_code/output_tail/finished_at)
+    （004/005：快照列 insert 时已写，终态 update 不动）
   → 通用层终态：exit 0 → apply Success；非 0/超时 → apply Error（30s 后自然回收）
   → 结果气泡：emit_to("pet", "pulsepet://task-result", {text, logId, status})
     → 桥层 pushBubble({level:"critical", source:"task:<log_id>"})
@@ -1086,34 +1092,42 @@ tick 判定到期（daily/once，补跑窗内）
 - **并发上限 2**（P3-2 细节如上流程图）：等待队列在 RemindersState；完成回调经 channel 通知调度器出队。
 - **例程会话 token 口径**：例程进 opencode.db → Token 页可见（`--title` 前缀「pulsepet 例程:」标识）；来源标注（区分例程/手办）留 M5 agent 维度一并定（SCOPE §3.5 原文）。
 
-### 4.6 opencode 一等模板（UI 辅助，执行层不感知）
+### 4.6 例程模板注册表（UI 辅助，执行层不感知；原「opencode 一等模板」，Part B 泛化 2026-08-30）
 
-表单动作类型选「执行命令」时出现模板快捷块「opencode 例程」→ 一键填充：
+表单动作类型选「执行命令」时出现「例程模板」快捷块——**多 agent 模板注册表**（`lib/routine-templates.ts` 前端单侧，每 agent 一行 `{agentId, matches, build, flags[]}`；加新 agent 例程 = 一行 + i18n 键对，UI 零改动）：
 
 ```jsonc
-// action_params 填充结果（纯字符串拼接，执行层只认 command）
+// opencode 行填充结果（纯字符串拼接，执行层只认 command）
 {
   "command": "opencode run --title \"pulsepet 例程: <任务名>\" --auto? \"<指令>\"",
   "cwd": "<项目目录，可选>",
-  "timeout_minutes": 10
+  "timeout_minutes": 10,
+  "tpl_agent": "opencode",          // Part B：选中模板 + flags 持久化
+  "tpl_flags": { "auto": true }     //（保存一律新格式；旧键 opencode_auto 读兼容）
 }
+// claude-code 行：claude -p "<指令>" [--dangerously-skip-permissions]
+//（任务名只进 PulsePet label 不进命令——CC 无 --title，会话无 ⚡ 徽标，接受边界）
 ```
 
-- `--auto` 由模板 checkbox「自动放行权限（危险）」控制（S2；默认不勾——评审 PR 类只读任务几乎不触发权限，不勾也顺畅；勾选时 UI 显示危险色警示）；
-- 模板仅填表辅助：用户可自由改 command（模板产物与手写命令无差异）；
-- `--dir` 不用（cwd 字段就是工作目录，spawn 参数更干净）。
+- UI：chips 单选（默认预选 OpenCode，切换重置 flags、command 不因切换而变）+ 共享指令框 + 当前模板声明式 flags 行（danger 勾选 + 警示）+ 一键填充（**恒可点**——空指令填骨架命令、输入指令后自动重拼，保留高级用户「先填充骨架、后手改 command」口子；2026-08-30 用户目验修订，推翻实施时采纳的「指令空禁用」处置，见 routine-exec.md §3.7 修订段）；chips 文案复用 agents.ts `labelKey`；
+- flag 语义（`--auto` / `--dangerously-skip-permissions` 同款）：默认不勾——只读任务几乎不触发权限；勾选时危险色警示（无人值守副作用命令）；Rust validate 宽松校验 `tpl_agent`（字符串）/ `tpl_flags`（对象 + 值全布尔）；
+- 自动重拼启发式 = 注册表 `matches()`（`startsWith` 前缀形态，比 `includes` 严——复合命令不重拼；**重拼只看 command，不看选中态**）+ 空指令守卫（编辑回填 tplInstruction 恒空，不以空指令覆盖原 command）；
+- 模板仅填表辅助：用户可自由改 command（模板产物与手写命令无差异）；`--dir` 不用（cwd 字段就是工作目录）。
 
 ### 4.7 UI：合并「定时任务」tab + snooze 按钮
 
 - **tab 改名**：核心 tab「提醒」→「定时任务」（`panel.tab.tasks`；M2 注册表核心三之一，位置不变）；i18n 键沿用 `reminders.*` 存量 + 新增 `tasks.*`（合并表单/徽标/历史/模板）。
 - **（2026-08-25 R1 后用户裁定修订）**：① tab 中文显示名「定时任务」→「例程」（en 建议Routines，实施定）；「Todo」tab 中文显示名→「待办」（en 保持 Todo）——仅改 i18n 值，labelKey（`panel.tab.tasks` / `panel.tab.todo`）不变，页面内与 tab 名直接联动的标题文案同步「例程」；② 表单标题「新建提醒」→「新建例程」；③ 「新建」按钮从单独一行移至表单块**右下角**并换非默认色（与 M2 token 协调，实施定色）；④ 表单动作类型分段按钮去图标（「提醒」不带 💧、「执行命令」不带 ⚡；列表行徽标 💧/⚡ 保留不动）。
 - **（2026-08-25 二次修订）**：⑤ 状态芯片 `panel.agentTask` 文案「定时任务」→「例程」（en 建议 Routine，实施定）——与 tab 名统一；⑥ 「新建」按钮再上移：**不占单独动作行，与表单最后一行字段同行对齐**（右随字段行），③ 的"表单块右下角"精化为"最后一行字段行右端"。
+- **（2026-08-30 修订，routine-exec.md Part A）**：⑦ 执行历史分页 50→15 + 常量收归 `ACTION_LOG_PAGE_SIZE` 单点（原局部 `PAGE_SIZE` 与常量双份维护有失配风险）；⑧ 迁移 004 三快照列（`label`/`command`/`executed_command`）——历史展示全读快照、不关联当前配置（行内任务名 + 展开区「存储命令（当时配置）/ 实际执行命令」双块；skipped →「未执行」、旧行 →「未记录」）；⑨ 分页控件（页码 + 上一页/下一页）移历史块底部居中，筛选下拉独占顶部。
+- **（2026-08-30 修订，routine-exec.md Part B）**：⑩ §4.7 表单行的「opencode 模板块」字样同步——exec 表单任务名行之下为**例程模板注册表块**（chips 多模板，§4.6 Part B 重写）；`--auto` 勾选项成为 opencode 模板声明的 flag 之一（claude-code 行对应 `--dangerously-skip-permissions`）。
+- **（2026-08-30 修订，routine-exec.md Part C）**：⑪ 快照字段集合演进为 任务名/命令/工作目录——迁移 005 `+cwd`（当时执行目录）/ `−executed_command`（实录与配置恒同值，冗余列删除）；展开区「存储命令/实际执行命令」双块 → **「命令（当时）」单块 +「工作目录（当时）」块**（cwd 未配置 →「继承 App 进程目录」占位）；skipped 行「未执行」语义由状态色点/文案承载。
 - **列表**（一张，现有提醒列表扩展）：每行动作徽标（🔔 notify / ⚡ exec，title 属性说明——§十二 F10 修订 2026-08-28：💧→🔔）+ 类别列（§十二 F11 修订：todo 派生行同渲染「📋 待办」，原条件排除已删）+ 名称 + 调度摘要（「每 30 分钟 · 09:00-18:00」/「每天 09:00」/「周三、五 09:00」/「一次 · 08-25 21:00」）+ 启用开关 + 行操作（编辑/试一试/跳过本次/删除两步确认——均既有交互模式扩展）；todo 派生行保持 M2 展示（可见惰性 + 徽标；§十二 F12 修订：行内烟花勾选项移除，烟花随全局总开关 OR 语义；§十二 F14 修订：页底「历史统计」区移除，reminder_logs 记账保留）。
 - **表单**（M2 只做了轻翻新，本里程碑完整重做，SCOPE 预告的归属）：动作类型分段（notify/exec）→ 条件显隐：
   - notify：kind（hydration/rest/custom）/ 文案 / 调度（interval 分钟 + 时间窗 ‖ daily HH:MM + 星期 ‖ once 日期时间）/ 烟花；
-  - exec：任务名 / opencode 模板块（§4.6）/ command（等宽多行）/ cwd / 超时分钟 / 调度（同上三分支）/ `--auto` 随模板；
+  - exec：任务名 / 例程模板注册表块（§4.6 Part B：chips 多模板 + 声明式 flags）/ command（等宽多行）/ cwd / 超时分钟 / 调度（同上三分支）/ 模板 flags 随勾选；
   - 校验：Rust `validate` 为权威（前端同规则预检，v1 模式）。
-- **执行历史区**（列表下方折叠面板）：action_logs 倒序（时间 / 徽标 / summary / 状态色点 ok 绿·failed 红·skipped 灰·running 蓝）；行展开显示 output_tail（等宽，2KB 内）+ scheduled_at 与 started_at 差（补跑延迟可见）；命令 `action_logs_list(reminder_id?)` 分页（50 条/页）。
+- **执行历史区**（列表下方折叠面板）：action_logs 倒序（时间 / 徽标 / **任务名（`label` 快照，不关联当前 rules）** / summary / 状态色点 ok 绿·failed 红·skipped 灰·running 蓝）；行展开显示 **「命令（当时）」单块（实录与配置恒同值——命令串逐字节原样传给 sh/powershell）+「工作目录（当时）」块（`cwd` 快照；未配置 →「继承 App 进程目录」占位）**（005 起，Part C；旧行 command NULL →「未记录」）+ output_tail（等宽，2KB 内）+ scheduled_at 与 started_at 差（补跑延迟可见）；命令 `action_logs_list(reminder_id?)` 分页（**15 条/页，2026-08-30 裁定；页码 + 上一页/下一页在块底部居中，筛选下拉独占顶部**）。
 - **snooze 按钮**：M2 气泡组件扩展——critical 且 `reminder` 载荷时，气泡右侧小按钮「稍后 10 分钟」（hover 才浮现，不喧宾）；点击 invoke `reminders_snooze` → 气泡即消；点宠物仍 = 确认（两动作并存，M2 记账语义：snooze 结案 via='snooze'）。
 
 ### 4.8 Rust 变更汇总
@@ -1121,6 +1135,8 @@ tick 判定到期（daily/once，补跑窗内）
 | 模块 | 变更 |
 |---|---|
 | `migrations/003` + `db.rs` | §4.2 五列 + action_logs 表；SCHEMA_VERSION=3 |
+| `migrations/004` + `db.rs` | action_logs +3 快照列（label/command/executed_command，§4.2 修订注）；SCHEMA_VERSION=4（2026-08-30，routine-exec.md Part A） |
+| `migrations/005` + `db.rs` | action_logs +cwd 快照列、−executed_command（§4.2 修订注）；SCHEMA_VERSION=5（2026-08-30，routine-exec.md Part C） |
 | `Cargo.toml` | tokio features + `process`；新增 `libc`（Unix setsid/kill(-pgid) 杀组，无需 signal——P3-1 同步 §4.4） |
 | `action_exec.rs`（新） | ActionExecutor trait + Notify/Exec 实现 + 分派注册表 + 运行任务句柄登记表（`HashMap<log_id, ChildHandle>`，供退出处置）；命令 async（issue #9 纪律） |
 | `reminder_scheduler.rs` | ReminderRule struct/row_to_rule/load_rules SELECT +5 列；compute_next_due 按 kind 分派 + snooze_until 优先 + reload 错过检测；collect_due 补跑窗 + 暂停分支按 schedule_kind 分派（interval 顺延 / daily-once 记 skipped）+ 触发推进按 kind；触发分派 notify/exec；等待队列（pending_execs）+ 完成出队；新命令 `reminders_snooze` / `tasks_skip_once` / `action_logs_list` |

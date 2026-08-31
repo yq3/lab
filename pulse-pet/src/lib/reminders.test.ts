@@ -2,8 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   actionBadge,
   actionBadgeTitle,
-  buildOpencodeCommand,
   execBadge,
+  execFromParams,
+  execParamsJson,
   formatInterval,
   formatWindow,
   hasSmartQuotes,
@@ -17,10 +18,11 @@ import {
   normalizeSmartQuotes,
   sanitizeReminderText,
   scheduleSummary,
-  shellQuote,
   usesFireworks,
+  validateExecParams,
   validateReminderInput,
   weekdaysToJson,
+  type ExecFormState,
   type ReminderInput,
   type ReminderRule,
   type ReminderTrigger,
@@ -549,31 +551,89 @@ describe("v2 M4：动作徽标 + 调度摘要（§4.7 列表行）", () => {
   });
 });
 
-describe("v2 M4：opencode 例程模板拼接（§4.6，TC-M4-08）", () => {
-  it("逐字模板：--title 前缀 + 可选 --auto + 指令引用（不用 --dir）", () => {
-    expect(buildOpencodeCommand("数 md 文件", "数一下仓库有几个 md 文件", false)).toBe(
-      `opencode run --title 'pulsepet 例程: 数 md 文件' '数一下仓库有几个 md 文件'`,
-    );
-    expect(buildOpencodeCommand("任务A", "做 X", true)).toBe(
-      `opencode run --title 'pulsepet 例程: 任务A' --auto '做 X'`,
-    );
-    // 单引号指令安全转义（sh -c 双层语义）
-    expect(shellQuote("it's")).toBe(`'it'\\''s'`);
-    expect(buildOpencodeCommand("n", "don't stop", false)).not.toMatch(/--dir/);
-  });
-
-  it("V2-OPEN-ITEMS §二十三：弯引号内容原样保留 + 检测/修正纯函数", () => {
+describe("V2-OPEN-ITEMS §二十三：弯引号检测/修正纯函数（build 逐字钉已随 Part B 迁至 routine-templates.test.ts）", () => {
+  it("仅 ‘’“” 四字符归一 / 检测", () => {
     // 2026-08-30 修订：弯引号在单引号串内是合法字面量——**内容不做归一**
     //（原「拼装归一」属无收益内容改写，撤销）；结构引号恒由模板产 ASCII，
     // 安全由 shellQuote 保证。ASCII 内容引号走标准转义（保留内容非替换）。
-    expect(buildOpencodeCommand("该喝水啦 💧’", "他说“你好”", false)).toBe(
-      `opencode run --title 'pulsepet 例程: 该喝水啦 💧’' '他说“你好”'`,
-    );
     // 一键修正专用：仅 ‘’“” 四字符视为「本应是引号」（修复 IME 误替结构引号）
     expect(normalizeSmartQuotes("‘a’“b”")).toBe(`'a'"b"`);
     expect(hasSmartQuotes("ok’")).toBe(true);
     expect(hasSmartQuotes("ok'")).toBe(false);
     expect(hasSmartQuotes("opencode run --title 'x' 'y'")).toBe(false);
+  });
+});
+
+describe("Part B：exec 表单态持久化（execParamsJson/execFromParams 迁自 Tasks.tsx + 泛化 tpl_agent/tpl_flags）", () => {
+  const st = (over: Partial<ExecFormState> = {}): ExecFormState => ({
+    command: "echo hi",
+    cwd: "",
+    timeoutMinutes: 10,
+    tplInstruction: "",
+    tplAgent: "opencode",
+    tplFlags: {},
+    ...over,
+  });
+
+  it("execParamsJson：新格式 tpl_agent + tpl_flags（opencode_auto 不再写出；空 cwd 不写、trim 后写）", () => {
+    const p = JSON.parse(execParamsJson(st({ tplAgent: "claude-code", tplFlags: { skipPerms: true } })));
+    expect(p).toEqual({
+      command: "echo hi",
+      timeout_minutes: 10,
+      tpl_agent: "claude-code",
+      tpl_flags: { skipPerms: true },
+    });
+    expect(execParamsJson(st({ cwd: " /tmp " }))).toContain('"cwd":"/tmp"');
+  });
+
+  it("execFromParams 兜底四态（routine-exec.md §3.3）", () => {
+    // ① tpl_agent 缺失 + opencode_auto true → opencode + {auto:true}
+    expect(execFromParams('{"command":"c","opencode_auto":true}').tplFlags).toEqual({ auto: true });
+    // ② tpl_agent 存在 → opencode_auto 忽略（新格式恒不同时写出，并存仅手改数据）
+    const b = execFromParams('{"command":"c","tpl_agent":"claude-code","opencode_auto":true}');
+    expect(b.tplAgent).toBe("claude-code");
+    expect(b.tplFlags).toEqual({});
+    // ②' tpl_flags 缺失/非对象 → {}；值非布尔 → 整包 {}（读侧宽松）
+    expect(execFromParams('{"command":"c","tpl_agent":"opencode"}').tplFlags).toEqual({});
+    expect(execFromParams('{"command":"c","tpl_agent":"opencode","tpl_flags":[1]}').tplFlags).toEqual({});
+    expect(
+      execFromParams('{"command":"c","tpl_agent":"opencode","tpl_flags":{"auto":"yes"}}').tplFlags,
+    ).toEqual({});
+    // ③ 未知 tpl_agent → 回落默认 opencode，flags 照常解析、command 不动
+    const c = execFromParams('{"command":"c","tpl_agent":"future-agent","tpl_flags":{"x":true}}');
+    expect(c.tplAgent).toBe("opencode");
+    expect(c.tplFlags).toEqual({ x: true });
+    expect(c.command).toBe("c");
+    // ④ 均无 / opencode_auto:false → 默认态
+    expect(execFromParams('{"command":"c"}').tplAgent).toBe("opencode");
+    expect(execFromParams('{"command":"c"}').tplFlags).toEqual({});
+    expect(execFromParams('{"command":"c","opencode_auto":false}').tplFlags).toEqual({});
+  });
+
+  it("matchOf 反推：command 前缀形态优先决定 tplAgent（重拼只看 command）", () => {
+    expect(execFromParams(`{"command":"claude -p 'x'"}`).tplAgent).toBe("claude-code");
+    expect(execFromParams(`{"command":"opencode run --title 't' 'i'"}`).tplAgent).toBe("opencode");
+    // 手写命令不匹配任何模板 → 存的 tpl_agent（有效）或默认 opencode
+    expect(execFromParams('{"command":"echo hi","tpl_agent":"claude-code"}').tplAgent).toBe("claude-code");
+    expect(execFromParams('{"command":"echo hi"}').tplAgent).toBe("opencode");
+  });
+
+  it("往返 + 非法 JSON / 超范围 timeout 回退", () => {
+    expect(execFromParams(execParamsJson(st({ tplFlags: { auto: true } })))).toEqual(
+      st({ tplFlags: { auto: true } }),
+    );
+    expect(execFromParams(null)).toEqual(st({ command: "" }));
+    expect(execFromParams("{bad").tplAgent).toBe("opencode");
+    expect(execFromParams('{"command":"c","timeout_minutes":999}').timeoutMinutes).toBe(10);
+  });
+
+  it("validateExecParams 预检新键（与 Rust 同规则）", () => {
+    expect(
+      validateExecParams({ command: "ls", tpl_agent: "opencode", tpl_flags: { auto: true } }),
+    ).toBeNull();
+    expect(validateExecParams({ command: "ls", tpl_flags: "x" })).toMatch(/tpl_flags/);
+    expect(validateExecParams({ command: "ls", tpl_flags: { auto: "yes" } })).toMatch(/tpl_flags/);
+    expect(validateExecParams({ command: "ls", tpl_agent: 5 })).toMatch(/tpl_agent/);
   });
 });
 

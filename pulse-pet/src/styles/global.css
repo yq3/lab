@@ -1415,6 +1415,20 @@ select {
   color: var(--ink-soft);
 }
 
+/* Part B：模板 chips 单选行（复用 seg 按钮基底 + active 选中态） */
+.task-tpl-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 6px 0;
+}
+
+.seg.tpl-chip.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
 .task-tpl-row {
   display: flex;
   align-items: center;
@@ -1535,6 +1549,31 @@ select {
   font-size: 12px;
   background: var(--surface);
   color: var(--ink);
+}
+
+/* 分页控件（Part A：自顶部 controls 行移至历史块底部居中——筛选下拉独占顶部） */
+.task-history-pagination {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+/* 行内任务名（004 label 快照；flex:none + 限宽 ellipsis——防被 summary 的
+   flex:1 挤没；旧行 null → 未记录占位，faint 色） */
+.task-history-name {
+  flex: none;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.task-history-name.is-unrecorded {
+  color: var(--ink-faint);
+  font-weight: 400;
 }
 
 .task-history-list {

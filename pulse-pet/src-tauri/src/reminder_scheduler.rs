@@ -101,7 +101,7 @@ pub struct ReminderRule {
     pub created_at: String,
     /// v2 M4：动作类型（'notify' 默认 | 'exec'）。
     pub action_type: String,
-    /// v2 M4：动作参数 JSON 文本（exec = {"command","cwd?","timeout_minutes?","opencode_auto?"}）。
+    /// v2 M4：动作参数 JSON 文本（exec = {"command","cwd?","timeout_minutes?","tpl_agent?","tpl_flags?"}——Part B 起；旧键 opencode_auto 读兼容，validate 均容忍）。
     pub action_params: Option<String>,
     /// v2 M4：调度类型（'interval' 默认 | 'daily' | 'once'；P2-6：daily/once 行
     /// interval_minutes 恒 0）。
@@ -527,11 +527,13 @@ pub struct FiredRule {
 
 /// skipped 判定记录（两来源：超窗 / 暂停；调用方写 last_skipped_at + 推进
 /// 已在内存完成 + exec 落 action_logs(status='skipped')）。
+/// 004：携 action_params 供 persist_skipped 提取 command 快照（判定时刻配置）。
 #[derive(Debug, Clone)]
 pub struct SkippedRule {
     pub id: i64,
     pub label: String,
     pub action_type: String,
+    pub action_params: Option<String>,
     /// 错过的原定时刻。
     pub scheduled_at_ms: i64,
     pub reason: SkipReason,
@@ -604,6 +606,7 @@ impl RemindersState {
                             id: rule.id,
                             label: rule.label.clone(),
                             action_type: rule.action_type.clone(),
+                            action_params: rule.action_params.clone(),
                             scheduled_at_ms: sched,
                             reason: SkipReason::Paused,
                         });
@@ -647,6 +650,7 @@ impl RemindersState {
                     id: rule.id,
                     label: rule.label.clone(),
                     action_type: rule.action_type.clone(),
+                    action_params: rule.action_params.clone(),
                     scheduled_at_ms: sched,
                     reason: SkipReason::MissedWindow,
                 });
@@ -1169,6 +1173,16 @@ pub struct ActionLog {
     pub reminder_id: i64,
     /// 冗余快照（规则删除后类型仍可读）。
     pub action_type: String,
+    /// 当时任务名快照（004；沿用来源列 reminders.label 同名——规则改名/
+    /// 删除不影响历史；迁移前旧行 NULL → 前端「未记录」）。
+    pub label: Option<String>,
+    /// 当时配置的任务命令快照（004；action_params.command；解析不出 → NULL）。
+    /// 005 起「实际执行命令」不再单列——命令串逐字节原样传给 sh/powershell
+    ///（目录经进程属性生效），实录与配置恒同值（routine-exec.md Part C）。
+    pub command: Option<String>,
+    /// 当时工作目录快照（005；action_params.cwd 非空值；未配置 → NULL）——
+    /// 「当时在哪个目录执行」的时点实录（规则改/删后仍可回查）。
+    pub cwd: Option<String>,
     pub status: String,
     /// i18n 模板键（`task.summary.*`；参数化键 `key:arg`——P3-3 展示按语言渲染）。
     pub summary: String,
@@ -1180,34 +1194,45 @@ pub struct ActionLog {
 }
 
 /// insert running 态日志（spawn 时刻写；summary 置空串，终态回写补齐）。
+/// 快照：label = 派发时刻 rule.label；command = 当时配置命令（与实际执行
+/// 同串）；cwd = 当时工作目录（未配置 → NULL）。
 pub fn insert_action_log_running(
     conn: &Connection,
     reminder_id: i64,
     action_type: &str,
+    label: &str,
+    command: Option<&str>,
+    cwd: Option<&str>,
     started_at: &str,
     scheduled_at: &str,
 ) -> Result<i64, String> {
     conn.execute(
-        "INSERT INTO action_logs (reminder_id, action_type, status, summary, started_at, scheduled_at) \
-         VALUES (?1, ?2, 'running', '', ?3, ?4)",
-        params![reminder_id, action_type, started_at, scheduled_at],
+        "INSERT INTO action_logs (reminder_id, action_type, label, command, cwd, \
+         status, summary, started_at, scheduled_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, 'running', '', ?6, ?7)",
+        params![reminder_id, action_type, label, command, cwd, started_at, scheduled_at],
     )
     .map_err(|e| format!("insert action_log: {e}"))?;
     Ok(conn.last_insert_rowid())
 }
 
 /// insert skipped 态日志（超窗/暂停两来源；finished_at = 判定时刻）。
+/// 快照 label/command/cwd = 判定时刻配置（「配置了但没跑」的完整上下文）。
 pub fn insert_action_log_skipped(
     conn: &Connection,
     reminder_id: i64,
+    label: &str,
+    command: Option<&str>,
+    cwd: Option<&str>,
     summary_key: &str,
     scheduled_at: &str,
     finished_at: &str,
 ) -> Result<i64, String> {
     conn.execute(
-        "INSERT INTO action_logs (reminder_id, action_type, status, summary, started_at, \
-         finished_at, scheduled_at) VALUES (?1, 'exec', 'skipped', ?2, ?3, ?3, ?4)",
-        params![reminder_id, summary_key, finished_at, scheduled_at],
+        "INSERT INTO action_logs (reminder_id, action_type, label, command, cwd, status, summary, \
+         started_at, finished_at, scheduled_at) \
+         VALUES (?1, 'exec', ?2, ?3, ?4, 'skipped', ?5, ?6, ?6, ?7)",
+        params![reminder_id, label, command, cwd, summary_key, finished_at, scheduled_at],
     )
     .map_err(|e| format!("insert skipped action_log: {e}"))?;
     Ok(conn.last_insert_rowid())
@@ -1237,15 +1262,16 @@ pub fn finish_action_log_with(
     Ok(())
 }
 
-/// 历史页分页查询（倒序 50/页；reminder_id 可选过滤）。
+/// 历史页分页查询（倒序 15/页；reminder_id 可选过滤）。
 pub fn list_action_logs(
     conn: &Connection,
     reminder_id: Option<i64>,
     page: u64,
 ) -> Result<(Vec<ActionLog>, i64), String> {
-    const PAGE_SIZE: i64 = 50;
+    // 单页行数收归 ACTION_LOG_PAGE_SIZE 单一事实源（routine-exec.md Part A：
+    // 原局部 PAGE_SIZE 与常量两份维护，只改其一会 page_size/LIMIT 失配）。
     let page = page.max(1);
-    let offset = (page as i64 - 1) * PAGE_SIZE;
+    let offset = (page as i64 - 1) * ACTION_LOG_PAGE_SIZE;
     let (where_clause, bind_id): (&str, Option<i64>) = match reminder_id {
         Some(id) => ("WHERE reminder_id = ?1", Some(id)),
         None => ("", None),
@@ -1259,9 +1285,10 @@ pub fn list_action_logs(
         .map_err(|e| format!("count action_logs: {e}"))?;
     let mut stmt = conn
         .prepare(&format!(
-            "SELECT id, reminder_id, action_type, status, summary, output_tail, exit_code, \
-             started_at, finished_at, scheduled_at FROM action_logs {where_clause} \
-             ORDER BY id DESC LIMIT {PAGE_SIZE} OFFSET {offset}"
+            "SELECT id, reminder_id, action_type, label, command, cwd, status, \
+             summary, output_tail, exit_code, started_at, finished_at, scheduled_at \
+             FROM action_logs {where_clause} \
+             ORDER BY id DESC LIMIT {ACTION_LOG_PAGE_SIZE} OFFSET {offset}"
         ))
         .map_err(|e| format!("list action_logs: {e}"))?;
     let rows = stmt
@@ -1270,13 +1297,16 @@ pub fn list_action_logs(
                 id: row.get(0)?,
                 reminder_id: row.get(1)?,
                 action_type: row.get(2)?,
-                status: row.get(3)?,
-                summary: row.get(4)?,
-                output_tail: row.get(5)?,
-                exit_code: row.get(6)?,
-                started_at: row.get(7)?,
-                finished_at: row.get(8)?,
-                scheduled_at: row.get(9)?,
+                label: row.get(3)?,
+                command: row.get(4)?,
+                cwd: row.get(5)?,
+                status: row.get(6)?,
+                summary: row.get(7)?,
+                output_tail: row.get(8)?,
+                exit_code: row.get(9)?,
+                started_at: row.get(10)?,
+                finished_at: row.get(11)?,
+                scheduled_at: row.get(12)?,
             })
         })
         .map_err(|e| format!("list action_logs: {e}"))?;
@@ -1368,7 +1398,19 @@ fn persist_skipped<R: tauri::Runtime>(
             };
             let sched = ms_to_rfc3339(s.scheduled_at_ms)
                 .unwrap_or_else(|| now_ts.to_string());
-            if let Err(e) = insert_action_log_skipped(&conn, s.id, key, &sched, now_ts) {
+            // 快照取判定时刻配置（与 running 的派发时刻快照语义对齐——Part C）
+            let cmd = crate::action_exec::command_from_params(s.action_params.as_deref());
+            let dir = crate::action_exec::cwd_from_params(s.action_params.as_deref());
+            if let Err(e) = insert_action_log_skipped(
+                &conn,
+                s.id,
+                &s.label,
+                cmd.as_deref(),
+                dir.as_deref(),
+                key,
+                &sched,
+                now_ts,
+            ) {
                 plog!("[pulsepet] insert skipped log for #{} failed: {e}", s.id);
             }
         }
@@ -1850,7 +1892,7 @@ pub fn tasks_skip_once<R: tauri::Runtime>(
     Ok(())
 }
 
-/// v2 M4 执行历史分页查询（TC-M4-16）：倒序 50 条/页，reminder_id 可选过滤。
+/// v2 M4 执行历史分页查询（TC-M4-16）：倒序 15 条/页，reminder_id 可选过滤。
 #[tauri::command]
 pub fn action_logs_list(
     app: tauri::AppHandle,
@@ -1868,8 +1910,8 @@ pub fn action_logs_list(
     })
 }
 
-/// 单页行数（§4.7 执行历史区：50 条/页）。
-pub const ACTION_LOG_PAGE_SIZE: i64 = 50;
+/// 单页行数（§4.7 执行历史区；2026-08-30 用户裁定 50→15，routine-exec.md Part A）。
+pub const ACTION_LOG_PAGE_SIZE: i64 = 15;
 
 /// 分页返回结构（与 TS `ActionLogPage` 一致）。
 #[derive(Debug, Clone, Serialize)]
@@ -3721,12 +3763,22 @@ mod tests {
     fn action_logs_crud_pagination_and_orphan_survival() {
         let c = conn();
         let r = insert_rule(&c, &input("custom", "执行", 30)).unwrap();
-        // 60 条 ok 日志 + 1 条 running
+        // 60 条 ok 日志 + 1 条 running（004 起 insert 携带 label/command 快照；
+        // 005 起 executed 位换 cwd 快照——Part C）
         for i in 0..60 {
             finish_action_log_with(
                 &c,
-                insert_action_log_running(&c, r.id, "exec", &rfc(1000 + i), &rfc(1000 + i))
-                    .unwrap(),
+                insert_action_log_running(
+                    &c,
+                    r.id,
+                    "exec",
+                    "执行",
+                    Some(&format!("cmd-{i}")),
+                    Some("/tmp/loop"),
+                    &rfc(1000 + i),
+                    &rfc(1000 + i),
+                )
+                .unwrap(),
                 "ok",
                 crate::action_exec::SUMMARY_OK,
                 Some(&format!("tail-{i}")),
@@ -3735,30 +3787,51 @@ mod tests {
             )
             .unwrap();
         }
-        insert_action_log_running(&c, r.id, "exec", &rfc(999_000), &rfc(999_000)).unwrap();
-        // 第 1 页：倒序（最新 running 在前）50 条
+        insert_action_log_running(
+            &c,
+            r.id,
+            "exec",
+            "运行中",
+            Some("run-cmd"),
+            Some("/tmp/run"),
+            &rfc(999_000),
+            &rfc(999_000),
+        )
+        .unwrap();
+        // 第 1 页：倒序（最新 running 在前）15 条（004 起分页 15 条/页）
         let (page1, total) = list_action_logs(&c, None, 1).unwrap();
         assert_eq!(total, 61);
-        assert_eq!(page1.len(), 50);
+        assert_eq!(page1.len(), 15);
         assert_eq!(page1[0].status, "running", "倒序：id 最大（running 那条）在前");
         assert_eq!(page1[1].output_tail.as_deref(), Some("tail-59"));
-        // 第 2 页：11 条
+        // 第 2 页：15 条，末条 tail-31（61 条倒序：offset 15..30）
         let (page2, _) = list_action_logs(&c, None, 2).unwrap();
-        assert_eq!(page2.len(), 11);
-        assert_eq!(page2.last().unwrap().output_tail.as_deref(), Some("tail-0"));
+        assert_eq!(page2.len(), 15);
+        assert_eq!(page2.last().unwrap().output_tail.as_deref(), Some("tail-31"));
+        // 第 5 页（末页）：1 条——最早一条位于末页末尾的边界覆盖
+        let (page5, _) = list_action_logs(&c, None, 5).unwrap();
+        assert_eq!(page5.len(), 1);
+        assert_eq!(page5.last().unwrap().output_tail.as_deref(), Some("tail-0"));
         // 按规则过滤
         let (filtered, ftotal) = list_action_logs(&c, Some(r.id), 1).unwrap();
         assert_eq!(ftotal, 61);
-        assert_eq!(filtered.len(), 50);
+        assert_eq!(filtered.len(), 15);
         // 删除规则 → 历史保留（悬空 reminder_id + 冗余快照可读）
         delete_rule(&c, r.id).unwrap();
         let (after, atotal) = list_action_logs(&c, None, 1).unwrap();
         assert_eq!(atotal, 61, "规则删除后历史保留");
         assert_eq!(after[0].action_type, "exec", "action_type 冗余快照可读");
-        // skipped 插入（超窗两来源共用形状）
+        // 快照列在规则删除后仍可读（Part C：label/command/cwd 悬空保留）
+        assert_eq!(after[0].label.as_deref(), Some("运行中"), "label 快照悬空可读");
+        assert_eq!(after[0].command.as_deref(), Some("run-cmd"), "command 快照悬空可读");
+        assert_eq!(after[0].cwd.as_deref(), Some("/tmp/run"), "cwd 快照悬空可读");
+        // skipped 插入（超窗两来源共用形状；005 起带 label/command/cwd 快照）
         let _ = insert_action_log_skipped(
             &c,
             999,
+            "悬空例程",
+            Some("planned-cmd"),
+            Some("/tmp/plan"),
             crate::action_exec::SUMMARY_MISSED,
             &rfc(1000),
             &rfc(2000),
@@ -3767,6 +3840,9 @@ mod tests {
         let (rows, total) = list_action_logs(&c, None, 1).unwrap();
         assert_eq!(total, 62);
         assert_eq!(rows[0].status, "skipped", "倒序：最新 skipped 在首页首位");
+        assert_eq!(rows[0].label.as_deref(), Some("悬空例程"));
+        assert_eq!(rows[0].command.as_deref(), Some("planned-cmd"));
+        assert_eq!(rows[0].cwd.as_deref(), Some("/tmp/plan"), "skipped 亦快照 cwd（配置了但没跑的完整上下文）");
     }
 
     // ---- R2（TC-M4-15-1 P2）：finish_action_log_with 的 running 守卫 ----
@@ -3776,7 +3852,9 @@ mod tests {
         // 守卫钉子：已离开 running 态的行（如 abort 先行结案 interrupted、
         // 或已完成 ok）不被后续完成回写覆盖——两个写入方以行状态为屏障
         let c = conn();
-        let log_id = insert_action_log_running(&c, 1, "exec", &rfc(1000), &rfc(1000)).unwrap();
+        let log_id =
+            insert_action_log_running(&c, 1, "exec", "任务", None, None, &rfc(1000), &rfc(1000))
+                .unwrap();
         // running → 首次正常回写成功
         finish_action_log_with(
             &c, log_id, "ok", crate::action_exec::SUMMARY_OK, Some("out"), Some(0), &rfc(2000),
@@ -3799,7 +3877,9 @@ mod tests {
         assert_eq!(exit_code, Some(0), "旧值全保留（守卫 = 整行不动）");
         // abort 结案（interrupted）后的完成回写同样被拦——action_exec 侧的
         // 真实进程竞态钉子覆盖该主场景，此处钉纯 SQL 语义
-        let log2 = insert_action_log_running(&c, 2, "exec", &rfc(1000), &rfc(1000)).unwrap();
+        let log2 =
+            insert_action_log_running(&c, 2, "exec", "任务", None, None, &rfc(1000), &rfc(1000))
+                .unwrap();
         c.execute(
             "UPDATE action_logs SET status = 'failed', summary = ?2 WHERE id = ?1",
             params![log2, crate::action_exec::SUMMARY_INTERRUPTED],

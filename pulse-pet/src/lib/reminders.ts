@@ -15,6 +15,7 @@ import { sanitizeBubbleText } from "./bubble";
 import { isTauriRuntime } from "./token-stats";
 import { t, type Lang } from "./i18n";
 import { todoReminderText } from "./todos";
+import { matchOf, templateOf } from "./routine-templates";
 
 export { isTauriRuntime };
 
@@ -46,7 +47,7 @@ export interface ReminderRule {
   created_at: string;
   /** v2 M4：动作类型（'notify' | 'exec'）。 */
   action_type: ActionType;
-  /** v2 M4：动作参数 JSON 文本（exec = {command, cwd?, timeout_minutes?, opencode_auto?}）。 */
+  /** v2 M4：动作参数 JSON 文本（exec = {command, cwd?, timeout_minutes?, tpl_agent?, tpl_flags?}——Part B 起；旧键 opencode_auto 读兼容）。 */
   action_params: string | null;
   /** v2 M4：调度类型（'interval' | 'daily' | 'once'；daily/once 行 interval 恒 0）。 */
   schedule_kind: ScheduleKind;
@@ -298,7 +299,104 @@ export function validateExecParams(
   if (params.opencode_auto != null && typeof params.opencode_auto !== "boolean") {
     return t("tasks.validation.autoBad", undefined, lang);
   }
+  // Part B（routine-exec.md §3.3）：tpl_agent / tpl_flags 预检（与 Rust 同规则）
+  if (params.tpl_agent != null && typeof params.tpl_agent !== "string") {
+    return t("tasks.validation.tplAgentBad", undefined, lang);
+  }
+  const tplFlags = params.tpl_flags;
+  if (
+    tplFlags != null &&
+    (typeof tplFlags !== "object" ||
+      Array.isArray(tplFlags) ||
+      Object.values(tplFlags).some((v) => typeof v !== "boolean"))
+  ) {
+    return t("tasks.validation.tplFlagsBad", undefined, lang);
+  }
   return null;
+}
+
+// ---- Part B（routine-exec.md §3.3）：exec 表单态（自 Tasks.tsx 迁入 + 泛化） ----
+
+/**
+ * exec 表单的独立状态（command 等 → 序列化进 action_params 提交；Tasks.tsx 消费）。
+ * Part B 泛化：tplAuto → tplFlags + tplAgent（多模板注册表）。
+ */
+export interface ExecFormState {
+  command: string;
+  cwd: string;
+  timeoutMinutes: number;
+  /** 模板指令输入（不持久化——空指令守卫防编辑态改任务名 clobber 原 command）。 */
+  tplInstruction: string;
+  /** 选中例程模板 agentId（chips 单选；新建默认预选 opencode）。 */
+  tplAgent: string;
+  /** 模板 flags 勾选态（key → bool；chips 切换时重置为全 false）。 */
+  tplFlags: Record<string, boolean>;
+}
+
+/** exec 表单默认态（新建）。 */
+export function emptyExecState(): ExecFormState {
+  return {
+    command: "",
+    cwd: "",
+    timeoutMinutes: 10,
+    tplInstruction: "",
+    tplAgent: "opencode",
+    tplFlags: {},
+  };
+}
+
+/** exec 表单态 → action_params JSON（Part B 起保存一律新格式：tpl_agent + tpl_flags；timeout 恒写——模板与手写同构）。 */
+export function execParamsJson(exec: ExecFormState): string {
+  return JSON.stringify({
+    command: exec.command,
+    ...(exec.cwd.trim() ? { cwd: exec.cwd.trim() } : {}),
+    timeout_minutes: exec.timeoutMinutes,
+    tpl_agent: exec.tplAgent,
+    tpl_flags: exec.tplFlags,
+  });
+}
+
+/**
+ * action_params JSON → exec 表单态（编辑回填）。兜底四态 + matchOf 反推：
+ * - `tplAgent` = `matchOf(command)` 反推（重拼只看 command 形态）→ 存的
+ *   `tpl_agent`（注册表内有效）→ 默认 opencode；
+ * - 旧键 `opencode_auto` 读兼容：`tpl_agent` 缺失且 true → `{auto:true}`
+ *   （`tpl_agent` 存在时忽略——新格式恒不同时写出，并存仅手改数据）；
+ * - `tpl_flags` 缺失/非对象/值非布尔 → `{}`（读侧宽松；写侧由 validate 把守）。
+ */
+export function execFromParams(params: string | null): ExecFormState {
+  const base = emptyExecState();
+  if (!params) return base;
+  try {
+    const p = JSON.parse(params) as Record<string, unknown>;
+    const command = typeof p.command === "string" ? p.command : "";
+    const rawFlags = p.tpl_flags;
+    const tplFlags =
+      rawFlags != null &&
+      typeof rawFlags === "object" &&
+      !Array.isArray(rawFlags) &&
+      Object.values(rawFlags).every((v) => typeof v === "boolean")
+        ? (rawFlags as Record<string, boolean>)
+        : {};
+    const storedAgent = typeof p.tpl_agent === "string" ? p.tpl_agent : null;
+    const tplAgent =
+      matchOf(command)?.agentId ??
+      (storedAgent != null && templateOf(storedAgent) != null ? storedAgent : "opencode");
+    return {
+      command,
+      cwd: typeof p.cwd === "string" ? p.cwd : "",
+      timeoutMinutes:
+        typeof p.timeout_minutes === "number" && p.timeout_minutes >= 1 && p.timeout_minutes <= 120
+          ? p.timeout_minutes
+          : 10,
+      tplInstruction: "",
+      tplAgent,
+      tplFlags:
+        storedAgent == null && p.opencode_auto === true ? { auto: true } : tplFlags,
+    };
+  } catch {
+    return base;
+  }
 }
 
 /** weekdays JSON 文本校验（1-7、合法数组）。 */
@@ -443,29 +541,6 @@ export function scheduleSummary(
 }
 
 /**
- * opencode 例程模板拼接（§4.6，纯填表辅助——执行层不感知 opencode）：
- * `opencode run --title "pulsepet 例程: <任务名>" [--auto] "<指令>"`；
- * 不用 --dir（cwd 字段即工作目录）。
- * 内容原样保留（§二十三修订：弯引号在单引号串内是合法字面量，不做内容
- * 归一——结构引号恒由本函数产 ASCII，安全由 shellQuote 转义保证）。
- */
-export function buildOpencodeCommand(
-  taskName: string,
-  instruction: string,
-  auto: boolean,
-): string {
-  const title = `pulsepet 例程: ${taskName.trim()}`;
-  const instr = instruction.trim();
-  const autoFlag = auto ? " --auto" : "";
-  return `opencode run --title ${shellQuote(title)}${autoFlag} ${shellQuote(instr)}`;
-}
-
-/** POSIX 单引号安全引用（sh -c 双层语义下最稳的引用形态）。 */
-export function shellQuote(s: string): string {
-  return `'${s.replace(/'/g, `'\\''`)}'`;
-}
-
-/**
  * 弯引号 → ASCII 对应字符（§二十三：仅 ‘’“” 四字符——供「一键修正」把
  * 输入法/系统智能引号误替的结构引号修复回 ASCII；ASCII 引号与其余内容
  * 一概不动）。语义取舍：把弯引号一律视为「本应是引号」——针对误替场景；
@@ -522,6 +597,13 @@ export interface ActionLog {
   id: number;
   reminder_id: number;
   action_type: string;
+  /** 当时任务名快照（004；旧行 null → 「未记录」）。 */
+  label: string | null;
+  /** 当时配置的任务命令快照（004；解析不出 null）——命令串逐字节原样传给
+   * shell（目录经进程属性生效），实录与配置恒同值，005 起不再单列 executed。 */
+  command: string | null;
+  /** 当时工作目录快照（005；未配置 → null = 继承 App 进程目录）。 */
+  cwd: string | null;
   status: string;
   summary: string;
   output_tail: string | null;
@@ -658,7 +740,7 @@ export async function skipTaskOnce(id: number): Promise<void> {
   return invoke("tasks_skip_once", { id });
 }
 
-/** v2 M4：执行历史分页查询（倒序 50 条/页；reminderId 可选过滤）。 */
+/** v2 M4：执行历史分页查询（倒序 15 条/页——2026-08-30 用户裁定，004 起；reminderId 可选过滤）。 */
 export async function fetchActionLogs(
   reminderId: number | null,
   page: number,

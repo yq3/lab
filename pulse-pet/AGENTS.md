@@ -9,7 +9,7 @@ PulsePet 是一个桌面宠物 App（Tauri 2 + React + TS + Vite），监听 cod
 ## 文档地图（2026-08-22 起按版本归档于 `docs/`）
 
 - `docs/v1/`——**0.1.x 发版线**文档：`DESIGN.md`（技术方案）、`TEST-CASES.md`（验收用例）、`DECISIONS.md`（v1 范围决策）、`V1-OPEN-ITEMS.md`（v1 遗留清单，**§八 = v0.1.3 维护版计划**）、`DESIGN-REVIEW.md` / `TEST-CASES-REVIEW.md`（历史评审，留档原貌）、`desktop-pet-research.md`（调研）。0.1.x 线的维护性文档修订（如 v0.1.3 改 TEST-CASES 措辞）仍落此处。
-- `docs/v2/`——**v2** 范围与设计：`V2-SCOPE.md`（范围决策）、`V2-DESIGN.md`（M1~M6 方案设计与评审记录）、`V2-TEST-CASES.md`（v2 验收用例）、`V2-OPEN-ITEMS.md`（v2 运行时问题 / 反馈批次 / 追加特性，§一~§二十一）、`agent-registry.md`（多 agent 注册表设计与实施记录）、`agent-onboarding.md`（新 agent 接入操作手册）、`pet-size.md`（宠物大小档位与归一化）；后续新文档落此目录，**不回改 docs/v1/ 文档**。
+- `docs/v2/`——**v2** 范围与设计：`V2-SCOPE.md`（范围决策）、`V2-DESIGN.md`（M1~M6 方案设计与评审记录）、`V2-TEST-CASES.md`（v2 验收用例）、`V2-OPEN-ITEMS.md`（v2 运行时问题 / 反馈批次 / 追加特性，§一~§二十五）、`agent-registry.md`（多 agent 注册表设计与实施记录）、`agent-onboarding.md`（新 agent 接入操作手册）、`pet-size.md`（宠物大小档位与归一化）、`routine-exec.md`（例程 exec 批次：执行历史快照化 + 多 agent 例程模板注册表 + 执行上下文增补——快照字段 = 任务名/命令/工作目录，Part A/B/C 均 2026-08-30 实施）；后续新文档落此目录，**不回改 docs/v1/ 文档**。
 - 正文中的 `DESIGN §x` / `TEST-CASES §x` 等纯文字引用指 `docs/v1/` 下同名文件；`V2-DESIGN §x` / `V2-TEST-CASES §x` / `V2-SCOPE §x` 指 `docs/v2/` 下同名文件。
 
 ## 本目录技术栈与命令

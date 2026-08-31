@@ -504,7 +504,7 @@
 - **前置**：tempdir DB 集成测试 + v1 存量数据实机。
 - **步骤/预期**：
   1. 迁移 003 幂等（版本 2→3 执行 / 3 跳过；SQL + 版本提升包在同一事务，A1 约定）；`SCHEMA_VERSION = 3` 编译期断言不红；
-  2. `reminders` 表 +7 列（action_type / action_params / schedule_kind / schedule_at / schedule_weekdays / snooze_until / last_skipped_at）+ `action_logs` 新表；
+  2. `reminders` 表 +7 列（action_type / action_params / schedule_kind / schedule_at / schedule_weekdays / snooze_until / last_skipped_at）+ `action_logs` 新表（**004 修订注**：2026-08-30 追加三快照列 label/command/executed_command、SCHEMA_VERSION=4，见 routine-exec.md Part A 与 TC-M4-16——本用例留档 003 时点不动；**005 修订注**：2026-08-30 追加 cwd 快照列并 DROP executed_command（恒同值冗余）、SCHEMA_VERSION=5，快照集合 = 任务名/命令/工作目录，见 routine-exec.md Part C）；
   3. v1 存量行自动获得默认值（action_type='notify' / schedule_kind='interval'），**v1 行为零变化**：升级后原提醒原样可见可编辑、interval 窗口 / 去重 / 暂停顺延 / 烟花叠加行为与 v1 等价（TC-RM 回归）；
   4. `action_params` JSON 解析失败 → validate 拒绝保存（存量行不可能有，新写路径全过 validate）。
 
@@ -562,13 +562,14 @@
 
 - **步骤/预期**：command 非空且 ≤2000 字符；cwd 可选（存在则必须为目录）；timeout_minutes 1–120（缺省 10）；`opencode_auto` 为 bool（仅校验，不改变命令）；kind 切换时重置无关字段（interval 行清 schedule_at / weekdays；daily/once 行清 start_time / end_time 窗口——防遗留窗口卡住 in_window 判定导致误 skipped）；once 过去时刻拒绝；`action_params` JSON 解析失败拒绝。
 
-### TC-M4-08 opencode 一等模板（实机）
+### TC-M4-08 例程模板注册表（实机；原「opencode 一等模板」，Part B 泛化 2026-08-30）
 
-- **步骤**：表单动作类型选「执行命令」→ 点「opencode 例程」模板快捷块 → 填任务名与指令 → 保存并触发。
+- **步骤**：表单动作类型选「执行命令」→ 「例程模板」块 chips 切换 OpenCode / Claude Code → 填任务名与指令 → 勾/不勾 flag → 保存并触发。
 - **预期**：
-  1. 拼出的 command = `opencode run --title "pulsepet 例程: <任务名>" [--auto] "<指令>"`（`--auto` 由 checkbox 控制，默认不勾、勾选时危险色警示）；cwd 字段独立（不用 `--dir`）；timeout 缺省 10 分钟；
-  2. 模板仅填表辅助：用户改 command 后与手写命令无差异（执行层不感知 opencode）；
-  3. 真实例程（如「数一下仓库有几个 md 文件」）执行 → 宠物细粒度状态随 agent 层变化（spawn 的 `opencode run` 加载 pulse-pet-hook.js，thinking / editing / testing 正常上报，R9 首日验证）→ 结束 success / failed + 气泡 + **Token 页出现「pulsepet 例程:」标题会话**（`--title` 是否被自动摘要覆盖 = 本用例实测回填，M5 例程徽标 R8 的可行性前提）。
+  1. opencode 拼出的 command = `opencode run --title "pulsepet 例程: <任务名>" [--auto] "<指令>"`（`--auto` 由 flag 勾选控制，默认不勾、勾选时危险色警示）；cwd 字段独立（不用 `--dir`）；timeout 缺省 10 分钟；action_params 持久化 `tpl_agent` + `tpl_flags`（Part B 新格式）；
+  2. Claude Code 拼出 `claude -p "<指令>" [--dangerously-skip-permissions]`（任务名不进命令；**CC 会话无 ⚡ 例程徽标——已裁定接受边界**，靠指令首行派生 title 辨识）；chips 文案 = agent 显示名（labelKey）；切换 chips 重置勾选、command 不因切换而变；
+  3. 模板仅填表辅助：用户改 command 后与手写命令无差异（执行层不感知 agent）；一键填充恒可点（空指令填骨架，输入指令后自动重拼——保留「先填充、后手改 command」口子，2026-08-30 修订）；编辑回填按 command 前缀形态恢复选中模板（手写命令回落默认 OpenCode 且不被重拼）；
+  4. 真实 opencode 例程（如「数一下仓库有几个 md 文件」）执行 → 宠物细粒度状态随 agent 层变化（spawn 的 `opencode run` 加载 pulse-pet-hook.js，thinking / editing / testing 正常上报，R9 首日验证）→ 结束 success / failed + 气泡 + **Token 页出现「pulsepet 例程:」标题会话**（`--title` 是否被自动摘要覆盖 = 本用例实测回填，M5 例程徽标 R8 的可行性前提）。
 
 ### TC-M4-09 权限行为（实机，S1 复验）
 
@@ -646,11 +647,11 @@
 
 - **步骤**：tempdir DB 集成单测（action_logs 增删查）+ 产生多次运行（ok / failed / skipped / 超时）→ 打开历史区 → 展开一行。
 - **预期**：
-  1. action_logs 倒序、分页 50 条/页（`action_logs_list(reminder_id?)` 可按规则过滤）；
-  2. 每行：时间 / 动作类型徽标 / summary / 状态色点（ok 绿 · failed 红 · skipped 灰 · running 蓝）；
-  3. 行展开：output_tail（等宽、2KB 内）+ scheduled_at 与 started_at 差（补跑延迟可见）；
-  4. 规则删除后历史保留（悬空 reminder_id 允许，action_type 冗余快照可读）；
-  5. 单测（tempdir DB）：action_logs 增删查全链路 + 悬空 reminder_id 行保留（§4.11 集成行——与 TC-M4-15 的启动清理单测互补）。
+  1. action_logs 倒序、分页 15 条/页（2026-08-30 修订，原 50——routine-exec.md Part A；`action_logs_list(reminder_id?)` 可按规则过滤；页码 + 上一页/下一页在历史块**底部居中**，筛选下拉独占顶部）；
+  2. 每行：时间 / 动作类型徽标 / **任务名（`label` 快照）** / summary / 状态色点（ok 绿 · failed 红 · skipped 灰 · running 蓝）；
+  3. 行展开：**「命令（当时）」单块 +「工作目录（当时）」块（005 起 Part C——实录与配置恒同值，命令串原样传给 shell；cwd 未配置 →「继承 App 进程目录」、旧行 command NULL →「未记录」）** + output_tail（等宽、2KB 内）+ scheduled_at 与 started_at 差（补跑延迟可见）；
+  4. 规则删除后历史保留（悬空 reminder_id 允许，action_type + **快照列（label/command/cwd）**冗余可读——改名/改命令/删除不影响历史回查）；
+  5. 单测（tempdir DB）：action_logs 增删查全链路 + 悬空 reminder_id 行保留（§4.11 集成行——与 TC-M4-15 的启动清理单测互补；004 起含快照断言与末页边界钉）。
 
 ### TC-M4-17 双语与深浅主题（实机）
 

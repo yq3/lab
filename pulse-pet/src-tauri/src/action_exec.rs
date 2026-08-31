@@ -183,7 +183,9 @@ impl ExecExecutor {
 
     /// validate 规则（TC-M4-07）：command 非空 ≤2000；cwd 可选（存在则须为
     /// 目录）；timeout_minutes 1-120（缺省 10）；opencode_auto 须 bool（仅
-    /// 校验不改命令——模板拼接在 UI 完成）。特殊字符给警告不阻止（R3）。
+    /// 校验不改命令——模板拼接在 UI 完成）；tpl_agent 须字符串、tpl_flags 须
+    /// 对象且值全布尔（Part B，宽松白名单——未知键仍忽略）。特殊字符给警告
+    /// 不阻止（R3）。
     pub fn validate_params(params: &Value) -> Result<(), String> {
         let obj = params
             .as_object()
@@ -216,6 +218,19 @@ impl ExecExecutor {
         if let Some(a) = obj.get("opencode_auto") {
             if !a.is_boolean() {
                 return Err("opencode_auto 应为布尔值".to_string());
+            }
+        }
+        // Part B（routine-exec.md §3.3）：tpl_agent / tpl_flags 宽松校验——
+        // 未知键仍忽略（宽松白名单不变）；null 命中即非法（opencode_auto 同款先例）。
+        if let Some(a) = obj.get("tpl_agent") {
+            if !a.is_string() {
+                return Err("tpl_agent 应为字符串".to_string());
+            }
+        }
+        if let Some(f) = obj.get("tpl_flags") {
+            let ok = f.as_object().is_some_and(|m| m.values().all(Value::is_boolean));
+            if !ok {
+                return Err("tpl_flags 应为对象且所有值为布尔".to_string());
             }
         }
         // R3：特殊字符（非 ASCII 可打印 + 空白之外的字符）警告不阻止——
@@ -784,6 +799,30 @@ pub fn drain_pending_execs<R: tauri::Runtime>(
     }
 }
 
+/// action_params → command 提取（004 快照助手，pub 共用：start_exec_run 与
+/// reminder_scheduler::persist_skipped 两调用方）。**与 run_task 的 params
+/// 解析完全同源**（`from_str().ok()` → 取 `command` as_str）：解析失败 /
+/// 缺键 / 非字符串 → None（快照写 NULL，前端走「未记录」——恒同值口径；
+/// run_task 侧解析失败兜底 `{}` → 空命令直接 Failed 不 spawn，本助手
+/// None → NULL，两路口径一致——差异仅在「执行前失败」vs「历史未记录」）。
+pub fn command_from_params(action_params: Option<&str>) -> Option<String> {
+    let v: serde_json::Value = serde_json::from_str(action_params?).ok()?;
+    v.get("command")?.as_str().map(str::to_string)
+}
+
+/// action_params → cwd 提取（005 快照助手，pub 共用：start_exec_run 与
+/// reminder_scheduler::persist_skipped）。**与 run_task→exec_run_with_timeout
+/// 的 cwd 提取严格同源**（`get("cwd").as_str` + `!trim().is_empty()` 过滤）：
+/// **只 trim 判空、存原串**（current_dir 拿原串，不得误 trim 存值）；
+/// 缺省/空串/纯空白/非字符串/解析失败 → None（未配置 → 前端「未配置」占位）。
+pub fn cwd_from_params(action_params: Option<&str>) -> Option<String> {
+    let v: serde_json::Value = serde_json::from_str(action_params?).ok()?;
+    v.get("cwd")?
+        .as_str()
+        .filter(|s| !s.trim().is_empty())
+        .map(str::to_string)
+}
+
 /// 等待队列条目（RemindersState 持有；排队中无进程无 running 行——
 /// App 退出/崩溃时自然消失无残留）。
 #[derive(Debug, Clone)]
@@ -802,11 +841,24 @@ fn start_exec_run<R: tauri::Runtime>(
 ) -> bool {
     use tauri::Manager;
     let started = now_rfc3339();
+    // 快照（Part C）：label = 派发时刻 rule.label；command = 当时配置命令
+    //（与实际执行同串——目录经进程属性生效不进命令串）；cwd = 当时工作目录。
+    let cmd = command_from_params(rule.action_params.as_deref());
+    let dir = cwd_from_params(rule.action_params.as_deref());
     let log_id = {
         let db = app.state::<Mutex<Connection>>();
         let Ok(conn) = db.lock() else { return false };
         let sched_ts = ms_to_rfc3339(scheduled_at_ms).unwrap_or_else(|| started.clone());
-        match insert_action_log_running(&conn, rule.id, &rule.action_type, &started, &sched_ts) {
+        match insert_action_log_running(
+            &conn,
+            rule.id,
+            &rule.action_type,
+            &rule.label,
+            cmd.as_deref(),
+            dir.as_deref(),
+            &started,
+            &sched_ts,
+        ) {
             Ok(id) => id,
             Err(e) => {
                 plog!("[pulsepet] exec insert running log failed: {e}");
@@ -950,6 +1002,41 @@ mod tests {
     use super::*;
 
     #[test]
+    fn command_from_params_same_source_parse() {
+        // Part A 快照提取助手：与 run_task 完全同源（from_str().ok() → get
+        // command as_str）——解析失败/缺键/非字符串 → None（写 NULL 走「未记录」）
+        assert_eq!(command_from_params(None), None);
+        assert_eq!(command_from_params(Some("{not json")), None);
+        assert_eq!(command_from_params(Some(r#"{"cwd":"/tmp"}"#)), None);
+        assert_eq!(
+            command_from_params(Some(r#"{"command":42}"#)),
+            None,
+            "command 非字符串 → None"
+        );
+        assert_eq!(
+            command_from_params(Some(r#"{"command":"echo hi"}"#)),
+            Some("echo hi".to_string())
+        );
+    }
+
+    #[test]
+    fn cwd_from_params_trim_check_only_store_raw() {
+        // Part C：与 run_task→exec_run_with_timeout 的 cwd 提取严格同源——
+        // 只 trim 判空、存原串（current_dir 拿原串，不得误 trim 存值——审查 P3-1）
+        assert_eq!(cwd_from_params(None), None);
+        assert_eq!(cwd_from_params(Some("{not json")), None);
+        assert_eq!(cwd_from_params(Some(r#"{"cwd":""}"#)), None, "空串 → None");
+        assert_eq!(cwd_from_params(Some(r#"{"cwd":"   "}"#)), None, "纯空白串 → None");
+        assert_eq!(cwd_from_params(Some(r#"{"cwd":42}"#)), None, "非字符串 → None");
+        assert_eq!(
+            cwd_from_params(Some(r#"{"cwd":" /tmp/x "}"#)),
+            Some(" /tmp/x ".to_string()),
+            "非空带首尾空白 → 原样返回（不 trim 存值）"
+        );
+        assert_eq!(cwd_from_params(Some(r#"{"cwd":"/tmp"}"#)), Some("/tmp".to_string()));
+    }
+
+    #[test]
     fn exec_spawns_suppress_console_window() {
         // issue #19 同类清扫钉子：exec 定时任务（powershell）与 abort 路径
         // （taskkill）的 spawn 必须 CREATE_NO_WINDOW——release GUI 子系统下
@@ -1004,6 +1091,38 @@ mod tests {
     }
 
     // ---- validate（TC-M4-07） ----
+
+    #[test]
+    fn exec_validate_tpl_agent_flags_lenient_checks() {
+        // Part B（routine-exec.md §3.3）：tpl_agent / tpl_flags 宽松校验——
+        // 未知键仍忽略（宽松白名单不变），新键存在时校验形态；
+        // null 命中即非法（与 opencode_auto 同款先例）。
+        let ok = serde_json::json!({
+            "command": "ls",
+            "tpl_agent": "opencode",
+            "tpl_flags": { "auto": true }
+        });
+        assert!(ExecExecutor::validate_params(&ok).is_ok());
+        // tpl_flags 非对象 / 数组 / 值非布尔 / null → 拒绝
+        for bad in [
+            serde_json::json!("x"),
+            serde_json::json!([1]),
+            serde_json::json!({ "auto": "yes" }),
+            serde_json::Value::Null,
+        ] {
+            assert!(
+                ExecExecutor::validate_params(&serde_json::json!({ "command": "ls", "tpl_flags": bad })).is_err(),
+                "tpl_flags = {bad:?} 应拒绝"
+            );
+        }
+        // tpl_agent 非字符串 / null → 拒绝；字符串任意值放行（注册表在前端）
+        assert!(ExecExecutor::validate_params(&serde_json::json!({ "command": "ls", "tpl_agent": 5 })).is_err());
+        assert!(ExecExecutor::validate_params(&serde_json::json!({ "command": "ls", "tpl_agent": serde_json::Value::Null })).is_err());
+        assert!(ExecExecutor::validate_params(&serde_json::json!({ "command": "ls", "tpl_agent": "future-agent" })).is_ok());
+        // 旧键 opencode_auto 校验保留（读兼容期间旧数据仍可过 validate）
+        assert!(ExecExecutor::validate_params(&serde_json::json!({ "command": "ls", "opencode_auto": true })).is_ok());
+        assert!(ExecExecutor::validate_params(&serde_json::json!({ "command": "ls", "opencode_auto": "yes" })).is_err());
+    }
 
     #[test]
     fn exec_validate_command_rules() {
@@ -1553,7 +1672,14 @@ mod tests {
             // running 日志（start_exec_run 的 spawn 时刻形态）+ exec 规则
             let started = crate::reminder_scheduler::now_rfc3339();
             let log_id = crate::reminder_scheduler::insert_action_log_running(
-                &conn, 1, "exec", &started, &started,
+                &conn,
+                1,
+                "exec",
+                "退出竞态钉子",
+                Some("sleep 597"),
+                None,
+                &started,
+                &started,
             )
             .unwrap();
             let rule = crate::reminder_scheduler::ReminderRule {

@@ -79,6 +79,10 @@ registry 收敛后，接入新 agent = **两条独立链路按需接入**：
   [ ] agents.rs AGENTS += AgentSpec{ id, short_name, is_primary:false, integration, stats, register_state }
   [ ] agents.ts AGENTS += 一行（每 agent 一行格式，labelKey/descKey camelCase，hasCost）
   [ ] i18n: token.agent.<name> / integrations.<name>Desc（zh/en 成对，品牌规范写法）
+  [ ] 例程模板行（Part B，2026-08-30 起）：有 headless run CLI 的 agent 在
+      src/lib/routine-templates.ts 的 ROUTINE_TEMPLATES += 一行（agentId /
+      matches 前缀 / build / flags 声明）+ i18n tasks.tpl.<camel>.* 键对
+      （hint 必需，flag 按 i18nKey/i18nKey+"Hint"）；无 run CLI 不加，UI 不受影响
   [ ] "codex" 拒绝钉翻转（Rust 4 + 前端 3 文件，清单见 §1 步骤 5；接其他 id 不动、按需新增）
   [ ] 验证：cargo test / npm test / tsc / build 全绿 + dev 冒烟（白名单、卡、徽标、芯片）
 

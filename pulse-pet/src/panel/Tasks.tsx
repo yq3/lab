@@ -3,9 +3,11 @@ import {
   REMINDER_TEMPLATES,
   actionBadge,
   actionBadgeTitle,
-  buildOpencodeCommand,
   deleteReminder,
+  emptyExecState,
   execBadge,
+  execFromParams,
+  execParamsJson,
   fetchActionLogs,
   fetchFireworksGlobal,
   fetchPaused,
@@ -29,11 +31,14 @@ import {
   weekdaysToJson,
   type ActionLogPage,
   type ActionType,
+  type ExecFormState,
   type ReminderInput,
   type ReminderKind,
   type ReminderRule,
   type ScheduleKind,
 } from "../lib/reminders";
+import { ROUTINE_TEMPLATES, matchOf, templateOf, tplHintKey } from "../lib/routine-templates";
+import { specOf } from "../lib/agents";
 import { t, useLangStore } from "../lib/i18n";
 import { pluginEnabled, usePluginStore } from "../lib/plugin-store";
 
@@ -45,10 +50,14 @@ import { pluginEnabled, usePluginStore } from "../lib/plugin-store";
  *   + 启用开关 + 行操作（编辑/试一试/跳过本次/删除两步确认）；todo 派生行
  *   保持 M2 展示（可见惰性 + 📋 徽标；§十二 F12 行内烟花勾选项已移除）；
  * - 表单按 action_type 条件显隐（完整重做）：notify = kind/文案/调度三分支/
- *   烟花；exec = 任务名/opencode 例程模板块/command 等宽多行/cwd/超时/调度；
+ *   烟花；exec = 任务名/例程模板注册表块（Part B：chips 多模板）/command 等宽多行/cwd/超时/调度；
  * - Rust validate 权威 + 前端同规则预检（v1 模式）；
- * - 执行历史区（折叠面板）：action_logs 倒序分页 50 条/页 + 状态过滤 + 状态
- *   色点 + 展开 output_tail（等宽）+ scheduled_at 与 started_at 差（补跑延迟）。
+ * - 执行历史区（折叠面板，routine-exec.md Part A）：action_logs 倒序分页
+ *   15 条/页（页码 + 上一页/下一页在块底部居中，筛选下拉独占顶部）+ 状态
+ *   色点 + 行内任务名（快照，不关联当前 rules）+ 展开「命令（当时）」+
+ *   「工作目录（当时）」块（005 快照——实录与配置恒同值，单命令块）+
+ *   output_tail（等宽）+ scheduled_at 与 started_at 差（补跑延迟）；旧行
+ *   command null →「未记录」、cwd null →「未配置（继承 App 进程目录）」。
  * - i18n：tasks.* 命名空间（reminders.* 存量保留复用）。
  */
 
@@ -68,15 +77,9 @@ const SCHEDULE_KINDS: { id: ScheduleKind; labelKey: string }[] = [
   { id: "once", labelKey: "tasks.schedule.once" },
 ];
 
-/** exec 表单的独立状态（command 等 → 序列化进 action_params 提交）。 */
-interface ExecFormState {
-  command: string;
-  cwd: string;
-  timeoutMinutes: number;
-  /** opencode 模板块的指令 + --auto（模板拼接辅助态）。 */
-  tplInstruction: string;
-  tplAuto: boolean;
-}
+// ExecFormState / emptyExecState / execParamsJson / execFromParams 已迁至
+// lib/reminders.ts 导出（Part B：泛化 tplAgent/tpl_flags + 单测面；防
+// lib→panel 反向依赖）。
 
 function emptyForm(): ReminderInput {
   return {
@@ -93,10 +96,6 @@ function emptyForm(): ReminderInput {
     schedule_at: null,
     schedule_weekdays: null,
   };
-}
-
-function emptyExec(): ExecFormState {
-  return { command: "", cwd: "", timeoutMinutes: 10, tplInstruction: "", tplAuto: false };
 }
 
 /** 当前语言的模板列表（label 本地化；kind/interval 取 REMINDER_TEMPLATES 权威值）。 */
@@ -121,37 +120,6 @@ function allTemplateLabels(): Set<string> {
   return labels;
 }
 
-/** exec 表单态 → action_params JSON（timeout 恒写——模板与手写同构）。 */
-function execParamsJson(exec: ExecFormState): string {
-  return JSON.stringify({
-    command: exec.command,
-    ...(exec.cwd.trim() ? { cwd: exec.cwd.trim() } : {}),
-    timeout_minutes: exec.timeoutMinutes,
-    ...(exec.tplAuto ? { opencode_auto: true } : {}),
-  });
-}
-
-/** action_params JSON → exec 表单态（编辑回填）。 */
-function execFromParams(params: string | null): ExecFormState {
-  const base = emptyExec();
-  if (!params) return base;
-  try {
-    const p = JSON.parse(params) as Record<string, unknown>;
-    return {
-      command: typeof p.command === "string" ? p.command : "",
-      cwd: typeof p.cwd === "string" ? p.cwd : "",
-      timeoutMinutes:
-        typeof p.timeout_minutes === "number" && p.timeout_minutes >= 1 && p.timeout_minutes <= 120
-          ? p.timeout_minutes
-          : 10,
-      tplInstruction: "",
-      tplAuto: p.opencode_auto === true,
-    };
-  } catch {
-    return base;
-  }
-}
-
 /** once 时刻 "YYYY-MM-DDTHH:MM" → datetime-local input 值。 */
 function onceToLocalInput(at: string | null | undefined): string {
   return at ?? "";
@@ -165,7 +133,7 @@ export default function Tasks() {
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<ReminderRule | null>(null);
   const [form, setForm] = useState<ReminderInput>(emptyForm);
-  const [exec, setExec] = useState<ExecFormState>(emptyExec);
+  const [exec, setExec] = useState<ExecFormState>(emptyExecState);
   const [formError, setFormError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   /** 两步删除确认：第一次点"删除"变为"确认删除？"，3s 内再点才执行。 */
@@ -250,7 +218,7 @@ export default function Tasks() {
       await upsertReminder(editing?.id ?? null, { ...payload, label: payload.label.trim() });
       setEditing(null);
       setForm(emptyForm());
-      setExec(emptyExec());
+      setExec(emptyExecState());
       refresh();
     } catch (e) {
       setFormError(e instanceof Error ? e.message : String(e));
@@ -272,7 +240,7 @@ export default function Tasks() {
       if (editing?.id === r.id) {
         setEditing(null);
         setForm(emptyForm());
-        setExec(emptyExec());
+        setExec(emptyExecState());
       }
       if (historyFilter === r.id) setHistoryFilter(null);
       refresh();
@@ -338,10 +306,15 @@ export default function Tasks() {
     setFormError(null);
   };
 
-  /** opencode 例程模板（§4.6）：一键拼 command（--auto 随 checkbox；不用 --dir）。 */
-  const applyOpencodeTemplate = () => {
+  /** 例程模板一键填充（§4.6 → Part B 注册表）：按选中模板拼 command。
+      恒可点（2026-08-30 用户裁定恢复旧行为）：空指令也填充骨架命令
+      （'… "" '），随后输入指令自动重拼，或高级用户直接手改 command——
+      保留「先拿骨架、后自己写」的口子。 */
+  const applyRoutineTemplate = () => {
+    const tpl = templateOf(exec.tplAgent);
+    if (!tpl) return;
     const name = form.label.trim() || t("tasks.form.namePlaceholder");
-    setExec((e) => ({ ...e, command: buildOpencodeCommand(name, e.tplInstruction, e.tplAuto) }));
+    setExec((e) => ({ ...e, command: tpl.build(name, e.tplInstruction, e.tplFlags) }));
     setFormError(null);
   };
 
@@ -410,24 +383,27 @@ export default function Tasks() {
         use_fireworks: action === "exec" ? false : f.use_fireworks,
       };
     });
-    if (action === "exec") setExec(emptyExec());
+    if (action === "exec") setExec(emptyExecState());
   };
 
-  /** 任务名/文案输入：更新 label；exec 语境同步重拼模板 command（§二十三）。 */
+  /** 任务名/文案输入：更新 label；exec 语境同步重拼模板 command（§二十三）。
+      Part B：matchOf 反推模板（重拼只看 command 形态）+ 空指令守卫——
+      编辑回填 tplInstruction 恒空，不再以空指令覆盖原 command。 */
   const onLabelInput = (value: string) => {
     setForm((f) => ({ ...f, label: value }));
-    setExec((x) =>
-      form.action_type === "exec" && x.command.includes("opencode run")
-        ? {
-            ...x,
-            command: buildOpencodeCommand(
-              value.trim() || t("tasks.form.namePlaceholder"),
-              x.tplInstruction,
-              x.tplAuto,
-            ),
-          }
-        : x,
-    );
+    setExec((x) => {
+      if (form.action_type !== "exec") return x;
+      const tpl = matchOf(x.command);
+      if (!tpl || !x.tplInstruction.trim()) return x;
+      return {
+        ...x,
+        command: tpl.build(
+          value.trim() || t("tasks.form.namePlaceholder"),
+          x.tplInstruction,
+          x.tplFlags,
+        ),
+      };
+    });
   };
 
   const weekdays = parseWeekdays(form.schedule_weekdays);
@@ -456,7 +432,7 @@ export default function Tasks() {
           onClick={() => {
             setEditing(null);
             setForm(emptyForm());
-            setExec(emptyExec());
+            setExec(emptyExecState());
             setFormError(null);
           }}
         >
@@ -626,62 +602,90 @@ export default function Tasks() {
                 </div>
               )}
 
-              {/* opencode 例程模板块（仅 exec，§4.6） */}
+              {/* 例程模板注册表块（仅 exec；§4.6 → Part B routine-templates.ts）：
+                  chips 单选（默认预选 opencode，切换重置 flags、command 不因切换
+                  而变）+ 共享指令框 + 当前模板声明式 flags + 一键填充（恒可点——
+                  空指令填骨架，输入指令后自动重拼；高级用户可直接手改 command） */}
               {form.action_type === "exec" && (
                 <div className="task-tpl-block">
-                  <div className="task-tpl-title">{t("tasks.tpl.title")}</div>
-                  <p className="reminder-hint">{t("tasks.tpl.hint")}</p>
+                  <div className="task-tpl-title">{t("tasks.tpl.blockTitle")}</div>
+                  <div className="task-tpl-chips">
+                    {ROUTINE_TEMPLATES.map((tpl) => (
+                      <button
+                        key={tpl.agentId}
+                        className={`seg tpl-chip${exec.tplAgent === tpl.agentId ? " active" : ""}`}
+                        onClick={() =>
+                          setExec((x) => ({ ...x, tplAgent: tpl.agentId, tplFlags: {} }))
+                        }
+                      >
+                        {t(specOf(tpl.agentId)?.labelKey ?? "panel.agentTask")}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="reminder-hint">{t(tplHintKey(exec.tplAgent))}</p>
                   <textarea
                     className="task-textarea"
                     rows={2}
                     placeholder={t("tasks.form.instruction")}
                     value={exec.tplInstruction}
                     onChange={(e) =>
-                      setExec((x) => ({
-                        ...x,
-                        tplInstruction: e.target.value,
-                        // §二十三：指令输入自动同步进模板拼的 command（与
-                        // --auto checkbox 同款启发式）——常规路径无需手改
-                        // command 文本框（手改是弯引号事故的入口）
-                        command: x.command.includes("opencode run")
-                          ? buildOpencodeCommand(
-                              form.label.trim() || t("tasks.form.namePlaceholder"),
-                              e.target.value,
-                              x.tplAuto,
-                            )
-                          : x.command,
-                      }))
+                      setExec((x) => {
+                        // §二十三 → Part B：指令输入自动重拼（matchOf 启发式 +
+                        // 空指令守卫——常规路径无需手改 command 文本框）
+                        const tpl = matchOf(x.command);
+                        const cmd =
+                          tpl && e.target.value.trim()
+                            ? tpl.build(
+                                form.label.trim() || t("tasks.form.namePlaceholder"),
+                                e.target.value,
+                                x.tplFlags,
+                              )
+                            : x.command;
+                        return { ...x, tplInstruction: e.target.value, command: cmd };
+                      })
                     }
                   />
                   <div className="task-tpl-row">
-                    <label className={`reminder-check${exec.tplAuto ? " danger-check" : ""}`}>
-                      <input
-                        type="checkbox"
-                        checked={exec.tplAuto}
-                        onChange={(e) => {
-                          const auto = e.target.checked;
-                          setExec((x) => {
-                            // 已用模板拼过 command：--auto 增删同步进 command
-                            const cmd = x.command.includes("opencode run")
-                              ? buildOpencodeCommand(
-                                  form.label.trim() || t("tasks.form.namePlaceholder"),
-                                  x.tplInstruction,
-                                  auto,
-                                )
-                              : x.command;
-                            return { ...x, tplAuto: auto, command: cmd };
-                          });
-                        }}
-                      />
-                      {t("tasks.tpl.auto")}
-                    </label>
-                    <button className="seg primary" onClick={applyOpencodeTemplate}>
-                      {t("tasks.tpl.title")}
+                    {templateOf(exec.tplAgent)?.flags.map((f) => (
+                      <label
+                        key={f.key}
+                        className={`reminder-check${exec.tplFlags[f.key] ? " danger-check" : ""}`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={exec.tplFlags[f.key] === true}
+                          onChange={(e) => {
+                            const checked = e.target.checked;
+                            setExec((x) => {
+                              // 已用模板拼过 command：flag 增删同步进 command
+                              const tpl = matchOf(x.command);
+                              const flags = { ...x.tplFlags, [f.key]: checked };
+                              const cmd =
+                                tpl && x.tplInstruction.trim()
+                                  ? tpl.build(
+                                      form.label.trim() || t("tasks.form.namePlaceholder"),
+                                      x.tplInstruction,
+                                      flags,
+                                    )
+                                  : x.command;
+                              return { ...x, tplFlags: flags, command: cmd };
+                            });
+                          }}
+                        />
+                        {t(f.i18nKey)}
+                      </label>
+                    ))}
+                    <button className="seg primary" onClick={applyRoutineTemplate}>
+                      {t("tasks.tpl.fill")}
                     </button>
                   </div>
-                  {exec.tplAuto && (
-                    <p className="task-danger-hint">{t("tasks.tpl.autoHint")}</p>
-                  )}
+                  {templateOf(exec.tplAgent)?.flags
+                    .filter((f) => exec.tplFlags[f.key])
+                    .map((f) => (
+                      <p key={f.key} className="task-danger-hint">
+                        {t(`${f.i18nKey}Hint`)}
+                      </p>
+                    ))}
                 </div>
               )}
 
@@ -932,27 +936,6 @@ export default function Tasks() {
                     </option>
                   ))}
               </select>
-              <span className="reminder-meta">
-                {t("tasks.history.page", {
-                  page: history?.page ?? 1,
-                  pages: totalPages,
-                  total: history?.total ?? 0,
-                })}
-              </span>
-              <button
-                className="seg"
-                disabled={(history?.page ?? 1) <= 1}
-                onClick={() => setHistoryPage((p) => Math.max(1, p - 1))}
-              >
-                {t("tasks.history.prev")}
-              </button>
-              <button
-                className="seg"
-                disabled={(history?.page ?? 1) >= totalPages}
-                onClick={() => setHistoryPage((p) => p + 1)}
-              >
-                {t("tasks.history.next")}
-              </button>
             </div>
             {historyError && <p className="reminder-form-error">{historyError}</p>}
             {history && history.rows.length === 0 && (
@@ -981,6 +964,14 @@ export default function Tasks() {
                       {/* §十二 F10：notify 历史行徽标 💧 → 🔔（审查 P3-1：与列表
                           actionBadge 共用 execBadge 助手；历史行无 kind 字段） */}
                       <span className="task-badge">{execBadge(log.action_type)}</span>
+                      {/* 行内任务名（004 label 快照——不关联当前 rules，规则
+                           改名/删除不影响历史；旧行 null → 未记录占位） */}
+                      <span
+                        className={`task-history-name${log.label ? "" : " is-unrecorded"}`}
+                        title={log.label ?? undefined}
+                      >
+                        {log.label ?? t("tasks.history.unrecorded")}
+                      </span>
                       <span className="task-history-summary">
                         {renderTaskSummary(log.summary, log.exit_code)}
                       </span>
@@ -993,6 +984,19 @@ export default function Tasks() {
                             {t("tasks.history.delay", { sec: delaySec })}
                           </p>
                         )}
+                        {/* 命令 + 工作目录（快照，Part C 演进：005 起单命令块
+                            ——命令串逐字节原样传给 sh/powershell（目录经进程
+                            属性生效不进命令串），实录与配置恒同值；旧行
+                            command null → 未记录；cwd null → 未配置（继承
+                            App 进程目录） */}
+                        <p className="task-detail-label">{t("tasks.history.command")}</p>
+                        <pre className="task-output mono">
+                          {log.command ?? t("tasks.history.unrecorded")}
+                        </pre>
+                        <p className="task-detail-label">{t("tasks.history.workdir")}</p>
+                        <pre className="task-output mono">
+                          {log.cwd ?? t("tasks.history.cwdNone")}
+                        </pre>
                         <p className="task-detail-label">{t("tasks.history.output")}</p>
                         <pre className="task-output mono">
                           {log.output_tail ?? "—"}
@@ -1003,6 +1007,30 @@ export default function Tasks() {
                 );
               })}
             </ul>
+            {/* 分页控件（routine-exec.md Part A）：块底部居中，筛选下拉独占顶部 */}
+            <div className="task-history-pagination">
+              <span className="reminder-meta">
+                {t("tasks.history.page", {
+                  page: history?.page ?? 1,
+                  pages: totalPages,
+                  total: history?.total ?? 0,
+                })}
+              </span>
+              <button
+                className="seg"
+                disabled={(history?.page ?? 1) <= 1}
+                onClick={() => setHistoryPage((p) => Math.max(1, p - 1))}
+              >
+                {t("tasks.history.prev")}
+              </button>
+              <button
+                className="seg"
+                disabled={(history?.page ?? 1) >= totalPages}
+                onClick={() => setHistoryPage((p) => p + 1)}
+              >
+                {t("tasks.history.next")}
+              </button>
+            </div>
           </div>
         )}
       </section>
