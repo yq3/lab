@@ -1,6 +1,6 @@
 [package]
 name = "pulse-pet"
-version = "0.2.3"
+version = "0.2.4"
 description = "PulsePet desktop pet"
 authors = ["you"]
 edition = "2021"
