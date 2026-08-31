@@ -1262,7 +1262,7 @@ pub fn finish_action_log_with(
     Ok(())
 }
 
-/// 历史页分页查询（倒序 15/页；reminder_id 可选过滤）。
+/// 历史页分页查询（倒序 10/页；reminder_id 可选过滤）。
 pub fn list_action_logs(
     conn: &Connection,
     reminder_id: Option<i64>,
@@ -1419,6 +1419,13 @@ fn persist_skipped<R: tauri::Runtime>(
             s.id,
             s.label,
             s.reason
+        );
+    }
+    // §二十七：skipped 行落库 → 整批一次广播失效（防逐行风暴），panel 执行历史实时出现 skipped 行
+    if !skipped.is_empty() {
+        let _ = app.emit(
+            crate::action_exec::ACTION_LOGS_CHANGED_EVENT,
+            serde_json::json!({}),
         );
     }
     plog!("[pulsepet] {} task(s) skipped (missed window/paused) recorded", skipped.len());
@@ -1892,7 +1899,7 @@ pub fn tasks_skip_once<R: tauri::Runtime>(
     Ok(())
 }
 
-/// v2 M4 执行历史分页查询（TC-M4-16）：倒序 15 条/页，reminder_id 可选过滤。
+/// v2 M4 执行历史分页查询（TC-M4-16）：倒序 10 条/页，reminder_id 可选过滤。
 #[tauri::command]
 pub fn action_logs_list(
     app: tauri::AppHandle,
@@ -1910,8 +1917,9 @@ pub fn action_logs_list(
     })
 }
 
-/// 单页行数（§4.7 执行历史区；2026-08-30 用户裁定 50→15，routine-exec.md Part A）。
-pub const ACTION_LOG_PAGE_SIZE: i64 = 15;
+/// 单页行数（§4.7 执行历史区；2026-08-30 用户裁定 50→15，routine-exec.md Part A；
+/// 2026-08-31 用户裁定 15→10，V2-OPEN-ITEMS §二十七）。
+pub const ACTION_LOG_PAGE_SIZE: i64 = 10;
 
 /// 分页返回结构（与 TS `ActionLogPage` 一致）。
 #[derive(Debug, Clone, Serialize)]
@@ -3798,24 +3806,24 @@ mod tests {
             &rfc(999_000),
         )
         .unwrap();
-        // 第 1 页：倒序（最新 running 在前）15 条（004 起分页 15 条/页）
+        // 第 1 页：倒序（最新 running 在前）10 条（§二十七起分页 10 条/页）
         let (page1, total) = list_action_logs(&c, None, 1).unwrap();
         assert_eq!(total, 61);
-        assert_eq!(page1.len(), 15);
+        assert_eq!(page1.len(), 10);
         assert_eq!(page1[0].status, "running", "倒序：id 最大（running 那条）在前");
         assert_eq!(page1[1].output_tail.as_deref(), Some("tail-59"));
-        // 第 2 页：15 条，末条 tail-31（61 条倒序：offset 15..30）
+        // 第 2 页：10 条，末条 tail-41（61 条倒序：offset 10..20）
         let (page2, _) = list_action_logs(&c, None, 2).unwrap();
-        assert_eq!(page2.len(), 15);
-        assert_eq!(page2.last().unwrap().output_tail.as_deref(), Some("tail-31"));
-        // 第 5 页（末页）：1 条——最早一条位于末页末尾的边界覆盖
-        let (page5, _) = list_action_logs(&c, None, 5).unwrap();
-        assert_eq!(page5.len(), 1);
-        assert_eq!(page5.last().unwrap().output_tail.as_deref(), Some("tail-0"));
+        assert_eq!(page2.len(), 10);
+        assert_eq!(page2.last().unwrap().output_tail.as_deref(), Some("tail-41"));
+        // 第 7 页（末页）：1 条——最早一条位于末页末尾的边界覆盖
+        let (page7, _) = list_action_logs(&c, None, 7).unwrap();
+        assert_eq!(page7.len(), 1);
+        assert_eq!(page7.last().unwrap().output_tail.as_deref(), Some("tail-0"));
         // 按规则过滤
         let (filtered, ftotal) = list_action_logs(&c, Some(r.id), 1).unwrap();
         assert_eq!(ftotal, 61);
-        assert_eq!(filtered.len(), 15);
+        assert_eq!(filtered.len(), 10);
         // 删除规则 → 历史保留（悬空 reminder_id + 冗余快照可读）
         delete_rule(&c, r.id).unwrap();
         let (after, atotal) = list_action_logs(&c, None, 1).unwrap();

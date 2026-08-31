@@ -1127,7 +1127,7 @@ tick 判定到期（daily/once，补跑窗内）
   - notify：kind（hydration/rest/custom）/ 文案 / 调度（interval 分钟 + 时间窗 ‖ daily HH:MM + 星期 ‖ once 日期时间）/ 烟花；
   - exec：任务名 / 例程模板注册表块（§4.6 Part B：chips 多模板 + 声明式 flags）/ command（等宽多行）/ cwd / 超时分钟 / 调度（同上三分支）/ 模板 flags 随勾选；
   - 校验：Rust `validate` 为权威（前端同规则预检，v1 模式）。
-- **执行历史区**（列表下方折叠面板）：action_logs 倒序（时间 / 徽标 / **任务名（`label` 快照，不关联当前 rules）** / summary / 状态色点 ok 绿·failed 红·skipped 灰·running 蓝）；行展开显示 **「命令（当时）」单块（实录与配置恒同值——命令串逐字节原样传给 sh/powershell）+「工作目录（当时）」块（`cwd` 快照；未配置 →「继承 App 进程目录」占位）**（005 起，Part C；旧行 command NULL →「未记录」）+ output_tail（等宽，2KB 内）+ scheduled_at 与 started_at 差（补跑延迟可见）；命令 `action_logs_list(reminder_id?)` 分页（**15 条/页，2026-08-30 裁定；页码 + 上一页/下一页在块底部居中，筛选下拉独占顶部**）。
+- **执行历史区**（列表下方折叠面板）：action_logs 倒序（时间 / 徽标 / **任务名（`label` 快照，不关联当前 rules）** / summary / 状态色点 ok 绿·failed 红·skipped 灰·running 蓝）；行展开显示 **「命令（当时）」单块（实录与配置恒同值——命令串逐字节原样传给 sh/powershell）+「工作目录（当时）」块（`cwd` 快照；未配置 →「继承 App 进程目录」占位）**（005 起，Part C；旧行 command NULL →「未记录」）+ output_tail（等宽，2KB 内）+ scheduled_at 与 started_at 差（补跑延迟可见）；命令 `action_logs_list(reminder_id?)` 分页（**10 条/页，2026-08-31 裁定（原 15，2026-08-30 / 50）；页码 + 上一页/下一页在块底部居中，筛选下拉独占顶部**）。
 - **snooze 按钮**：M2 气泡组件扩展——critical 且 `reminder` 载荷时，气泡右侧小按钮「稍后 10 分钟」（hover 才浮现，不喧宾）；点击 invoke `reminders_snooze` → 气泡即消；点宠物仍 = 确认（两动作并存，M2 记账语义：snooze 结案 via='snooze'）。
 
 ### 4.8 Rust 变更汇总

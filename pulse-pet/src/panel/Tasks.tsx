@@ -1,5 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ACTION_LOGS_CHANGED_EVENT,
+  REMINDER_TRIGGER_EVENT,
   REMINDER_TEMPLATES,
   actionBadge,
   actionBadgeTitle,
@@ -53,7 +55,7 @@ import { pluginEnabled, usePluginStore } from "../lib/plugin-store";
  *   烟花；exec = 任务名/例程模板注册表块（Part B：chips 多模板）/command 等宽多行/cwd/超时/调度；
  * - Rust validate 权威 + 前端同规则预检（v1 模式）；
  * - 执行历史区（折叠面板，routine-exec.md Part A）：action_logs 倒序分页
- *   15 条/页（页码 + 上一页/下一页在块底部居中，筛选下拉独占顶部）+ 状态
+ *   10 条/页（页码 + 上一页/下一页在块底部居中，筛选下拉独占顶部）+ 状态
  *   色点 + 行内任务名（快照，不关联当前 rules）+ 展开「命令（当时）」+
  *   「工作目录（当时）」块（005 快照——实录与配置恒同值，单命令块）+
  *   output_tail（等宽）+ scheduled_at 与 started_at 差（补跑延迟）；旧行
@@ -190,6 +192,40 @@ export default function Tasks() {
   useEffect(() => {
     if (historyOpen) void loadHistory(historyPage, historyFilter);
   }, [historyOpen, historyPage, historyFilter, loadHistory]);
+
+  // §二十七：失效广播 → 本页数据自动刷新（无需切 tab）。
+  // - action-logs://changed：exec 开始（running 行）/ 终态回写 / skipped 落库
+  //   → 刷任务列表 +（历史面板开着时）刷当前页历史；
+  // - reminder://trigger：notify 触发（不写 action_logs）→ 只刷任务列表「上次」列。
+  // listener 只注册一次，回调经 ref 读最新开合/分页态（闭包不随渲染更新）。
+  const historyView = useRef({ open: historyOpen, page: historyPage, filter: historyFilter });
+  historyView.current = { open: historyOpen, page: historyPage, filter: historyFilter };
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    let unlisten: (() => void) | undefined;
+    let alive = true;
+    void import("@tauri-apps/api/event")
+      .then(async ({ listen }) => {
+        const unLogs = await listen(ACTION_LOGS_CHANGED_EVENT, () => {
+          void load();
+          const v = historyView.current;
+          if (v.open) void loadHistory(v.page, v.filter);
+        });
+        const unTrig = await listen(REMINDER_TRIGGER_EVENT, () => void load());
+        return () => {
+          unLogs();
+          unTrig();
+        };
+      })
+      .then((un) => {
+        if (alive) unlisten = un;
+        else un();
+      });
+    return () => {
+      alive = false;
+      unlisten?.();
+    };
+  }, [load, loadHistory]);
 
   /** CRUD 后调度器已在 Rust 侧 reload，前端刷新展示即可（TC-RM-07）。 */
   const refresh = () => {

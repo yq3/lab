@@ -647,7 +647,7 @@
 
 - **步骤**：tempdir DB 集成单测（action_logs 增删查）+ 产生多次运行（ok / failed / skipped / 超时）→ 打开历史区 → 展开一行。
 - **预期**：
-  1. action_logs 倒序、分页 15 条/页（2026-08-30 修订，原 50——routine-exec.md Part A；`action_logs_list(reminder_id?)` 可按规则过滤；页码 + 上一页/下一页在历史块**底部居中**，筛选下拉独占顶部）；
+   1. action_logs 倒序、分页 10 条/页（2026-08-31 修订，原 15（2026-08-30）/50——routine-exec.md Part A、V2-OPEN-ITEMS §二十七；`action_logs_list(reminder_id?)` 可按规则过滤；页码 + 上一页/下一页在历史块**底部居中**，筛选下拉独占顶部）；
   2. 每行：时间 / 动作类型徽标 / **任务名（`label` 快照）** / summary / 状态色点（ok 绿 · failed 红 · skipped 灰 · running 蓝）；
   3. 行展开：**「命令（当时）」单块 +「工作目录（当时）」块（005 起 Part C——实录与配置恒同值，命令串原样传给 shell；cwd 未配置 →「继承 App 进程目录」、旧行 command NULL →「未记录」）** + output_tail（等宽、2KB 内）+ scheduled_at 与 started_at 差（补跑延迟可见）；
   4. 规则删除后历史保留（悬空 reminder_id 允许，action_type + **快照列（label/command/cwd）**冗余可读——改名/改命令/删除不影响历史回查）；

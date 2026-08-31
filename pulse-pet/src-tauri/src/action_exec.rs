@@ -57,6 +57,10 @@ pub const IDLE_RECYCLE_MS: u64 = 30_000;
 pub const TASK_AGENT: &str = "task";
 /// 结果气泡独立事件名（P1-3；桥层按 M2 critical 入队，无 reminder 载荷）。
 pub const TASK_RESULT_EVENT: &str = "pulsepet://task-result";
+/// action_logs 失效广播（V2-OPEN-ITEMS §二十七）：running insert / 终态回写 /
+/// skipped 落库后 `app.emit` 广播，panel「例程-执行历史」据此自动刷新（空
+/// payload 纯失效信号；与上方 pet 定向的气泡事件语义正交、互不替代）。
+pub const ACTION_LOGS_CHANGED_EVENT: &str = "action-logs://changed";
 
 /// v2 M6（V2-DESIGN §6.2，TC-M6-03-1）：`pulsepet://task-result` payload 构造
 /// （纯函数供单测）——显式携带 `agent: TASK_AGENT`（字段此前已隐含——结果
@@ -886,6 +890,11 @@ fn start_exec_run<R: tauri::Runtime>(
         .inner()
         .clone();
     tauri::async_runtime::spawn(run_task(app.clone(), rule, log_id, registry));
+    // §二十七：running 行已落库 → 广播失效，panel 执行历史实时出现 running 行。
+    {
+        use tauri::Emitter;
+        let _ = app.emit(ACTION_LOGS_CHANGED_EVENT, serde_json::json!({}));
+    }
     true
 }
 
@@ -959,6 +968,8 @@ async fn run_task<R: tauri::Runtime>(
             TASK_RESULT_EVENT,
             task_result_payload(&text, log_id, outcome.status.as_str()),
         );
+        // §二十七：终态已回写 → 广播失效，panel 执行历史实时翻转状态/输出。
+        let _ = app.emit(ACTION_LOGS_CHANGED_EVENT, serde_json::json!({}));
     }
     plog!(
         "[pulsepet] exec finished: task #{} log#{} status={} exit={:?}",

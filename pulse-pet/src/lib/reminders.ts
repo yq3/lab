@@ -740,7 +740,7 @@ export async function skipTaskOnce(id: number): Promise<void> {
   return invoke("tasks_skip_once", { id });
 }
 
-/** v2 M4：执行历史分页查询（倒序 15 条/页——2026-08-30 用户裁定，004 起；reminderId 可选过滤）。 */
+/** v2 M4：执行历史分页查询（倒序 10 条/页——2026-08-31 用户裁定，原 15（2026-08-30）/50；reminderId 可选过滤）。 */
 export async function fetchActionLogs(
   reminderId: number | null,
   page: number,
@@ -752,3 +752,11 @@ export async function fetchActionLogs(
     page: page ?? 1,
   });
 }
+
+/** §二十七：action_logs 失效广播事件名（与 Rust `action_exec.rs` 常量锁步）——
+ *  running insert / 终态回写 / skipped 落库后广播，panel 例程页据此自动刷新。 */
+export const ACTION_LOGS_CHANGED_EVENT = "action-logs://changed";
+
+/** §二十七：notify 触发广播事件名（Rust `reminder_scheduler.rs`，既有全局广播）——
+ *  panel 例程页据此刷新任务列表「上次」列（notify 不写 action_logs）。 */
+export const REMINDER_TRIGGER_EVENT = "reminder://trigger";
