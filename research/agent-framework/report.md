@@ -2,6 +2,7 @@
 
 > **方法**：源码级三阶段研究（17 份框架档案 → 15 份维度分析 → 本报告），全部结论可溯源到 `~/develop/opensource/<仓库>/路径#符号`，证据等级区分【核心】/【示例】/【文档】。分析基线见附录 A；逐框架证据见 [profiles/](./profiles/)，逐维度证据见 [dimensions/](./dimensions/)。Agno / smolagents / Letta 等未本地克隆的框架不纳入源码结论，本文不对其下判断。
 > **快照**：2026-09-09 ~ 09-12 的各仓库 HEAD（详见附录 A）。
+> **补充（2026-09-12 会话沉淀）**：§4.3（图编排设计分歧）、§4.4（Java/Python 阵营对比）、§5.6（Java 财务场景选型推演）为选型讨论的二次综合——全部事实性断言复用正文已核验证据，未引入新的源码结论；§5.6 含具体团队约束输入。
 
 ---
 
@@ -143,9 +144,40 @@ OTel 赢下标准之争的一半（9 家直埋，agentscope 双语/spring-ai/lan
 
 **跨语言共性规律**：接口与概念层一周内对齐，工程纵深（后端矩阵、eval、auth、UI）长期滞后甚至战略性放弃；Java 版的差异化贡献集中在「企业运维物」（注册中心/并发控制/审计/热重载），Python 版集中在「研究前沿物」（压缩算法/规划器/eval）。
 
+### 4.3 图编排的设计分歧：「做图派」与「拒图派」
+
+§3.8 的光谱背后是路线选择而非能力差距。**做图派**：langgraph/MS（Pregel 引擎）、adk-python 2.x（通用图）、dify（graphon + 画布）、saa/langgraph4j（同源图引擎）、langchain4j（固定拓扑）、crewai Flow、llama_index Workflow。**拒图派且是刻意拒绝**：openai-agents（全库无 Graph/Workflow 符号，官方 pattern 下沉 examples）、claude-agent-sdk（线性消息管道）、spring-ai（`effective-agents.adoc` 明言五模式「用普通 Java 代码组合」）、agentscope v2（最激进——v1 组合子双语整体删除）。
+
+拒图的四个理由：
+
+1. **押注「模型即编排」**：假设 reasoning model 自带规划能力，代码里画死的拓扑是会过时的脚手架。证据链：deepagents 把 `write_todos` 移出默认栈（「从 harness 强加规划转向按模型训练偏好按需装配」，§3.7）；openai-agents/claude-sdk 无显式规划概念，只给循环边界与预算（max_turns / max_budget_usd）。
+2. **产品形态约束**：SDK 的设计单位是「一次会话里的一个 agent」，编排属宿主应用；工程精力花在 runtime harness（上下文压缩/权限/工具治理/沙箱）。Claude Code 本身是 while 循环 + 工具而非图，却是最成功的 agent 产品——对「图是否必需」的现成反证。
+3. **学习与维护成本被验证过高**：agentscope v2 删组合子的教训（§3.8）——做一半的图比没有图更糟，用户学会的 API 下一代就没了。
+4. **分层经济学**：做好图引擎门槛极高（Pregel/BSP 才免费获得 durable/time-travel；langgraph4j 换拉取式引擎即丢动态扇出），所以引擎独立成资产（graphon / llama-index-workflows / MS durable 外置仓），「库层不做的，生态层用别人的引擎做」（spring-ai 留白 → saa fork langgraph4j 补位）。
+
+**判断标准是 agent 自治度，不是企业级与否**：高自治场景（coding/研究/开放对话）流程无法预先画出，图是负担，循环 + 预算 + 权限才是对的形态；低自治 + 高合规场景（财务审批/风控/RPA 化流程）拓扑本身是业务规则与法规——分支必须代码化、静态可审计、可暂停可恢复，图在这里是**合规资产**：图即文档（合规审查可直接审拓扑）、superstep 边界即持久化点（审批暂停/断点恢复免费获得）、checkpoint 链即执行审计轨迹。2025-26 的钟摆因此呈双向运动：研究型/产品型框架做减法（信模型），企业侧（dify/saa/MS/adk 2.x）加码图（确定性本身是需求）。
+
+### 4.4 Java 与 Python 两大阵营：现状差异与演进方向
+
+**现状差异（六个方面）**：
+
+1. **生态结构——靠量 vs 靠桥**。Python 框架自带大规模集成面（llama_index 103 个 llms 集成包、crewai 经 LiteLLM 兜底百余模型、langchain 15 个 partners）；Java 把 provider 广度外包给两个枢纽（langchain4j ~30 模块、Spring AI 15 模块），其余框架做桥（langgraph4j 双集成、adk-java 双桥、saa 全托管 Spring AI）。副作用：模型级 fallback 在 langchain4j/langgraph4j 双双空白（§3.1 核验注 1）。
+2. **工程纵深 vs 研究前沿（最核心断层）**。Java 独有贡献清一色运维物：CAS 乐观并发、Nacos/higress 注册、aistio 流量连接器、Helm 五件套、quartz/xxl-job、PersistBarrier、BigQuery 审计、YAML 热重载；Python 独有贡献清一色前沿物：分层压缩水位、非破坏性摘要、eval 全家桶、SOP 引擎/GoalPipeline。连跨语言对也如此分叉（agentscope：Python 先行抽象、Java 先行工程化，§4.2）。
+3. **持久化——广度反超、深度落后**。后端矩阵 Java 更宽（langgraph4j 8 / saa 9+5 / agentscope-java 7 vs langgraph 官方 3）；语义深度在 Python（DeltaChannel 增量快照、跨线程 BaseStore、durability 三级、conformance 套件）。Python 官方策略是「窄接口 + 合规套件、广度交社区」（§3.10）。
+4. **观测——标准统一 vs 商业分裂**。Java/企业栈是 OTel 直埋共识（spring-ai 直用 gen_ai semconv、langchain4j Micrometer、langgraph4j 有官方 OTel 模块——而 Python langgraph 核心至今零 OTel，§3.12）；Python 一半押标准一半押自有生态（LangSmith / OpenAI ingest）。
+5. **Java 的反超点：Skill 与 A2A**。Skill 机制 Java 五家全有而 Python 主流缺位（§3.6）——skill 是文件约定 + 提示工程，不依赖快速迭代运行时；A2A 完整实现集中在 Java 企业阵营（双向 + Nacos + 服务治理，§3.9）——「Spring Cloud 运维模型搬到 agent」只有 Java 在做。
+6. **部署形态——服务常态化 vs 库常态化**。Java 代表作长成可部署服务（agentscope-java 三进程控制平面、saa Spring Boot + A2A server）；Python 一半纯库（langchain/llama_index/openai-agents/claude-sdk 零部署产物），平台形态由 dify 承担（§3.14/§3.15）。
+
+**演进方向**：
+
+- **Java：补课式演进 + 治理化深化**。范式跟随 Python（skills/harness/权限引擎/图引擎），典型滞后 1-2 个版本（adk-python 2.9 vs adk-java 1.9 是活标本），但落地时用企业材料重做（权限引擎 → 6 步显式链 + DB 分布式沙箱锁）；引擎靠借力不靠自研（saa fork langgraph4j）；押注协议而非框架（MCP/A2A 作标准语 + 注册中心作粘合剂）。未来更可能输出「agent 的服务治理层」而非「范式定义」。风险：创新滞后、社区单点（langgraph4j 实质单维护者）、版本耦合（saa 基于 Spring AI 1.1.x）。
+- **Python：做减法 + 商业分层**。范式做减法（删编排、信模型：agentscope v2 / deepagents / openai 三连证）；框架变薄、harness 变厚（竞争重心移到单 agent 深度：上下文工程/权限/skills/预算）；引擎外置资产化；商业模式成熟（协议开源 + 实现/观测/管理面闭源，最前沿能力先出现在 SaaS 再回流开源）。
+
+**合流的四条线**：MCP（16/17 标配）、A2A、SKILL.md 规范、OTel gen_ai semconv——协议层正在统一两个阵营；互操作深度也在从「包一层 adapter」走向「执行语义桥接」（adk LangGraphAgent 桥接 checkpointer 语义、langgraph RemoteGraph 实现 PregelProtocol，§3.9）。
+
 ---
 
-## 5. 选型建议（五个场景）
+## 5. 选型建议（五个场景 + 一个实例推演）
 
 ### 5.1 企业流程自动化（审批流、跨系统集成、非开发人员维护）
 - **首选 dify**：唯一把「可视化画布 + HITL 表单 + 多租户 RBAC + 版本化发布 + 定时触发」做成完整开源产品的框架（19 种节点、HUMAN_INPUT 表单含超时处置与权限矩阵、tenant_id 贯穿、Celery 分级队列）。代价：Python/TS 技术栈锁定、引擎外置 graphon 的自主可控需评估、 Helm 在社区仓。
@@ -175,6 +207,28 @@ OTel 赢下标准之争的一半（9 家直埋，agentscope 双语/spring-ai/lan
 - **代码级纵深**：**agent-framework**（内容标签信息流控制 + 参数级审批 + Purview 策略外评 + OTel 直埋）适合 Azure 合规体系；**agentscope 双语**（权限引擎 5 模式 + bypass 免疫 + fail-closed + 完全私有部署无 SaaS 依赖）适合自主可控优先。
 - **Java 合规栈**：**spring-ai**（Micrometer/OTel gen_ai semconv 直连企业 APM + 语义缓存 + 模板注入防护）+ 自建 PII/审计（spring-ai 本体这些是 🟡）。
 - **本场景要避开的坑**：默认遥测外发的 openai-agents/crewai（不关不能用）；引擎层零安全的 langgraph 必须搭配上层治理；无 JDBC 会话后端的 adk-java 在私有数据库要求下是硬伤；「遗忘/按用户删除」全行业空白——记忆系统合规必须自己在存储层实现。
+
+### 5.6 场景实例推演：Java 财务领域企业级 Agent
+
+约束画像：Java 团队；agent 服务独立部署、经 API 与业务系统通信；**图编排是硬性要求**；财务领域硬性审批/审计/合规。这是 §5.1-§5.5 通用建议的一个具体化应用，也演示如何用本报告的维度证据做选型推演。
+
+| 候选 | 图编排 | 独立部署/API 形态 | 审批/审计/合规 | 结论 |
+|---|---|---|---|---|
+| **spring-ai-alibaba** | ✅ graph-core 全概念 + 并行条件边 | ✅ Spring Boot 即部署单元；A2A JSON-RPC server | ✅ 双层 HITL + 9 saver（含 Oracle）+ PII hook + node/edge 观测 | **首选** |
+| langgraph4j | ✅ 图引擎本体（saa 上游） | 🟡 无生产 server，服务壳自建 | ❌ 引擎零安全；OTel 模块 + checkpoint 历史 | 备选引擎 |
+| agentscope-java | ❌ v2 删除图/组合子（§3.8） | ✅ 三进程 + Helm | ✅ PERMISSION_ASKING + 跨进程审批协调 | 不满足图硬条件 |
+| langchain4j | 🔶 仅固定拓扑组合子，无自由图 | ❌ 纯库 | ✅ guardrail SPI | 单独用不满足 |
+| adk-java | ❌ 1.9 无通用图（2.x 图引擎仅在 Python） | 🟡 dev server | ❌ Session 无 JDBC 后端（私有化硬伤） | 排除 |
+
+**首选 saa 的五条理由**：① 图编排是它的立身之本且比上游强（`addParallelConditionalEdges`、agent 即图节点 `asNode()`、flow 四件套——「分支审批路由 / 并行子任务 / 循环对账」拓扑直接可表达）；② 双层 HITL 正好接企业审批流（图层 `interruptsBefore/After` + `withResume()` 跨重启续跑；agent 层 `HumanInTheLoopHook` 三态反馈 APPROVED/EDITED/REJECTED，`HumanInteractionHandler` 可替换接口即「对接现有审批 API」的预留缝）；③ 审计合规底座最全（Oracle/Mysql/Postgres/Mongo/Redis saver、checkpoint 链追加式快照即执行审计轨迹、node+edge 两级 Observation 唯一到边级可直连企业 APM、PIIDetectionHook、`CompiledGraph#schedule` 定时调度）；④ 模型中立可指证（仓库无 DashScope ChatModel 源码，治理件模型无关）；⑤ Spring 栈零摩擦 + Nacos 配置热更（支持 KMS 加密 dataId）。
+
+**风险与对策**：版本耦合 Spring AI 1.1.x（锁版本 + 盯升级路径，最大工程风险）；admin 画布独立构建（代码优先则用内嵌 studio）；内容安全 🟡（外接企业合规栈）；无多租户 RBAC（本就归业务侧）；社区绑阿里（Apache 协议，fork 有 graph-core 先例）。
+
+**备选路径**：`langgraph4j + spring-ai` 自组装（langgraph4j 官方双集成，但需自补 saa 已做好的 flow agent / HITL hook / 拦截器族；加分项 `interruptBeforeEdge` 连 Python 版都没有）；若编排需求实为 SOP 式轻流程，可重看 agentscope-java（PERMISSION_ASKING 终态 + ToolConfirmationCoordinator 最贴「审批在另一个服务」的形态，但今天不满足图硬条件）。三者图语义同源（langgraph4j 谱系），迁移成本可控。
+
+**PoC 清单**：① 真实 DB（Oracle/PG）跑通条件分支 + 并行边 + 循环拓扑；② 审批全链路：`interruptsBefore` 暂停 → 杀进程重启 → `withResume()` 续跑（checkpoint 一致性是审计合规的命根子）；③ `HumanInteractionHandler` 对接 mock 审批 API 的改造量评估；④ checkpoint 历史 + node/edge Observation 进 OTel 后端拼审计报表；⑤ 锁定版本组合 + 模型切换（通义/OpenAI/本地模型）验证中立性。
+
+**三个演进信号**（任一兑现即重评选型）：adk-java 追平 2.x 图引擎（衡量 Google 双语投入）；agentscope-java 2.1 弃用清洗落地后 API 是否稳住（change-log Part B 已明示）；saa 升级 Spring AI 2.x 基线。
 
 ---
 
