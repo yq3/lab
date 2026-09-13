@@ -1,6 +1,6 @@
 # supersonic 解剖档案
 
-> 基线：~/develop/opensource/supersonic @ 6919ac50b (2026-09-08)；canonical tencentmusic/supersonic。**状态备注：维护模式**——正式 release 停在 2024-11 v0.9.8、近两年无发版、单人维保（master 持续小步提交但无版本化）；pom `revision=1.0.0-SNAPSHOT`。只作 ChatBI/语义层架构参考，不构成生产选型推荐。技术栈 Java 21 + Spring Boot 3.3.9，是本组唯一 Java 系样本，参考价值直接。
+> 基线：~/develop/opensource/supersonic @ 6919ac50b (2026-09-08)；canonical tencentmusic/supersonic。**状态备注：维护模式**——正式 release 停在 2025-03 v0.9.10、此后 18 个月无发版（master 低频小步提交但无版本化，2026 年约 40+ commits，git tag 实测：v0.9.10=2025-03-03）；pom `revision=1.0.0-SNAPSHOT`。只作 ChatBI/语义层架构参考，不构成生产选型推荐。技术栈 Java 21 + Spring Boot 3.3.9，是本组唯一 Java 系样本，参考价值直接。
 
 ## 1. 产品定位与形态
 

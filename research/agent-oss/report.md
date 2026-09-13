@@ -54,7 +54,7 @@
 | A5 | **有序求值管线 + bypass 免疫位 + DecisionReason**：deny→ask→工具自评→硬合规判定（连 bypassPermissions 也要问）→mode→allow，每个决策附结构化理由 | claude-code-sourcemap 档案 §4【还原源码】 | sealed interface + record 建模决策理由，直接进审计报表；超限额/敏感科目判定放在任何提权模式之前 |
 | A6 | **审批与被审内容版本绑定**（approvedRevision：内容一改即撤销审批、与 spec 对账不一致 fail-closed）**+ 批准并记住=可审计规则修订**（amendment：谁/何时/批了什么） | cline 档案 §5、codex 档案 §5 | 「批这版分录 + 以后该供应商 10 万以下自动过」的正确形态：规则修订事件（带审批人签名）+ 内容 hash 绑定，绝非内存 yes 集合 |
 | A7 | **执行侧二次校验**：执行器收口处独立复核审批状态（只执行 CONFIRMED），与决策层形成纵深防御 | OpenHands 档案 §5 | 业务 API 调用出口统一再查审批单；防中间层缺位/被绕过 |
-| A8 | **fail-closed 决策门 + 三态裁决**：固定检查顺序纯函数，任何输入不可解析即 DENY；结构性违规 DENY / 定量违规 PAUSE_FOR_REAUTH 分流 | Vibe-Trading 档案 §5（enforcement.py#check_mandate 八查） | 付款门照抄检查序列（黑名单→科目→单笔→累计→频次→预算）；「宁可误拒不可放行」 |
+| A8 | **fail-closed 决策门 + 三态裁决**：固定检查顺序纯函数，任何输入不可解析即 DENY；结构性违规 DENY / 定量违规 PAUSE_FOR_REAUTH 分流 | Vibe-Trading 档案 §5（live/enforcement.py#check_mandate 八查） | 付款门照抄检查序列（黑名单→科目→单笔→累计→频次→预算）；「宁可误拒不可放行」 |
 | A9 | **授权不可达**：限额/白名单写入口不是工具、不进注册表、不可被自省发现；只从审批服务 API + 人工确认进入；agent 面上只有 propose 类工具 | Vibe-Trading 档案 §5（commit_mandate 命门不变量） | 财务「调额/解冻/科目白名单维护」同构处理——比 prompt 约束强的结构性保证；授权合同带生命周期（默认 30 天过期） |
 | A10 | **granular 关闭=自动拒绝**：用户关掉某类审批询问，系统按拒绝处理而非跳过（防审批疲劳全点同意） | codex 档案 §5 | 审批疲劳是财务场景真实风险（量大后人全点同意），交互设计层就要防 |
 
@@ -66,10 +66,10 @@
 | A12 | **审计双平面**：执行面逐 LLM 调用留痕（操作枚举+完整 prompt+token+时长）× 管理面声明式操作日志（注解驱动、IP 链解析、敏感 header 排除、删除前资源名补录） | SQLBot 档案 §4/§5 | Java：Spring AOP + 自定义注解完全同构；再叠 DB-GPT view message（用户最终所见独立落库）成三线齐备 |
 | A13 | **缓存即审计**：每个 LLM 决策的 prompt/response/输入快照哈希按内容寻址落盘，缓存=审计=调试三合一 | ai-hedge-fund 档案 §4（llm/cache.py） | 合规回放零额外成本的起步设计；回测重跑 $0 |
 | A14 | **PIT 决策日志 pending→resolved**：决策当下存 pending，事实发生后回填 outcome+反思，resolution_date 供时点过滤 | TradingAgents 档案 §4（memory.py） | 「当时知道什么」可回答；离线复盘闭环同时就是审计流水 |
-| A15 | **审计绑定版本**：图形状签名进 checkpoint key（改图自动作废旧执行态）+ 方法论指纹（prompt/工具/版本→hash，可 diff） | TradingAgents 档案 §4、Vibe-Trading 档案 §4（manifest.py） | 审计记录必须绑定产生它的规则与拓扑版本，否则重放无法解释 |
+| A15 | **审计绑定版本**：图形状签名进 checkpoint key（改图自动作废旧执行态）+ 方法论指纹（prompt/工具/版本→hash，可 diff） | TradingAgents 档案 §4、Vibe-Trading 档案 §4（governance/manifest.py） | 审计记录必须绑定产生它的规则与拓扑版本，否则重放无法解释 |
 | A16 | **哨兵值拒绝静默降级**：不可解析的决策返回 REVIEW 进人工队列；脏输出字段级归一（"N/A"/百分比/货币符号） | TradingAgents 档案 §5（schemas.py） | LLM 输出卫生的底线；解析失败必须可见 |
 | A17 | **revert 两阶段**（stage→人工确认→commit，可反悔）+ checkpoint 恢复前先 stash 现状 | opencode 档案 §4.2、cline 档案 §4 | 财务「草稿/冲正」对应物：回滚本身不破坏现场 |
-| A18 | **对账不重发**：不可逆动作前写 crash-safe 标记，重启后拿对端证据关闭重发窗口，mutation 永不自动重试 | Vibe-Trading 档案 §5（pending_action.py） | 付款/过账类动作的崩溃恢复纪律；重发窗口=双倍付款风险 |
+| A18 | **对账不重发**：不可逆动作前写 crash-safe 标记，重启后拿对端证据关闭重发窗口，mutation 永不自动重试 | Vibe-Trading 档案 §5（live/pending_action.py） | 付款/过账类动作的崩溃恢复纪律；重发窗口=双倍付款风险 |
 
 **工具与集成（约束①核心）**
 
@@ -107,11 +107,11 @@
 | B3 | **语义层口径治理**：指标唯一权威定义 + 派生口径 + 值级映射 + 术语字典（机制）；口径文件在 Git、变更走 PR、审批后发布运行时（治理形态） | supersonic 档案 §6（元模型）、WrenAI 档案 §4（MDL 治理即代码） | 机制学 supersonic（Calcite schema + 元模型表），治理形态学 WrenAI（YAML/JSON + JSON Schema 校验进 Git，CI 审批后发布）；建设成本高，按财务域优先级分期（先核心报表指标） |
 | B4 | **受限语义方言 + 确定性翻译**：LLM 只写逻辑层（指标名/维度名），物理展开/join/方言在确定性翻译层完成 | supersonic 档案 §2（S2SQL + Calcite） | B3 的执行半边；「LLM 输出落在可校验的受限表达域」是 B 组谱系结论的分水岭——与 A22 出口校验双管齐下 |
 | B5 | **授权合同对象零解析面**：给 agent 读的合同用不可变、零验证歧义形式（Vibe 用 frozen dataclass 而非 Pydantic 的动机：不给 agent 留可利用的解析差异） | Vibe-Trading 档案 §8 | Java 对应：record + Jackson 严格模式 + 显式 final；所有给模型消费的结构体都过一遍「可利用面」审查 |
-| B6 | **kill switch 物理制动**：独立于 LLM/主循环/SSE 存活的开关，payload 损坏视为已触发 | Vibe-Trading 档案 §5（halt.py） | 服务化后=独立存储标志位（DB/Redis）+ 每动作前检查 + 运维面专用入口（不经 agent 服务） |
+| B6 | **kill switch 物理制动**：独立于 LLM/主循环/SSE 存活的开关，payload 损坏视为已触发 | Vibe-Trading 档案 §5（live/halt.py） | 服务化后=独立存储标志位（DB/Redis）+ 每动作前检查 + 运维面专用入口（不经 agent 服务） |
 | B7 | **advisory 与 gate 分离**：外部风控建议（fail-open、绝不阻塞、默认关）与硬门（fail-closed、唯一权威）严格分离 | Vibe-Trading 档案 §5 | 财务同理：外部风控建议服务挂了不该阻断合规门，也不能因「建议通过」绕过门——混用会把外部依赖可用性变成资金链路可用性风险 |
 | B8 | **代码沙箱（仅对账/批量核算场景）**：每会话容器 + 容器内执行服务器 + session key 鉴权 | OpenHands 档案 §6、data-formulator 档案 §2 | JVM 无 OS 沙箱等价物（SecurityManager 废弃），Docker(+gVisor) 是现实替代；**能力面收窄（A19）优先，确需执行分析代码才上容器** |
 | B9 | **MCP 双面暴露**：同一 agent 服务 REST/SSE 主面 + MCP Server 工具面 | DataAgent 档案 §6.5 | 业务系统消费 REST 主面，其他 agent 系统消费 MCP 工具面；MCP server 自述 readOnlyHint 不可作安全依据（Vibe curated map 反制先例） |
-| B10 | **worker 六分类质量闸门**：completed/failed/timeout/token_limit/**incomplete**（跑完但伪造交付/空计划）/cancelled | Vibe-Trading 档案 §2（models.py#WorkerStatus） | 多 agent 工作流必备：专设状态抓「跑完但没实质交付」；Java 枚举 + 产物校验器（空检查/溯源检查） |
+| B10 | **worker 六分类质量闸门**：completed/failed/timeout/token_limit/**incomplete**（跑完但伪造交付/空计划）/cancelled | Vibe-Trading 档案 §2（swarm/models.py#WorkerStatus） | 多 agent 工作流必备：专设状态抓「跑完但没实质交付」；Java 枚举 + 产物校验器（空检查/溯源检查） |
 
 ### 2.3 C 级：仅参考（8 条）
 
@@ -227,3 +227,14 @@
 - 图引擎能力（checkpoint/HITL/subgraph/多 agent 原语）见 `research/agent-framework/profiles/`（spring-ai-alibaba、langgraph4j、agentscope-java 等 Java 系档案）与 `report.md` 选型结论——本报告不重复框架层分析。
 - DataAgent 构建在 spring-ai-alibaba graph 上、TradingAgents 构建在 LangGraph 上，其「怎么用框架」见各自档案 §2/§3。
 - 学术与基准参照（Data Agent survey、NL2SQL handbook、DAB leaderboard、财务基准群）见 `references.md`；财务 agent 基准全部 star<60 且碎片化，佐证本领域评估标准远未收敛——自建评估集时应参照 FinVault 的执行安全口径与 DAB 的任务/评分维度。
+
+## 6. 复核修正记录（2026-09-13 源码抽查复核）
+
+基线表 18/18 全量核验通过（canonical + HEAD + 日期全对，含 OpenHands 历史锚点 `e8249f00a` 存在且 HEAD 确为 TS/Electron 形态）；30+ 条具体断言对照源码抽查（Vibe-Trading 治理链全链路、cline `automation.ts:144` autoApprove 默认 true、codex Starlark/AskForApproval/SandboxMode、DataAgent PlanExecutorNode 与 src/main 状态键、supersonic S2DataPermissionAspect 与 AES-ECB、SQLBot generate_filter(llm.py:947)/MODE_ECB(utils.py:9)、DB-GPT confirm_actions/dispatch_parallel_tasks、browser-use `<secret>` 占位符(beta/service.py:1386)、TradingAgents PIT pending、ai-hedge-fund hedge_fund/llm/cache.py 等，全部实锤）。修正如下：
+
+1. supersonic「release 停 2024-11 v0.9.8」→ **release 停 2025-03 v0.9.10**（git tag 实测 v0.9.10=2025-03-03，此前核验有误），且 2026 年仍有约 40+ 低频维护提交——「维护模式」结论保留但依据修正；PROMPT.md / README / profiles/supersonic.md / dimensions/B 四处同步。
+2. Vibe-Trading 档案「Skills 体系 140+」→ **90**（`agent/src/skills/` 下 SKILL.md 实数）。
+3. Vibe-Trading 档案券商连接器列表 robinhood 重复两次 → 按 `trading/connectors/` 实际目录顺序重写（14 的计数本身正确）。
+4. 本报告引用 Vibe 源码补目录前缀：enforcement.py→`live/`、halt.py→`live/`、pending_action.py→`live/`、manifest.py→`governance/`、models.py#WorkerStatus→`swarm/`（档案层面本就准确，报告层简写补全）。
+5. 存疑保留：browser-use「14 个安全看门狗」的精确类数未逐一清点（概念与代码存在，全仓相关命中 538 处），引用时按「看门狗事件总线」的机制层面理解。
+6. 复核后追加补齐（同第 4 条标准扫尾）：dimensions/A 第 8 条 manifest.py→`governance/`、第 10 条 classification.py→`live/`；Vibe-Trading 档案 §8 第 5 条 classification.py→`live/`——`classification.py` 在该仓有撞名（`live/` 下的读写三级分类 vs 各 connector 自带的同名文件），不补前缀会产生指代歧义。

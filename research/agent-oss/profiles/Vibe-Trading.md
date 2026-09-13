@@ -46,7 +46,7 @@ Python 3.11 + FastAPI；**自研 agent loop 与 swarm runtime（无 LangGraph/La
 
 ## 5. HITL 与风控 ★★（全仓最大亮点，开源产品中罕见的完整 bounded-autonomy 实现）
 
-真实下单：14 个券商连接器（trading/connectors/：robinhood/alpaca/tiger/okx/binance/futu/ibkr/mt5/etoro/longbridge/dhan/robinhood/shoonya/trading212/zerodha）。合规链全部在 `agent/src/live/` + `governance/`【核心】：
+真实下单：14 个券商连接器（trading/connectors/：alpaca/binance/dhan/etoro/futu/ibkr/longbridge/mt5/okx/robinhood/shoonya/tiger/trading212/zerodha）。合规链全部在 `agent/src/live/` + `governance/`【核心】：
 
 1. **Mandate——三层不可变授权合同**（live/mandate/model.py）：frozen dataclass（**刻意不用 Pydantic**：零验证面，agent 无从利用）。Layer(a) `HardCaps` 定量上限：单笔名义 / 总敞口 / 杠杆 / 工具类型白名单 / 日交易数；资金上限由券商侧专用账户余额物理执行（「agent 物理上无法突破的天花板」，本地只做纵深防御镜像）。Layer(b) `UniverseConstraint` 选择域：资产类别桶 + 市值/流动性下限 + 排除名单——**不是 ticker 白名单**（「那会杀死 agent 的发现能力」），agent 在结构过滤内自由选标的。`ConsentMeta` 出处：consent_token_sha256（绑定同意 UX 产出的人工点击 artifact）、broker/account_ref、**expires_at 默认 30 天强制过期**（「live mandate 不许永生」）。`flatten_on_halt` 默认 False（cancel-only 安全默认）。
 2. **授权写入唯一路径**（live/mandate/commit.py#commit_mandate）【核心模式】：commit_mandate **不是工具、不进 agent 工具注册表、不 importable-by-discovery**，只由 API `POST /mandate/commit` 调用且需要 surface 来源的 consent_ack——「命门不变量（the 命门 invariant）：结构性保证，不是 prompt 级保证」。被劫持/幻觉的模型无法自我授权。agent 侧的 `propose_mandate_profiles` 工具只能写 proposal（持久化不授予任何权限）。
@@ -68,7 +68,7 @@ Python 3.11 + FastAPI；**自研 agent loop 与 swarm runtime（无 LangGraph/La
 - 自研 ToolRegistry（agent/tools.py）；核心工具：bash/read_file/write_file/load_skill/get_market_data/backtest/get_options_chain 等 + 文档解析（PDF/DOCX/XLSX/PPTX/图像 OCR、vision 读图）。bash 工具在容器内以 vibe-sandbox 降权用户跑 LLM 生成代码（runner.py drop privilege，compose 保留 SETUID/SETGID 专为此）。
 - **数据源智能回退链**（loaders registry：yfinance→akshare、okx→ccxt），数据永不进工作树（compose 挂载 `:ro`，注释「no market data may ever land in the working tree」）。
 - **券商读写隔离**（trading/connections.py + 各 connector classification.py/profiles.py）：profile 声明 capabilities（account.read/positions.read…）与 readonly 标志；**只有 readonly 且具备 account.read+positions.read 的连接**才能进只读 Portfolio 聚合页；连接注册表 connections.json credential-free，凭据进 OS vault/CredentialStore。Robinhood 走远程 MCP（工具名映射 connectors/robinhood/mcp.py），tiger 等走本地 SDK。
-- **Skills 体系**（agent/src/skills/，140+）：markdown 知识包（SKILL 正文 + references/ + scripts/），load_skill 按需注入描述、agent 自主加载全文；用户目录覆盖内置——「把有用例行流程沉淀成可复用工作流」的产品化路径。
+- **Skills 体系**（agent/src/skills/，SKILL.md 实数 90）：markdown 知识包（SKILL 正文 + references/ + scripts/），load_skill 按需注入描述、agent 自主加载全文；用户目录覆盖内置——「把有用例行流程沉淀成可复用工作流」的产品化路径。
 - 脱敏贯穿：redact_payload/redact_text 用于 trace/audit/公开 metadata（credential 正则 + 高熵 token + endpoint 形状检测，swarm/models.py#public_metadata_value）；错误信息 collapsing home 路径（CWE-209）；access log 脱敏 filter。
 - MCP 双向：作为 client 消费券商 MCP 工具，也作为 server（mcp_server.py）供外部 agent 调用。
 
@@ -91,7 +91,7 @@ Python 3.11 + FastAPI；**自研 agent loop 与 swarm runtime（无 LangGraph/La
   2. **fail-closed 决策纯函数 + 三态裁决**（enforcement.py#check_mandate → DENY/ALLOW/PAUSE_FOR_REAUTH）：固定检查顺序、不可解析即拒、结构性 vs 定量违规分流（结构性=永久拒绝，定量=暂停待重新授权）——可直接翻译成 Java 的 PaymentGate：黑名单 → 客户/科目校验 → 单笔限额 → 总敞口 → 频次 → 额度，每步 fail-closed。
   3. **哈希链审计账本 + run manifest 指纹**（agent/src/governance/ledger.py + manifest.py）：seq+prev_record_hash 的防篡改账本（断链拒绝追加），与「方法论指纹」（prompt/skills/工具/版本 → 一个 hash，可 diff 两次运行的方法论差异）——财务 agent 的两大审计问题「记录没被改过」「结果在什么规则版本下产生」分别有先例。
   4. **文件哨兵 kill switch**（halt.py）：不依赖 LLM/SSE/主循环存活的物理制动；「对账而非重发」的崩溃恢复纪律（mutation 永不自动重试）。
-  5. **读写三级分类**（classification.py）：不可信外部服务自述只能降级不能升级安全等级 + curated map 优先 + default-deny——对接外部 MCP/业务 API 时的权限分级标准做法。
+  5. **读写三级分类**（live/classification.py，与各 connector 自带的 classification.py 是两回事）：不可信外部服务自述只能降级不能升级安全等级 + curated map 优先 + default-deny——对接外部 MCP/业务 API 时的权限分级标准做法。
 - **最有借鉴价值 top 2**：模式 1（授权不可达）+ 模式 2（fail-closed 门）；次选 3（审计双账本）。
 - **不可迁移点**：单用户本地优先（文件系统持久化、loopback 绑定、OS vault 凭据、文件哨兵）——企业多租户需把存储/身份/kill switch 分别换成 DB、IAM、服务化开关，但**语义可原样保留**；自研 loop/swarm 无图引擎生态（LangGraph 的 checkpoint/HITL 原语、langgraph4j 对应物）。
 - **避坑**：advisory（fail-open、观察性）与 mandate gate（fail-closed、权威）的分离必须严格守住——文档反复强调「advisory never block」，混用会把外部依赖的可用性变成下单链路的可用性风险；frozen dataclass 的动机（零验证面防 agent 利用）提示：**给 agent 读的合同对象不要留可利用的解析空间**。

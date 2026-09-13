@@ -21,7 +21,7 @@
 | A | Vibe-Trading | HKUDS/Vibe-Trading | f84b2977 (09-12) | |
 | B BI/数据智能 | DB-GPT | eosphoros-ai/DB-GPT | 04559f9c (09-08) | |
 | B | SQLBot | dataease/SQLBot | ba9aa5db (09-11) | 许可 NOASSERTION（DataEase 系惯常 GPLv3+附加），商用注意 |
-| B | supersonic | tencentmusic/supersonic | 6919ac50b (09-08) | **维护模式**（release 停 2024-11 v0.9.8），只作 ChatBI/语义层参考 |
+| B | supersonic | tencentmusic/supersonic | 6919ac50b (09-08) | **维护模式**（release 停 2025-03 v0.9.10，此后 18 个月无发版、仅低频维护提交），只作 ChatBI/语义层参考 |
 | B | WrenAI | Canner/WrenAI | be1f9b57 (09-11) | |
 | B | DataAgent | spring-ai-alibaba/DataAgent | 3fb7852 (08-19) | 1.0.0-RC 未 GA |
 | B | data-formulator | microsoft/data-formulator | 5477f0e2 (08-15) | |

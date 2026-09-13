@@ -17,7 +17,7 @@
 
 优先级 A > B > C > D：A/B 组全维度深剖；C 组重点解剖权限/审批/上下文管理/会话恢复等横切工程；D 组快扫（架构与工具设计即可）。
 
-**对象状态标注（2026-09-13 gh api 核验，写入各档案时保留）**：supersonic 处于**维护模式**（正式 release 停在 2024-11 v0.9.8，近两年无发版、单人维保）——只作 ChatBI/语义层架构参考，不构成生产选型推荐；SQLBot 许可非标准（NOASSERTION，DataEase 系惯常 GPLv3+附加条款），商用需注意；DataAgent 尚在 1.0.0-RC 未 GA；opencode/goose/OpenHands 2026 年均已迁移 org（canonical 分别为 anomalyco/opencode、aaif-goose/goose、OpenHands/OpenHands），引用地址以克隆目录的 remote URL 为准。
+**对象状态标注（2026-09-13 gh api 核验，写入各档案时保留；supersonic 数据 2026-09-13 复核修正，见 report.md §6）**：supersonic 处于**维护模式**（正式 release 停在 2025-03 v0.9.10，此后 18 个月无发版、仅低频维护提交）——只作 ChatBI/语义层架构参考，不构成生产选型推荐；SQLBot 许可非标准（NOASSERTION，DataEase 系惯常 GPLv3+附加条款），商用需注意；DataAgent 尚在 1.0.0-RC 未 GA；opencode/goose/OpenHands 2026 年均已迁移 org（canonical 分别为 anomalyco/opencode、aaif-goose/goose、OpenHands/OpenHands），引用地址以克隆目录的 remote URL 为准。
 
 **claude-code-sourcemap 特殊说明**：该仓库是从 sourcemap 还原的 Claude Code CLI 内部实现（npm 包 v2.1.88，`restored-src/`），非官方开源。分析定位＝生产级 harness 内部解剖，重点挖：权限规则引擎、工具审批流（can_use_tool）、上下文自动压缩（autocompact）、JSONL 会话持久化与 resume、subagent/hooks/skills 机制。注意四点：
 

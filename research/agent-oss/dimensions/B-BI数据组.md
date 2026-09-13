@@ -7,7 +7,7 @@
 | 项目 | 确定性管线 ↔ 自由 agent | 语义层 | 技术栈 | 形态定位 | 状态备注 |
 |---|---|---|---|---|---|
 | SQLBot | 最左端：顺序多段 LLM 流水线（一次问答最多 6 次调用），无循环无 agent | ❌ 无（表勾选+术语库+表关系图，属 RAG 上下文供给） | Python / FastAPI | 产品：只读问数 SaaS | 许可 NOASSERTION（DataEase 系疑 GPLv3+附加条款），细粒度权限在 xpack 闭源包——商用需法务核验 |
-| supersonic | 偏左：受限方言 S2SQL → Apache Calcite 确定性翻译；状态机编排 | ✅ 组内最全：DB 元数据（模型/维度/指标/术语/数据集/主题域） | **Java 21 / Spring Boot 3.3** | 产品：ChatBI + Headless BI 平台 | **维护模式**（release 停 2024-11 v0.9.8，单人维保）——只作架构参考 |
+| supersonic | 偏左：受限方言 S2SQL → Apache Calcite 确定性翻译；状态机编排 | ✅ 组内最全：DB 元数据（模型/维度/指标/术语/数据集/主题域） | **Java 21 / Spring Boot 3.3** | 产品：ChatBI + Headless BI 平台 | **维护模式**（release 停 2025-03 v0.9.10，仅低频维护提交）——只作架构参考 |
 | WrenAI | 编排外置：引擎自身几乎不调 LLM，智能在宿主 agent，治理在引擎 | ✅ MDL 语义模型（Git 文件，治理即代码） | **Rust**（DataFusion）+ Python | 引擎：CLI / MCP / SDK | **open-core**：per-user 行权限、审计日志、hosted API 均为商业版；2026-05 刚整体改版（v1 移 legacy 分支） |
 | DB-GPT | 最右端：新代 ReAct 自由 agent + 并行子 agent（旧代固定管线并存） | ❌ 无（表级/字段级双向量 schema 召回） | Python（自研 AWEL DAG + dbgpt.agent） | 产品+框架双体 | 活跃；认证是显式 mock，安全边界停在「单机自用」 |
 | DataAgent | 中间折中：固定 16 节点 StateGraph + LLM 计划驱动路由 | 🔶 弱：schema 向量召回 + Excel 语义模型导入（不钳制生成 SQL） | **Java 17 / Spring Boot / spring-ai-alibaba graph** | 产品：独立部署的数据分析师服务 | **1.0.0-RC 未 GA**：权限/审计/租户三块工程缺口 |

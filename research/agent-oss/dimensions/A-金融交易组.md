@@ -85,17 +85,17 @@
 1. 决策拓扑分场景双轨：月结审查/报销初审用「并行独立审查 → 代码加权合成 → 硬规则 clamp」（agent 间不对话）；需要对抗推理处（付款建议、争议事项）用固定轮次辩论 + deep 模型裁决——来源：ai-hedge-fund.md §2、TradingAgents.md §2/§8。
 2. 立「LLM 影响力终止于建议」总纲：agent 产物经 schema 校验后进纯函数管线（合成/裁剪/生成动作），风控 clamp 事件（limit/before/after）逐条入审计——来源：ai-hedge-fund.md §5（risk/limits.py + VISION 原则）。
 3. 授权不可达：付款限额/科目权限/白名单的写入口只放审批服务 API（带人工 consent_ack），不进 agent 工具注册表、不可被自省发现；agent 侧只留 propose 类工具（持久化不授权）——来源：Vibe-Trading.md §5（commit_mandate 命门不变量）。
-4. 付款门做成 fail-closed 纯函数：固定检查顺序（黑名单→客户/科目→单笔→累计→频次→预算），任何输入不可解析/数据缺失即 DENY；三态裁决 ALLOW/DENY/PAUSE_FOR_REAUTH，结构性违规与定量违规分流——来源：Vibe-Trading.md §5（enforcement.py#check_mandate）。
+4. 付款门做成 fail-closed 纯函数：固定检查顺序（黑名单→客户/科目→单笔→累计→频次→预算），任何输入不可解析/数据缺失即 DENY；三态裁决 ALLOW/DENY/PAUSE_FOR_REAUTH，结构性违规与定量违规分流——来源：Vibe-Trading.md §5（live/enforcement.py#check_mandate）。
 5. 解析失败必须可见：不可解析的决策返回哨兵状态（如 REVIEW）进人工队列，绝不静默降级为通过/中性；LLM 脏输出做字段级归一（"N/A"/百分比/带货币符号数字）——来源：TradingAgents.md §5（signal_processing.py、schemas.py）。
 6. 审计起步用「缓存即审计」：每个 LLM 决策的 prompt/response/输入快照哈希按内容寻址落盘，合规回放天然免费；资金动作升级为哈希链账本（seq+prev_hash、append 前验链、断链拒写）——来源：ai-hedge-fund.md §4（llm/cache.py）、Vibe-Trading.md §5（governance/ledger.py）。
 7. 决策日志 pending→resolved：决策当下只存 pending（不增加 LLM 调用），事实发生（月结完成/付款核销）后回填 outcome 与反思，带 resolution_date 供时点过滤——离线复盘闭环同时就是审计流水——来源：TradingAgents.md §4（memory.py）。
-8. 工作流版本进审计键：图形状/拓扑签名进 checkpoint key（定义变更自动作废旧执行态），run 级方法论指纹（prompt/skills/工具/版本 → 一个 hash，可 diff）回答「结论在什么规则版本下产生」——来源：TradingAgents.md §4、Vibe-Trading.md §4（manifest.py）。
-9. 物理制动独立于 agent 服务：kill switch 做成不依赖 LLM/主循环/SSE 存活的开关（服务化后为独立存储标志位 + 每动作前检查），payload 损坏视为已触发（fail-closed）——来源：Vibe-Trading.md §5（halt.py）。
-10. 外部工具/业务 API 读写三级分类：default-deny，UNKNOWN 一律按写走审批门；不可信服务自述注解只能降级不能升级，维护者 curated map 优先——来源：Vibe-Trading.md §5（classification.py）。
-11. 不可逆动作崩溃恢复 = 对账不重发：动作前写 crash-safe 副作用标记，重启后拿对端证据对账关闭重发窗口，mutation 永不自动重试——来源：Vibe-Trading.md §5（pending_action.py）。
+8. 工作流版本进审计键：图形状/拓扑签名进 checkpoint key（定义变更自动作废旧执行态），run 级方法论指纹（prompt/skills/工具/版本 → 一个 hash，可 diff）回答「结论在什么规则版本下产生」——来源：TradingAgents.md §4、Vibe-Trading.md §4（governance/manifest.py）。
+9. 物理制动独立于 agent 服务：kill switch 做成不依赖 LLM/主循环/SSE 存活的开关（服务化后为独立存储标志位 + 每动作前检查），payload 损坏视为已触发（fail-closed）——来源：Vibe-Trading.md §5（live/halt.py）。
+10. 外部工具/业务 API 读写三级分类：default-deny，UNKNOWN 一律按写走审批门；不可信服务自述注解只能降级不能升级，维护者 curated map 优先——来源：Vibe-Trading.md §5（live/classification.py）。
+11. 不可逆动作崩溃恢复 = 对账不重发：动作前写 crash-safe 副作用标记，重启后拿对端证据对账关闭重发窗口，mutation 永不自动重试——来源：Vibe-Trading.md §5（live/pending_action.py）。
 12. 长图工作流上下文纪律：阶段结束裁剪消息、只向下游传结构化报告字段（防膨胀与串扰）；辩论/审查轮次纯计数器封顶（token 可预算）；deep 模型只配给裁决节点——来源：TradingAgents.md §2（MsgClear 节点、conditional_logic、deep/quick 配置）。
 13. 反幻觉三板斧进 prompt 工程规范：预取真实数据注入（grounding）+ 数字溯源硬规则（无溯源必标「无法获取」）+ 领域否定清单（无引擎不得报该数字）——来源：Vibe-Trading.md §2（worker.py#build_worker_prompt、investment_committee.yaml）。
-14. worker 产物六分类含 incomplete：专设状态捕获「跑完但没实质交付」（空计划/伪造数字/零调用零报告），作为多 agent 工作流的质量闸门——来源：Vibe-Trading.md §2（models.py#WorkerStatus）。
+14. worker 产物六分类含 incomplete：专设状态捕获「跑完但没实质交付」（空计划/伪造数字/零调用零报告），作为多 agent 工作流的质量闸门——来源：Vibe-Trading.md §2（swarm/models.py#WorkerStatus）。
 15. 给 agent 读的合同对象不留解析面：授权/限额等结构用不可变、零验证歧义的形式（Vibe 用 frozen dataclass 而非 Pydantic 的动机）——来源：Vibe-Trading.md §8（避坑）。
 16. 「回测即生产」一管线三模式：同一编排代码只换时钟与执行器跑模拟/回放/生产，杜绝研究实现与生产实现漂移；合规回放 = 历史时钟 + 记录的 LLM 响应（prompt cache 命中即精确重放）——来源：ai-hedge-fund.md §2/§8（run_cycle.py、backtesting/fund.py）。
 17. 授权合同带生命周期：mandate 默认 30 天强制过期、commit 时重新校验 profile 未突破用户所见上限——财务侧「调额/解冻」授权同样应有有效期与所见即所批校验——来源：Vibe-Trading.md §5（mandate/model.py、commit.py）。
