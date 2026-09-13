@@ -32,7 +32,9 @@ research/<topic>/
 
 ## 证据纪律（沿用 agent-framework 轮的约定）
 
-- 所有结论可溯源：`~/develop/opensource/<repo>/路径#符号`；区分三级证据——【核心】核心代码实现 /【示例】examples 或 demo /【文档】文档宣称；查不到标 ❌ 或 ⚠️待确认，不臆测。
+- 所有结论可溯源：`~/develop/opensource/<repo>/路径#符号`；区分三级证据——【核心】核心代码实现 /【示例】examples 或 demo /【文档】文档宣称；查不到标 ❌ 或 ⚠️待确认，不臆测。任务可增设特殊等级（先例：agent-oss 轮为 sourcemap 还原仓库增设【还原源码】），在子目录 README 声明。
+- 区分「产品宣称」与「代码实现」：README / 论文的 marketing 宣称不作能力证据，能力结论必须对码并注明证据等级（宣称 vs 实现落差是 agent-oss 轮 18 仓的通病，见其 report §3）。
+- 批次产物完成后做源码抽查复核（证据路径、关键断言、数据实数），修正与存疑在最终报告留痕（先例：agent-oss/report.md §6 复核修正记录）。
 - 未本地克隆的对象不纳入源码级结论，只能以「非源码结论」明确标注。
 - 网络受限：github.com 网页 / raw 常超时，查仓库元数据 / README / 文件内容优先用 `gh api`（安装位置与用法见仓库根 AGENTS.md）。
 - 本目录只放文字结论，不放源码副本、大文件、截图转储。
@@ -40,6 +42,7 @@ research/<topic>/
 ## 克隆与基线纪律
 
 - 克隆前先查 `~/develop/opensource/` 是否已有，**不要重复克隆**；复用时记录该仓库 HEAD 作为本轮基线。
+- **复用旧克隆先核 HEAD 形态**：仓库可能在两轮调研之间清仓迁移、重写或 SDK 化（案例：OpenHands 2026-07 清空原 Python 代码迁移 TS 版，经典架构只能锚定 git 历史提交解剖；cline 重构为 monorepo）——旧档案/网上旧资料不可直接引用，须重验现役链路。
 - **研究进行期间冻结已分析仓库**：不要 `git pull`（避免基线漂移）；确需更新，更新后重记基线。旧报告凭记录的 HEAD 随时 `git checkout <hash>` 复现。
 - 通用仓库名可能撞名（opensource 平铺，如 `agent-framework` 这种名字），引用时写全 `owner/repo`，冲突时克隆目录用 `<owner>-<repo>`。
 - 磁盘预算：按当轮入选清单**按需克隆**，不要预克隆候选全集。
@@ -49,3 +52,4 @@ research/<topic>/
 | 子目录 | 主题 | 时间 | 说明 |
 |---|---|---|---|
 | `agent-framework/` | 主流 Agent 开发框架多维度对比（17 框架 × 15 维，源码级） | 2026-09 | 方法和评级体系的来源，见其 README.md |
+| `agent-oss/` | Agent 开源产品应用架构解剖（18 仓 → 财务 agent 参考模式，pattern catalog + 推荐架构） | 2026-09 | 产品轮：8 维解剖模板 + 三级模式清单（直接可用/需改造/仅参考），见其 README.md |
