@@ -205,7 +205,7 @@ class Claim(TypedDict):
 claim: Claim = {"id": "CLM-2026-0001", "items_cents": [1200, 3500]}  # 键值形状受查
 ```
 
- hetero 的 dict（值类型不一）用 `dict[str, int]` 表达不了，TypedDict 就是它的答案——L1.3 的 Pydantic 会把它升级成带校验的完整方案，这里混个脸熟即可。
+值类型不一的「异构」dict 用 `dict[str, int]` 表达不了，TypedDict 就是它的答案——L1.3 的 Pydantic 会把它升级成带校验的完整方案，这里混个脸熟即可。
 
 ### 2.7 类型收窄，与 is vs ==（附下划线惯例）
 

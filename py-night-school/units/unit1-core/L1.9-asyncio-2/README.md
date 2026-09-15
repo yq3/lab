@@ -209,7 +209,7 @@ uv run python code/cancel_demo.py
 
 == B：纯 CPU 循环，取消来晚了 ==
   HOG-1:RAN_TO_COMPLETION
-  main:终于醒了（睡了 0.05s 却被拖到 0.2s 后），此刻才取消 HOG-1
+  main:终于醒了（睡了 0.05s 却被拖到 0.2s 后），此刻才想取消 HOG-1
   main:cancel() 返回 False（任务已完成，无从取消）
   main:await 拿到 HOG-1 的正常结果 'HOG-1'——取消来晚了
 ```

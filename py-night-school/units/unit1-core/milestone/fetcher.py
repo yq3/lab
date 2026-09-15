@@ -184,7 +184,7 @@ async def _print_report() -> None:
     for r in summary.regions:
         print(f"{r.region:8} 单据数 {r.count}  金额合计 {r.total_cents:6} 分  状态 {r.status}")
     print(f"总计 {summary.grand_total_cents} 分")
-    print(f"耗时 {elapsed:.3f}s（全串行约 0.7s+）；峰值并发 {peak_concurrency()}；east 调用 {call_count('east')} 次")
+    print(f"耗时 {elapsed:.3f}s（全串行约 0.6s）；峰值并发 {peak_concurrency()}；east 调用 {call_count('east')} 次")
 
 
 def main() -> None:

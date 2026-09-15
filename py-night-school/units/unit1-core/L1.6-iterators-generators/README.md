@@ -94,7 +94,7 @@ def audit_steps(claim_id):
   [执行] 第二段：查预算
 [next ] 第 2 次吐出: OK:预算
   [执行] 第三段：出结论
-[next ] 第 3 次吐出: OK:PASS
+[next ] 第 3 次吐出: PASS
 [next ] 第 4 次: StopIteration（生成器耗尽）
 ```
 

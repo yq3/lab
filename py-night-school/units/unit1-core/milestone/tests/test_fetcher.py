@@ -59,6 +59,7 @@ def test_peak_concurrency_capped() -> None:
 
 def test_total_elapsed_within_budget() -> None:
     _, elapsed = _collect()
-    # 全串行（重试生效、慢端点被预算掐断）约 0.46s——不并发过不了关；
+    # 全串行约 0.60s（north 0.30 + east 重试共 0.07 + 其余 0.23；即便 wait_for 把 north
+    # 掐到 0.15 也约 0.45s）——两种读法都超预算，不并发过不了关；
     # Semaphore(2) 限流并发后约 0.25s。阈值放宽到 0.40。
     assert elapsed < 0.40

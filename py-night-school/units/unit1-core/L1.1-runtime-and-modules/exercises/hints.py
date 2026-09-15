@@ -25,7 +25,7 @@ _HINTS: dict[str, list[str]] = {
         "import 会执行被导入文件的顶层 print——所以 B 场景的第一行输出来自 probe_a；"
         "而 main branch 行只属于被直接运行的文件，import 链上的文件一行都不会有。",
         "B 场景三行：probe-a 的模块名行、probe-b 的模块名行、probe-b 看到 probe_a.__name__ 的行；"
-        "C 场景共五行：probe-a 与 probe-b 的四行照打（模块名身份），最后两行是 probe-c 的"
+        "C 场景共五行：probe-a 与 probe-b 的三行照打（模块名身份），最后两行是 probe-c 的"
         " __main__ 身份行（它还 import 了 probe_b）与 main branch 行。",
     ],
 }

@@ -21,8 +21,12 @@ def test_ex2_valid_samples_pass(payload: dict[str, object]) -> None:
 
 @pytest.mark.parametrize(("kind", "payload"), INVALID_CASES)
 def test_ex2_invalid_cases_rejected(kind: str, payload: dict[str, object]) -> None:
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError) as exc_info:
         ReceiptSubmission.model_validate(payload)
+    # 三方对齐：kind 声明的违规字段必须与 Pydantic 实际报错的第一处字段一致——错标 kind 骗不过验收
+    assert exc_info.value.errors()[0]["loc"][0] == kind, (
+        f"kind 标了 {kind}，但实际违规的是 {exc_info.value.errors()[0]['loc'][0]}（样本应只违反一个字段）"
+    )
 
 
 def test_ex2_invalid_cases_cover_all_fields() -> None:

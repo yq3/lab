@@ -117,7 +117,7 @@ from expense.rules import preapprove  # 直取名字：preapprove(...)（≈ imp
 - **被直接运行**的文件：`__name__ == "__main__"`；
 - **被 import** 的模块：`__name__` 是它的模块名（如 `"expense.rules"`、`"demo_name"`）。
 
-于是 Python 的入口约定长这样（`code/expense/cli.py` 的真实底部）：
+于是 Python 的入口约定长这样（节选自 `code/expense/cli.py` 的底部，完整版还多一行金额回显）：
 
 ```python
 import sys
@@ -170,10 +170,12 @@ import 找模块的搜索路径是 `sys.path` 列表，对照：
 |---|---|---|
 | classpath（启动时定死，`-cp` / 环境变量） | `sys.path`（**运行中的普通列表**，可改） | Python 的搜索路径是可编程对象 |
 | 当前目录默认在 classpath 里（`java Hello`） | 脚本所在目录自动**插队到 `sys.path[0]`** | 这是很多「为什么这里能 import」的答案 |
-| `CLASSPATH` 环境变量 | `PYTHONPATH` 环境变量（插在标准库之后） | 同为「追加搜索路径」的逃生门 |
+| `CLASSPATH` 环境变量 | `PYTHONPATH` 环境变量（**插在标准库之前**，因此能遮蔽标准库） | 同为「追加搜索路径」的逃生门，Python 这条优先级更高 |
 | 依赖 jar 全部平铺在 classpath | 每个项目一个 `.venv/`，依赖只在 `site-packages` | uv 在 L0.1 已替你管好 |
 
 注意 `sys.path[0]` 随**启动方式**变：直接跑脚本时是**脚本所在目录**；`python -m 包.模块` 时是**当前目录**；`python -c` 时也是当前目录。这个细节是 §5 坑位的直接成因。
+
+顺带一个顺序后果：脚本目录与 `PYTHONPATH` 都排在标准库**前面**——把工作目录里的文件起名叫 `email.py` 再 `import email`，标准库就被你的文件顶掉了（实测：`PYTHONPATH` 落在 `sys.path[1]`，标准库在 `[3]`）。`json.py`、`random.py` 都中过同样的枪：起名避开标准库模块名。
 
 ### 2.6 PyPI 包名 vs Maven 坐标
 

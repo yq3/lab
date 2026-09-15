@@ -75,7 +75,7 @@ def retry(max_retries, exceptions):  # 第 1 层：收参数（带参装饰器�
 | `test_degraded_marked_for_slow_region` | north 状态 `DEGRADED`、空结果、0 金额 |
 | `test_status_kinds` | east `RETRY_OK`、其余 `PASS`——三态各就各位 |
 | `test_peak_concurrency_capped` | 峰值并发 ≤ 2 且 ≥ 2（限流真生效、并发真发生） |
-| `test_total_elapsed_within_budget` | 总时长 < 0.40s（全串行约 0.46s——不并发过不了关） |
+| `test_total_elapsed_within_budget` | 总时长 < 0.40s（全串行约 0.60s——north 0.30 + east 重试共 0.07（0.01×2 抖动 + 0.05 成功）+ 其余端点 0.23，不并发过不了关） |
 
 ```bash
 uv run pytest

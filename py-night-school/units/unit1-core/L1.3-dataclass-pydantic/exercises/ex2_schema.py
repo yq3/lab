@@ -10,7 +10,9 @@
   1. TODO(ex2a)：给三个字段加上能表达上述语义的约束（pattern / gt+le / min_length）；
   2. TODO(ex2b)：补 INVALID_CASES——至少 4 组、覆盖三个字段各自的违规，
      每行 (kind, payload)：kind 声明违反哪个字段（"receipt_no"/"amount_cents"/"payer"），
-     payload 是会触发 ValidationError 的 dict。覆盖是否达标由 meta-test 机器验收。
+     payload 是会触发 ValidationError 的 dict，且**只违反 kind 这一个字段**——
+     验收会比对 Pydantic 实际报错位置与 kind 是否一致，错标 kind 骗不过。
+     覆盖是否达标由 meta-test 机器验收。
 完成后：uv run pytest exercises/test_ex2.py 全绿。
 """
 
