@@ -5,7 +5,7 @@
     python3 scripts/check_lesson.py                              # 扫描全部课时目录
     python3 scripts/check_lesson.py units/unit0-toolchain/L0.1-uv-toolchain
 
-检查项：六段章节齐全 / 练习带 TODO + hints.py + pytest 验收 / solution 存在 /
+检查项：六段章节齐全 / §2 含 Java 对照表 / 练习带 TODO + hints.py + pytest 验收 / solution 存在 /
 延伸段源码路标锚定 commit（仓库@commit#路径）。仅用标准库。
 """
 
@@ -40,6 +40,27 @@ def bash_block_concat_lines(text: str) -> list[int]:
     return violations
 
 
+def section_text(text: str, header: str) -> str:
+    """截取某个二级章节（## N. 开头到下一个 ## 标题或文末）的正文。"""
+    capture = False
+    out: list[str] = []
+    for line in text.splitlines():
+        if line.startswith("## "):
+            if capture:
+                break
+            capture = line.startswith(header)
+            continue
+        if capture:
+            out.append(line)
+    return "\n".join(out)
+
+
+def has_java_table(text: str) -> bool:
+    """§2 概念讲解里是否有含 Java 的对照表（宪法特色 1 的机器化）。"""
+    section2 = section_text(text, "## 2.")
+    return any(line.strip().startswith("|") and "java" in line.lower() for line in section2.splitlines())
+
+
 def check_lesson(lesson: Path) -> list[str]:
     problems: list[str] = []
     readme = lesson / "README.md"
@@ -51,6 +72,8 @@ def check_lesson(lesson: Path) -> list[str]:
             problems.append(f"讲义缺少章节「{section}」")
     if not COMMIT_ANCHOR.search(text):
         problems.append("延伸段源码路标未锚定 commit（格式：仓库@commit#路径）")
+    if not has_java_table(text):
+        problems.append("§2 概念讲解缺少 Java↔Python 对照表（宪法特色 1：表格行需含 Java）")
     concat_lines = bash_block_concat_lines(text)
     if concat_lines:
         problems.append(
