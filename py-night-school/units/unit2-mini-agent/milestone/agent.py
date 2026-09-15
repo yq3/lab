@@ -50,7 +50,8 @@ class ReActAgent:
     ) -> AgentResult:
         """跑完整循环。execute 为 None 用本地注册表，否则用注入的执行器（MCP 桥接）。"""
         # TODO(t1): executor = execute or self._default_execute（接缝二选一）
-        # TODO(t1): 组装初始 messages（system + user）；to_openai_tools 生成契约
+        # TODO(t1): 顶部补 to_openai_tools 的 import；契约由 to_openai_tools(self._registry) 生成
+        # TODO(t1): 组装初始 messages（system + user）
         # TODO(t1): for turn in range(1, max_turns + 1)：请求模型 → 消息原样入史 → 分支
         # TODO(t1):   无 tool_calls -> 返回 AgentResult(文本, messages, turn)（软终止）
         # TODO(t1):   有 -> 逐个执行 executor(name, arguments) 并回喂（id 配对）

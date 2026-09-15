@@ -74,7 +74,7 @@
 - [x] 逐仓教学解剖（research/agent-tutorials/profiles/ ×8 + report.md 综合报告）
 - [x] Unit 0 内容与练习（L0.1 工具链 + 明线种子）
 - [x] Unit 1 内容与练习（九课 + 里程碑：语言核心·Java 对照，三态验证全过）
-- [x] Unit 2 内容与练习（五课 + 里程碑：无框架 mini-agent，292 行裸逻辑，离线可验收，三态验证全过）
+- [x] Unit 2 内容与练习（五课 + 里程碑：无框架 mini-agent，249 行裸逻辑（ast 口径），离线可验收，三态验证全过）
 - [ ] Unit 3 四框架课
 - [ ] Unit 4 产品实战课
 - [ ] Unit 5 毕业设计与参考实现

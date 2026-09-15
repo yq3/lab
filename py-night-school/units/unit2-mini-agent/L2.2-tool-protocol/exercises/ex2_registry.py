@@ -1,4 +1,4 @@
-# 练习 2（单变量编辑约束：只改本文件 TODO 标注的函数体，其余不要动）
+# 练习 2（单变量编辑约束：只改本文件 TODO 标注的函数体与所需的顶部 import，其余不要动）
 """@tool 带参装饰器：函数一登记进注册表。
 
 考察点：L1.5 带参装饰器的三层结构在真实场景的落地；
@@ -6,7 +6,7 @@
 functools.wraps 保住原函数身份。
 
 完成判据：uv run pytest exercises/test_ex2.py 全绿——
-  注册生效、描述取 docstring 第一行、wrapper 可调用且身份保留、同名后注册覆盖先注册。
+  注册生效、描述取 docstring 第一行、wrapper 可调用且身份保留、注册表键来自 __name__。
 提示：docstring 可能为 None 或前后有空白——先 strip 再取第一行。
 """
 

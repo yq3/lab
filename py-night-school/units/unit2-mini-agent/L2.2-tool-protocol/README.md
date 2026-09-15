@@ -26,6 +26,16 @@ uv run pyright
 
 ## 2. 概念讲解
 
+先给全课对照表，再逐个展开：
+
+| 你熟悉的 Java 物 | 今天的 Python 物 | 一句话差异 |
+|---|---|---|
+| springdoc 从 DTO 生成 OpenAPI schema | `model_json_schema()` | 契约从类型生成，不是手抄——同一思想 |
+| `@Component` + classpath 扫描 + `Map<String, Method>` 白名单 | `@tool(ArgsModel)` + `TOOL_REGISTRY` | 一个 dict + 装饰器副作用，「工具发现 = 查表」 |
+| Jackson `readValue` + Bean Validation 两道工序 | `model_validate_json()` | 解析、校验、类型收敛压成同一次调用（L1.3 三合一的兑现） |
+| Javadoc（不进运行时） | docstring 第一行 | 「文档即数据」：描述直接进 schema 广告给模型 |
+| 全局 `@ExceptionHandler` 往上抛 | error JSON 回喂 | 异常服务调用栈，回喂服务模型——错误是给模型的修复指令 |
+
 ### 2.1 昨晚的三个问题
 
 L2.1 我们手写了工具契约（那个 dict）并手工回喂——三个问题在真实项目里都会长大：
@@ -181,7 +191,7 @@ uv run python code/demo_schema.py
 uv run pytest code/
 ```
 
-七个测试覆盖：注册生效与 docstring 描述、payload 与模型 schema 的一致性（单一事实源）、
+六个测试覆盖：注册生效与 docstring 描述、payload 与模型 schema 的一致性（单一事实源）、
 required/pattern 广告、四条分发路径、校验分层（负数进得来、空列表进不来）。
 
 ### Step 2：注册表驱动的三回合对话（15 分钟）
@@ -210,6 +220,8 @@ uv run python code/demo_registry.py
 uv run python code/demo_registry.py --real
 ```
 
+（首次配 `.env`：`cp .env.example .env`，Windows PowerShell：`copy .env.example .env`。）
+
 模型自己决定调用顺序与参数（这是它与 mock 的区别）；循环带了 6 轮护栏——
 真实世界没有护栏的循环会发生什么，是 L2.3 §5 的主题。
 
@@ -220,7 +232,8 @@ uv run python code/demo_registry.py --real
 
 ## 4. 练习（本课过关点）
 
-规则：**单变量编辑约束**——只改标注的 TODO 区。卡住先想 5 分钟，再看渐进提示：
+规则：**单变量编辑约束**——只改标注的 TODO 区；实现需要的顶部 import 可以补（骨架只预置了
+given 部分用到的）。卡住先想 5 分钟，再看渐进提示：
 
 ```bash
 cd exercises
@@ -276,10 +289,10 @@ uv run pyright
 
 - Pydantic JSON Schema 官方文档（约束映射全表、schema 生成定制）：
   https://docs.pydantic.dev/latest/concepts/json_schema/
-- pydantic@e2683e14d#pydantic/json_schema.py —— schema 生成器的实现本体
+- pydantic/pydantic@e2683e14d#pydantic/json_schema.py —— schema 生成器的实现本体
   （`GenerateJsonSchema`）：`gt` → `exclusiveMinimum` 的映射就发生在这里，读它等于
   看契约编译器。
-- langchain@a063ec26d#libs/core/langchain_core/tools/simple.py —— 生产框架的 `@tool`：
+- langchain-ai/langchain@a063ec26d#libs/core/langchain_core/tools/simple.py —— 生产框架的 `@tool`：
   与我们的注册表对照读——它同样从函数签名/Pydantic 模型生成 schema、用 docstring 当
   描述；多出来的是 `args_schema` 定制与异步变体，骨架与我们今晚的一致。
 - openai/openai-cookbook@0aaed0f1d#examples/Orchestrating_agents.ipynb —— 对照原件的

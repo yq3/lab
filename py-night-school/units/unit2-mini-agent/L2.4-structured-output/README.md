@@ -26,6 +26,16 @@ uv run pyright
 
 ## 2. 概念讲解
 
+先给全课对照表，再逐个展开：
+
+| 你熟悉的 Java 物 | 今天的 Python 物 | 一句话差异 |
+|---|---|---|
+| `enum Verdict { PASS, ... }` | `Literal["PASS", ...]` | 值域是类型注解里的一组字符串：静态收窄、运行时校验、schema enum 三处共享 |
+| `ObjectMapper.readValue`（对端是序列化层） | `extract_json` + `json.loads` | LLM 是聊天界面——剥壳是你自己的责任（§5） |
+| Bean Validation errors 回传表单让用户改 | 校验错误回喂重试 | 同一个形状，「用户」换成了模型——它真的会照着改 |
+| `@ControllerAdvice` 统一异常出口 | `StructuredOutputError` fail-loud | 修不好的半成品不许当结论，抛给上层/人 |
+| OpenAPI 契约约束对端 | 端点侧 `response_format` | 端点保证 vs 客户端兜底的取舍（§2.5） |
+
 ### 2.1 问题：LLM 是聊天界面，不是序列化层
 
 后端互调（Java ↔ Java）的 JSON 没人会包 Markdown——但模型是个「爱聊天」的输出器：
@@ -199,12 +209,15 @@ uv run pytest code/
 uv run python code/demo_repair.py --real
 ```
 
+（首次配 `.env`：`cp .env.example .env`，Windows PowerShell：`copy .env.example .env`。）
+
 错误形态由模型自由发挥——可能一次就过，也可能给你表演新的花式包裹；
 `attempts=3` 的预算兜底。
 
 ## 4. 练习（本课过关点）
 
-规则：**单变量编辑约束**——只改标注的 TODO 区。卡住先想 5 分钟，再看渐进提示：
+规则：**单变量编辑约束**——只改标注的 TODO 区；实现需要的顶部 import 可以补（骨架只预置了
+given 部分用到的）。卡住先想 5 分钟，再看渐进提示：
 
 ```bash
 cd exercises
@@ -254,7 +267,7 @@ uv run pyright
   https://platform.openai.com/docs/guides/structured-outputs
 - Pydantic JSON Schema 文档（Literal → enum 映射、Field 约束 → schema 键全表）：
   https://docs.pydantic.dev/latest/concepts/json_schema/
-- openai-python@f348ec87b#src/openai/types/shared/response_format_json_schema.py ——
+- openai/openai-python@f348ec87b#src/openai/types/shared/response_format_json_schema.py ——
   端点侧约束在官方 SDK 里的类型定义：`json_schema` / `strict` 字段的静态化，
   与我们客户端方案并排读，取舍表（§2.5）的实物版。
 - openai/openai-agents-python@fb8fa1ba5#src/agents/agent.py —— 生产框架的 `output_type`：

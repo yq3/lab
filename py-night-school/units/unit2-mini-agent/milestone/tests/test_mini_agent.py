@@ -183,6 +183,8 @@ def test_t3_stdio_roundtrip() -> None:
                 await session.initialize()
                 outcomes.append(await run_mcp_tool(session, "preapprove", '{"items_cents": [1200, 3500, 2400]}'))
                 outcomes.append(await run_mcp_tool(session, "preapprove", '{"items_cents": [8800]}'))
+                outcomes.append(await run_mcp_tool(session, "preapprove", '{"items_cents": [-500]}'))
+                outcomes.append(await run_mcp_tool(session, "preapprove", json.dumps({"items_cents": [4000] * 126})))
                 try:
                     await run_mcp_tool(session, "no_such_tool", "{}")
                 except McpToolError as exc:
@@ -190,8 +192,13 @@ def test_t3_stdio_roundtrip() -> None:
         return outcomes
 
     outcomes = asyncio.run(scenario())
-    assert outcomes[:2] == ["PASS", "REJECT:ITEM_OVER_LIMIT"]
-    assert outcomes[2].startswith("McpToolError")
+    assert outcomes[:4] == [  # 预审四态全走一遍（真协议）
+        "PASS",
+        "REJECT:ITEM_OVER_LIMIT",
+        "REJECT:INVALID_AMOUNT",
+        "REJECT:TOTAL_OVER_LIMIT",
+    ]
+    assert outcomes[4].startswith("McpToolError")  # 未知工具走有名异常
 
 
 # ---- 端到端：循环 × 工具 × 结构化（T1 + 给定件的合体） ----

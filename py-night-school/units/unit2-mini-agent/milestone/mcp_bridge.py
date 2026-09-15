@@ -24,7 +24,7 @@ def mcp_tools_payload(tools: Sequence[Tool]) -> list[dict]:
 
 async def run_mcp_tool(session: ClientSession, name: str, arguments_json: str) -> str:
     """经 MCP 协议执行一个工具调用，返回文本结果；失败抛 McpToolError。"""
-    # TODO(t3): json.loads 拆 arguments（坏 JSON 抛 McpToolError("invalid_arguments: ...")）
+    # TODO(t3): json.loads 拆 arguments（需补 import json；坏 JSON 抛 McpToolError("invalid_arguments: ...")）
     # TODO(t3): await session.call_tool(name, arguments=...)；content 是联合类型列表，收文本要收窄
     # TODO(t3): result.is_error 为真 -> raise McpToolError(f"{name}: <文本>")；否则返回拼接文本
     raise NotImplementedError("TODO(t3): 补全 run_mcp_tool")

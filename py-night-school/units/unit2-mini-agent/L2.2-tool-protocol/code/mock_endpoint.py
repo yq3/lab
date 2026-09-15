@@ -27,7 +27,7 @@ def _sse_bytes(fragments: list[str]) -> bytes:
     """把若干 delta 文本片段编码成一段 SSE 字节流（data: 行 + 空行分隔 + [DONE] 哨兵）。"""
     lines: list[bytes] = []
     for i, fragment in enumerate(fragments):
-        delta = {"role": "assistant", "content": fragment}
+        delta = {"role": "assistant", "content": fragment} if i == 0 else {"content": fragment}
         finish_reason = "stop" if i == len(fragments) - 1 else None
         event = {
             "id": "chatcmpl-mock-stream",

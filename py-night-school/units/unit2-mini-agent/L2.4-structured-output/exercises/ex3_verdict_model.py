@@ -1,4 +1,4 @@
-# 练习 3（单变量编辑约束：只改本文件 TODO 标注的区域，其余不要动）
+# 练习 3（单变量编辑约束：只改本文件 TODO 标注的区域与所需的顶部 import，其余不要动）
 """verdict 值域：Literal 声明 + 归一化 + fail-closed。
 
 考察点：typing.Literal 把值域写进类型（pydantic 会把它广告成 schema 的 enum）；

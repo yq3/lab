@@ -17,14 +17,15 @@ structured.py   L2.4  解析 + 校验 + 回喂重试（T2：你写其中修复�
 mcp_bridge.py   L2.5  MCP 工具桥接（T3：你写）
 ```
 
-行数口径（诚实计数）：核心五模块裸逻辑 **292 行**（含文档注释 453 行；再加财务工具、
-MCP server、演示入口，全项目 843 行）——CURRICULUM 说的「~300 行」指前者：
+行数口径（诚实计数，可复现——用 ast 定位模块/类/函数各级 docstring 的行区间后，
+数非空、非 # 注释、不在区间内的行）：核心五模块裸逻辑 **249 行**；含文档注释 454 行；里程碑全部 Python（含给定件、演示入口与 hints，不含 tests）887 行。
+CURRICULUM 说的「~300 行」指第一口径的量级：
 一个下午能从头读完的体量，这就是「不神秘」的量化证明。
 
 对照原件：openai/openai-cookbook@0aaed0f1d#examples/Orchestrating_agents.ipynb
 的 `run_full_turn` 循环——写完后去读它，你会认出每一个零件。
 
-## 任务（三个 TODO，全在标注文件里）
+## 任务（三个 TODO，全在标注文件里；实现所需的顶部 import 可以补）
 
 ### T1 agent.py：循环 + 接缝（L2.3 复刻 + 一个新设计）
 
@@ -65,8 +66,8 @@ None 时走本地注册表（`self._default_execute`），注入时全走它。`
   uv run python main.py --real
   ```
 
-  前两个离线全链路（剧本模型 + 本地/MCP 工具 + 结构化决策），`--real` 需 `.env`
-  （模型自己决定调用顺序，预算 6 轮兜底）。
+  前两个离线全链路（剧本模型 + 本地/MCP 工具 + 结构化决策）；`--real` 需先配 `.env`
+  （`cp .env.example .env`，Windows PowerShell：`copy .env.example .env`），模型自己决定调用顺序，预算 6 轮兜底。
 
 ## 验收（全部绿 = Unit 2 结业）
 
@@ -110,7 +111,7 @@ milestone/
 
 ## 离毕业又近的一块
 
-毕业设计与 mini-agent 的对应关系，从今晚起逐课对表：L5.1 的静态图 = 这 292 行的
+毕业设计与 mini-agent 的对应关系，从今晚起逐课对表：L5.1 的静态图 = 这 249 行的
 拓扑化；L5.2 的审批外化 = 在「选工具」与「执行」之间插一个人工节点；L5.3 的事件溯源 =
 `messages` 列表升级为 append-only 事件表；L5.4 的 fail-closed 门 = `run_tool` 出口
 再加一条纯函数检查链。你在 Unit 3 每学一个框架，就回来问一次：**它替我付掉的

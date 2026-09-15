@@ -1,37 +1,36 @@
 """渐进提示（借鉴 Anthropic 官方课的 hints 机制）：先自己想 5 分钟再看，每次只看一级。
 
-第 1 级只给方向，第 2 级给形状，接近完整的做法在最后一级。
+第 1 级只给方向，第 2 级给形状（伪代码/签名级，无成行可抄的答案代码），接近完整的做法在最后一级。
 用法（在本目录下，uv run 跨平台）：
     uv run python -c "from hints import hint; print(hint('ex1', 1))"
 """
 
 _HINTS: dict[str, list[str]] = {
     "ex1": [
-        "工具函数体就是普通函数体：读文件（json.loads + Path.read_text）、循环找单号、"
-        "两种返回（找到 / error JSON）。装饰器和 server.run 都已备好，别动。",
-        '形状：claims = json.loads(BUDGET_FILE.read_text(encoding="utf-8"))["expense_claims"]；'
-        'for claim in claims: if claim["id"] == claim_id: return json.dumps({"id": claim["id"], '
-        '"submitter": ..., "purpose": ..., "items_cents": ...}, ensure_ascii=False)。',
+        "工具函数体就是普通函数体：读数据文件、循环找单号、两种返回（找到 / error JSON）。"
+        "装饰器与 server.run 都已备好，别动。",
+        "形状级三问：JSON 顶层取哪个键拿到单据列表？找到时返回的 JSON 有哪四个业务键？"
+        "找不到时 error JSON 的键名与值格式是什么（对照 L2.2 的 error_result 惯例）？",
         '收尾（循环外）：return json.dumps({"error": f"claim_not_found: {claim_id}"}, '
         "ensure_ascii=False)。返回值必须是 str——content 是回喂给模型的文本。",
     ],
     "ex2": [
-        "列表推导一行一个工具；三层 dict 套娃与 L2.2 的 openai_function 完全同构，"
-        "只是 parameters 的来源换成 tool.input_schema。",
-        '形状：{"type": "function", "function": {"name": tool.name, "description": '
-        'tool.description or "", "parameters": tool.input_schema}}。',
-        "完整版：return [ ... for tool in tools ]，三个键原样透传——description 的 "
-        'or "" 是唯一的小心思（None 会炸下游的 str 操作）。',
+        "payload 的三层嵌套与 L2.2 的 openai_function 完全同构，只是 parameters 的来源换了——"
+        "从 MCP 的 Tool 对象身上取。",
+        "形状级：Tool 的哪个属性装着 JSON Schema（注意是 snake_case 的哪个词）？"
+        "description 可能为 None，归一成什么才不炸下游的字符串操作？最外层的 type 固定是什么？",
+        '完整版：return [{"type": "function", "function": {"name": tool.name, '
+        '"description": tool.description or "", "parameters": tool.input_schema}} '
+        "for tool in tools]。",
     ],
     "ex3": [
-        "三步：拆封（json.loads，坏 JSON 抛 McpToolError）→ 调用（await session.call_tool"
-        "(name, arguments=arguments)）→ 取文本（遍历 result.content，取有 .text 的 part）。",
-        "形状：try: arguments = json.loads(arguments_json)；except json.JSONDecodeError as exc: "
-        'raise McpToolError(f"invalid_arguments: {exc.msg}") from exc；'
-        'texts = [text for part in result.content if (text := getattr(part, "text", None))]——'
-        "content 是联合类型列表，直接 part.text 会被 pyright 拦（ImageContent 没有 text）。",
+        "三步：拆封（arguments 是 JSON 字符串，坏 JSON 也要变成 McpToolError）→ 协议调用"
+        "（call_tool 要 dict）→ 取文本（content 是联合类型列表，直接 .text 过不了 pyright）。",
+        "形状级：取文本的两种收窄写法是什么（讲义 §2.3 提过）？is_error 为真时走哪个出口、"
+        "错误信息从哪里拼？多段文本怎么合成单字符串？",
         "收尾：if result.is_error: raise McpToolError(f\"{name}: {'; '.join(texts)}\")；"
-        'return "\\n".join(texts)。content 是列表（可能多段文本），拼接成单字符串对齐 run_tool 的口径。',
+        'return "\\n".join(texts)；坏 JSON：except json.JSONDecodeError as exc: '
+        'raise McpToolError(f"invalid_arguments: {exc.msg}") from exc。',
     ],
 }
 

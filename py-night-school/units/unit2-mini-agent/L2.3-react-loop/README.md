@@ -25,6 +25,16 @@ uv run pyright
 
 ## 2. 概念讲解
 
+先给全课对照表，再逐个展开：
+
+| 你熟悉的 Java 物 | 今天的 Python 物 | 一句话差异 |
+|---|---|---|
+| `while (true) + switch` 状态机 | ReAct while 循环 | 分支判断由模型输出驱动——审计问题从「转移全吗」变「出口谁说了算」（§5） |
+| 面向接口编程 + Mockito 造替身 | `ModelClient` Protocol + `ScriptedModel` | 结构化类型不要求 implements，普通类长成形状就算数 |
+| 线程池拒绝策略 / 超时兜底 | `max_turns` 轮数预算 | 确定性护栏对冲概率性软终止 |
+| 有状态会话（WebSocket session） | messages 全量重发 | 无状态协议：对话状态全在客户端的 list 里 |
+| LRU 逐出 / 缓存容量管理 | `trim_messages` 裁剪 | 视图可裁、档案不动；system 与 tool 配对是硬约束 |
+
 ### 2.1 ReAct：一个词和一个循环
 
 ReAct = **Rea**soning + **Act**ing：模型「想一步、做一步、看结果、再想」。
@@ -170,12 +180,15 @@ uv run pytest code/
 uv run python code/demo_agent.py --real
 ```
 
+（首次配 `.env`：`cp .env.example .env`，Windows PowerShell：`copy .env.example .env`。）
+
 `HttpModelClient` 上场，循环一行不改——这就是协议抽象的回报。模型自己决定
 调几张单、按什么顺序；预算 6 轮兜底。
 
 ## 4. 练习（本课过关点）
 
-规则：**单变量编辑约束**——只改标注的 TODO 区。卡住先想 5 分钟，再看渐进提示：
+规则：**单变量编辑约束**——只改标注的 TODO 区；实现需要的顶部 import 可以补（骨架只预置了
+given 部分用到的）。卡住先想 5 分钟，再看渐进提示：
 
 ```bash
 cd exercises
@@ -238,8 +251,8 @@ uv run pyright
   今晚必读「Executing Routines」一节：官方 `run_full_turn` 与我们的 `run` 并排读，
   逐行找对应（它用 `tools_map` 分发、我们用注册表；它没有预算——你会带着 §5 的
   眼光发现原典也留着这个坑）。Unit 3 的对照问题从今晚开始积累。
-- langgraph@24c13c211#libs/langgraph/langgraph/prebuilt/chat_agent_executor.py ——
-  `create_react_agent` 的本体：搜 `_get_model_input_state` 与工具节点装配——
+- langchain-ai/langgraph@f6d95abbe#libs/prebuilt/langgraph/prebuilt/chat_agent_executor.py ——
+  `create_react_agent` 的本体（已搬进独立的 prebuilt 包）：搜工具节点装配——
   它是把今晚 81 行的循环包进 StateGraph 的产物（L3.4 会精读，先混个眼熟）。
 - typing.Protocol 官方文档（结构化类型的权威定义）：
   https://docs.python.org/3/library/typing.html#typing.Protocol

@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
 from pathlib import Path
 
@@ -42,9 +43,15 @@ def test_preapprove_states_through_protocol() -> None:
             ("preapprove", '{"items_cents": [1200, 3500, 2400]}'),
             ("preapprove", '{"items_cents": [8800]}'),
             ("preapprove", '{"items_cents": [-500]}'),
+            ("preapprove", json.dumps({"items_cents": [4000] * 126})),  # 每笔合法，合计 504000 分超总额
         ]
     )
-    assert outcomes == ["PASS", "REJECT:ITEM_OVER_LIMIT", "REJECT:INVALID_AMOUNT"]
+    assert outcomes == [
+        "PASS",
+        "REJECT:ITEM_OVER_LIMIT",
+        "REJECT:INVALID_AMOUNT",
+        "REJECT:TOTAL_OVER_LIMIT",
+    ]
 
 
 def test_unknown_tool_becomes_mcp_tool_error() -> None:

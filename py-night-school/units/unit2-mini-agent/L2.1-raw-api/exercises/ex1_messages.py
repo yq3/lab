@@ -1,4 +1,4 @@
-# 练习 1（单变量编辑约束：只改本文件 TODO 标注的函数体，其余不要动）
+# 练习 1（单变量编辑约束：只改本文件 TODO 标注的函数体与所需的顶部 import，其余不要动）
 """messages 协议：组装请求与解剖响应。
 
 考察点：messages 列表的角色结构；响应 JSON 的 dict 导航（choices[0].message / finish_reason）；

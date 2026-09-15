@@ -1,4 +1,4 @@
-# 练习 2（单变量编辑约束：只改本文件 TODO 标注的函数体，其余不要动）
+# 练习 2（单变量编辑约束：只改本文件 TODO 标注的函数体与所需的顶部 import，其余不要动）
 """桥接：MCP 工具描述 → OpenAI tools 载荷。
 
 考察点：两套协议在「JSON Schema」上的接轨点——MCP 的 input_schema 原样放进

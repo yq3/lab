@@ -91,7 +91,8 @@ class ChatConfig:
         missing = [key for key in ("OPENAI_BASE_URL", "OPENAI_API_KEY", "MODEL_NAME") if not os.environ.get(key)]
         if missing:
             raise RuntimeError(
-                f"缺少环境变量 {missing}：先 cp .env.example .env 并填写（本课演示可用 mock 端点离线跑）"
+                f"缺少环境变量 {missing}：先 cp .env.example .env 并填写"
+                "（Windows: copy .env.example .env；本课演示可用 mock 端点离线跑）"
             )
         return cls(
             base_url=os.environ["OPENAI_BASE_URL"], api_key=os.environ["OPENAI_API_KEY"], model=os.environ["MODEL_NAME"]

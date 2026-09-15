@@ -14,8 +14,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-# 本课 .env 的默认位置：课时目录根（code/ 的上一级）
-ENV_PATH = Path(__file__).resolve().parents[1] / ".env"
+# 本目录 .env 的默认位置：里程碑根（与课时的 code/env_loader.py 相比少一层目录）
+ENV_PATH = Path(__file__).resolve().parent / ".env"
 
 REQUIRED_KEYS = ("OPENAI_BASE_URL", "OPENAI_API_KEY", "MODEL_NAME")
 

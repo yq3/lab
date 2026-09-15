@@ -3,7 +3,7 @@
 > 夜校的对照组学段：五个晚课手写一个 ~300 行的 mini-agent，把 agent 框架替你藏掉的
 > 每一层协议亲手摸一遍。Unit 3 每个框架课都会回来对照：「这层抽象替我付掉的代码，
 > 在 mini-agent 里是哪几行」——对照原件是 OpenAI cookbook 的
-> [Orchestrating_agents.ipynb](https://github.com/openai/openai-cookbook/blob/main/examples/Orchestrating_agents.ipynb)。
+> [Orchestrating_agents.ipynb](https://github.com/openai/openai-cookbook/blob/0aaed0f1d/examples/Orchestrating_agents.ipynb)（锚定 0aaed0f1d，与各课路标一致）。
 
 ## 学法说明（先读这段）
 
@@ -30,7 +30,7 @@
 
 ## 里程碑（本学段结业判据）
 
-独立完成 [milestone/](./milestone/README.md)：**mini-agent**（裸逻辑 292 行）——
+独立完成 [milestone/](./milestone/README.md)：**mini-agent**（裸逻辑 249 行，ast 口径）——
 多工具 + 流式 + 结构化输出 + MCP server，离线验收十一路全绿。它就是 Unit 3 的
 全程对照组：决策表的左边一列，从今晚起有了实体。
 

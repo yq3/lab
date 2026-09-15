@@ -29,7 +29,8 @@ class HttpModelClient:
         self.model = config.model
 
     async def complete(self, messages: Sequence[dict], tools: Sequence[dict]) -> dict:
-        return await self._chat.complete(messages, tools=tools)
+        # 空工具列表按「不带 tools 字段」发送（部分端点拒绝 "tools": []）
+        return await self._chat.complete(messages, tools=list(tools) or None)
 
     async def __aenter__(self) -> HttpModelClient:
         return self

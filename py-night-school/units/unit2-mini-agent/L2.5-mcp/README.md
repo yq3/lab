@@ -210,7 +210,8 @@ uv run python code/demo_stdio_pollution.py
 
 ## 4. 练习（本课过关点）
 
-规则：**单变量编辑约束**——只改标注的 TODO 区。卡住先想 5 分钟，再看渐进提示：
+规则：**单变量编辑约束**——只改标注的 TODO 区；实现需要的顶部 import 可以补（骨架只预置了
+given 部分用到的）。卡住先想 5 分钟，再看渐进提示：
 
 ```bash
 cd exercises
@@ -277,7 +278,8 @@ uv run pyright
   Tool 对象与 `input_schema` 的生成逻辑：L2.2「Pydantic → JSON Schema」的同族实现。
 - modelcontextprotocol/python-sdk@9972c21aa#src/mcp/client/session.py —— client 会话
   本体：initialize 握手、list_tools、call_tool 的请求/响应序列化全在这里。
-- microsoft/mcp-for-beginners —— MCP 协议深入课（六语言实现）：夜校只讲 agent 视角
+- microsoft/mcp-for-beginners@2f43408b7 —— MCP 协议深入课（六语言实现，
+  https://github.com/microsoft/mcp-for-beginners/tree/2f43408b7 ）：夜校只讲 agent 视角
   必需的一层，传输变体（SSE/streamable HTTP）、资源与提示词原语、部署形态去这里续。
 - 《Fluent Python》第 2 版第 13 章（Protocol）+ 本课的联合类型收窄实践：
   `isinstance` 收窄在协议多态结果上的应用。

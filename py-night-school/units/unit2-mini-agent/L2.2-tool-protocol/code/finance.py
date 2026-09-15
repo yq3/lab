@@ -1,7 +1,7 @@
 """报销域的两个工具：@tool 装饰器的第一批客户。
 
 明线素材唯一来源：data/expense/budget_mock.json（夜校工程纪律）。
-注意校验分层（§2.5）：schema 只管「形状」（是 list[int]、单号格式对），
+注意校验分层（讲义 L2.2 §2.5）：schema 只管「形状」（是 list[int]、单号格式对），
 业务值（负数、超限）留给规则函数判断——负数金额必须能进 preapprove，
 才有 "REJECT:INVALID_AMOUNT" 这个合法输出。
 """

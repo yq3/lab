@@ -281,7 +281,9 @@ uv run python code/demo_tool_call.py
   assistant: 报销单 CLM-2026-0002 预审拒绝：REJECT:…
 ```
 
-五条消息的轨迹就是 §2.5 时序图的实体。把「user → assistant(tool_calls) → tool →
+五条消息的轨迹就是 §2.5 时序图的实体。明细金额与仓库共享素材 `data/expense/budget_mock.json`
+对应（CLM-2026-0002 的 items 就是 [8800]）；本课为聚焦协议将规则内联复刻，规则的事实源仍是
+L0.1 的 `budget.py`——L2.2 起工具改从 data/ 实时读取。把「user → assistant(tool_calls) → tool →
 assistant(stop)」这个形状记住——L2.3 的循环就是把这两回合跑成 `while`。
 
 ### Step 4：（可选）真实端点一次
@@ -296,7 +298,8 @@ assistant(stop)」这个形状记住——L2.3 的循环就是把这两回合跑
 
 ## 4. 练习（本课过关点）
 
-规则：**单变量编辑约束**——只改标注的 TODO 区。卡住先想 5 分钟，再看渐进提示：
+规则：**单变量编辑约束**——只改标注的 TODO 区；实现需要的顶部 import 可以补（骨架只预置了
+given 部分用到的）。卡住先想 5 分钟，再看渐进提示：
 
 ```bash
 cd exercises
@@ -349,18 +352,18 @@ uv run pyright
   https://platform.openai.com/docs/api-reference/chat
 - MDN：Using server-sent events（SSE 协议完整规则：`data:`/`event:`/`id:` 行、重连）：
   https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events
-- openai-python@d7c41efee#src/openai/_streaming.py —— 官方 SDK 的流式解码器（`SSEDecoder`
+- openai/openai-python@d7c41efee#src/openai/_streaming.py —— 官方 SDK 的流式解码器（`SSEDecoder`
   类）：与你今晚手写的实现并排读，「find 分隔符 + 缓冲 + 解码」的形状一模一样——
   读完你就确信框架没有魔法。
-- openai-python@f348ec87b#src/openai/types/shared/function_definition.py —— SDK 里工具
+- openai/openai-python@f348ec87b#src/openai/types/shared/function_definition.py —— SDK 里工具
   契约的类型定义：`name` / `description` / `parameters`（JSON Schema）三件套的静态化。
 - openai/openai-cookbook@0aaed0f1d#examples/Orchestrating_agents.ipynb —— 本学段的
   **对照原件**：官方的「无框架手写 agent」名篇（`run_full_turn` 循环 + `tools_map` 分发）。
   L2.3 写循环时直接对照它，Unit 3 每个框架课也会回来问：这层抽象替我付掉的代码在原典里是哪几行。
 - httpx 官方文档（Async API / 流式响应）：
   https://www.python-httpx.org/async/ 
-- `python-dotenv`：生产里 `.env` 加载的事实标准库（本课手写了它的十行子集）：
-  https://github.com/theskumar/python-dotenv
+- theskumar/python-dotenv@a00cb2eed —— 生产里 `.env` 加载的事实标准库（本课手写了它的十行子集）：
+  https://github.com/theskumar/python-dotenv/tree/a00cb2eed
 
 ## 离毕业又近的一块
 

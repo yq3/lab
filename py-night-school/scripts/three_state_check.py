@@ -33,7 +33,7 @@ def run(cmd: str, cwd: Path) -> tuple[int, str]:
 
 
 def is_designed_failure(output: str, lesson: Path) -> bool:
-    """发货态的「精确红」：所有 FAILED/ERROR 行都落在 exercises/ 里。"""
+    """发货态的「精确红」：FAILED/ERROR 全部落在学员作答区——课时是 exercises/，里程碑是 tests/。"""
     bad_lines = [
         line
         for line in output.splitlines()
@@ -41,8 +41,13 @@ def is_designed_failure(output: str, lesson: Path) -> bool:
     ]
     if not bad_lines:
         return False
-    exercises_rel = (lesson / "exercises").relative_to(lesson)
-    return all(str(exercises_rel) in line for line in bad_lines)
+    if (lesson / "exercises").is_dir():
+        allowed = "exercises"
+    elif (lesson / "tests").is_dir():
+        allowed = "tests"
+    else:
+        return False
+    return all(allowed in line for line in bad_lines)
 
 
 def main() -> int:
@@ -87,11 +92,12 @@ def main() -> int:
         )
         # 共享素材：data/ 与课时目录同层数（parents[4] 的解析目标）
         shutil.copytree(ROOT / "data", mirror_root / "py-night-school" / "data")
-        # solution 覆盖练习
+        # solution 覆盖学员作答区：课时 -> exercises/，里程碑（无 exercises/）-> 目录根
         overlay = dest / "solution"
         if overlay.is_dir():
+            target_dir = dest / "exercises" if (dest / "exercises").is_dir() else dest
             for solution_file in overlay.glob("*.py"):
-                target = dest / "exercises" / solution_file.name
+                target = target_dir / solution_file.name
                 if target.is_file():
                     shutil.copy2(solution_file, target)
         for cmd in (*THREE_COMMANDS, "ruff format --check ."):
@@ -101,16 +107,20 @@ def main() -> int:
                 tail = "\n".join(output.splitlines()[-12:])
                 failures.append(f"毕业态 {cmd} 非绿：\n{tail}")
 
-    # ---- 3. 结构校验 ----
-    print("== 结构校验 check_lesson ==")
-    result = subprocess.run(
-        [sys.executable, str(ROOT / "scripts" / "check_lesson.py"), str(lesson)],
-        capture_output=True,
-        text=True,
-    )
-    print(result.stdout.strip())
-    if result.returncode != 0:
-        failures.append("check_lesson 未通过")
+    # ---- 3. 结构校验（仅课时布局；里程碑无六段式讲义，不走 check_lesson） ----
+    if (lesson / "exercises").is_dir():
+        print("== 结构校验 check_lesson ==")
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / "check_lesson.py"), str(lesson)],
+            capture_output=True,
+            text=True,
+        )
+        print(result.stdout.strip())
+        if result.returncode != 0:
+            failures.append("check_lesson 未通过")
+    else:
+        print("== 结构校验 check_lesson ==")
+        print("SKIP（里程碑布局，六段式结构校验不适用）")
 
     if failures:
         print("\n三态验证 FAIL：")

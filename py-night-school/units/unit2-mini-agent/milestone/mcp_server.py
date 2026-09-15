@@ -5,7 +5,7 @@ agent 进程里，而是由独立进程（server）提供，任何 MCP client（
 别人写的 agent）都能消费同一份工具——「一次编写，处处挂载」。
 
 形态：本文件是一个独立进程，用 stdio 传输运行（stdin/stdout 上跑 JSON-RPC）：
-    uv run python code/finance_server.py     # 它会「挂起」等你输入——这就是 server 在等 client
+    uv run python mcp_server.py             # 它会「挂起」等你输入——这就是 server 在等 client
 对照 Java：一个暴露 RPC 端点的小服务（像 JDK 内置 HttpServer 起的最小 API），
 只是传输从 HTTP 换成了进程间管道、协议从 REST 换成 JSON-RPC。
 
