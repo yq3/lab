@@ -165,7 +165,8 @@ py-night-school/
 ├── CURRICULUM.md        # 本文件（调研依据见 ../research/agent-tutorials/）
 ├── data/                # 共享 mock 素材（报销/预算/发票），金融素材复用 openai-cookbook examples/data/（NotRealCorp 虚构财报等）
 ├── scripts/
-│   └── check_lesson.py  # 课时模板机器校验（章节齐全/练习有 TODO/pytest 存在/源码路标带 commit）
+│   ├── check_lesson.py  # 课时模板机器校验（章节齐全/练习有 TODO/pytest 存在/源码路标带 commit）
+│   └── three_state_check.py  # 三态验证自动化（发货态精确红/毕业态全绿/结构校验，一条命令）
 └── units/
     └── unit<N>-<slug>/
         ├── README.md            # 单元导学

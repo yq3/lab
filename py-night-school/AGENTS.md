@@ -60,6 +60,9 @@
 2. **毕业态**全绿：solution 覆盖进 /tmp 副本后，三命令 + `ruff format --check` 全部通过；
 3. `scripts/check_lesson.py` PASS。
 
+三态可用一条命令跑：`python3 scripts/three_state_check.py units/<unit>/<lesson>`（自动镜像
+data/ 共享素材、覆盖 solution、跑全部命令；先例：L2.x 全课用它验收）。
+
 ## 6. 写一课的标准流程
 
 1. 在 CURRICULUM 找课时定位（不做大纲外加课）；

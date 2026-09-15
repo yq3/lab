@@ -1,0 +1,49 @@
+[project]
+name = "l23-react-loop"
+version = "0.1.0"
+description = "L2.3 ReAct 循环：模型选工具、执行、回喂、终止条件与轮数预算（+朴素上下文管理加餐）"
+requires-python = ">=3.12"
+dependencies = [
+    "httpx>=0.27",
+    "pydantic>=2",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "ruff>=0.12",
+    "pyright>=1.1",
+    "nodejs-wheel-binaries>=1.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["code", "exercises"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+extend-exclude = ["*.md"]  # 讲义代码块是手工对齐的教学代码，不参与 format
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+
+[tool.ruff.lint.isort]
+known-first-party = [
+    "agent",
+    "client",
+    "context_budget",
+    "env_loader",
+    "finance",
+    "mock_endpoint",
+    "model",
+    "tools",
+    "ex1_agent_loop",
+    "ex2_budget",
+    "ex3_trim",
+]
+
+[tool.pyright]
+include = ["code", "exercises"]
+extraPaths = ["code", "exercises"]
+typeCheckingMode = "basic"

@@ -1,0 +1,46 @@
+[project]
+name = "l24-structured-output"
+version = "0.1.0"
+description = "L2.4 结构化输出：schema 约束、解析失败、校验错误回喂重试"
+requires-python = ">=3.12"
+dependencies = [
+    "httpx>=0.27",
+    "pydantic>=2",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "ruff>=0.12",
+    "pyright>=1.1",
+    "nodejs-wheel-binaries>=1.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["code", "exercises"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+extend-exclude = ["*.md"]  # 讲义代码块是手工对齐的教学代码，不参与 format
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+
+[tool.ruff.lint.isort]
+known-first-party = [
+    "client",
+    "env_loader",
+    "mock_endpoint",
+    "model",
+    "structured",
+    "ex1_extract",
+    "ex2_repair",
+    "ex3_verdict_model",
+]
+
+[tool.pyright]
+include = ["code", "exercises"]
+extraPaths = ["code", "exercises"]
+typeCheckingMode = "basic"
