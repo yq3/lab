@@ -1,0 +1,45 @@
+[project]
+name = "l15-decorators"
+version = "0.1.0"
+description = "L1.5 装饰器 vs 注解：@ 的两副面孔（函数变换 / 注册表 / 带参装饰器）"
+requires-python = ">=3.12"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "ruff>=0.12",
+    "pyright>=1.1",
+    "nodejs-wheel-binaries>=1.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["code", "exercises"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+# UP047：老式模块级 ParamSpec/TypeVar 写法本课有意保留——框架源码主流就是它
+# （crewAI@894898f84 的 @tool 即用 P2 = ParamSpec("P2")），且 3.12 的
+# collections.abc.Callable 尚不接受 PEP 695 的 ParamSpec（3.13 才修）。
+ignore = ["UP047"]
+
+[tool.ruff.lint.isort]
+known-first-party = [
+    "timing",
+    "registry",
+    "retry",
+    "stacking",
+    "ex1_timing",
+    "ex2_retry",
+    "ex3_registry",
+]
+
+[tool.pyright]
+include = ["code", "exercises"]
+extraPaths = ["code", "exercises"]
+typeCheckingMode = "basic"

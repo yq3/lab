@@ -1,0 +1,34 @@
+[project]
+name = "u1-milestone-fetcher"
+version = "0.1.0"
+description = "Unit 1 里程碑：async 并发 fetcher（带参 retry 装饰器 + 超时降级 + 限流 + 汇总报告）"
+requires-python = ">=3.12"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "ruff>=0.12",
+    "pyright>=1.1",
+    "nodejs-wheel-binaries>=1.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["fetcher"]
+
+[tool.pyright]
+include = ["fetcher.py", "hints.py", "tests"]
+extraPaths = ["."]
+typeCheckingMode = "basic"

@@ -1,0 +1,42 @@
+[project]
+name = "l17-context-exceptions"
+version = "0.1.0"
+description = "L1.7 上下文管理器与异常处理：EAFP、异常链、with 与 @contextmanager"
+requires-python = ">=3.12"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "ruff>=0.12",
+    "pyright>=1.1",
+    "nodejs-wheel-binaries>=1.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["code", "exercises"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+
+[tool.ruff.lint.isort]
+known-first-party = [
+    "eafp_demo",
+    "chains",
+    "expense_errors",
+    "approval_session",
+    "ctx_tools",
+    "ex1_flow",
+    "ex2_custom_error",
+    "ex3_context",
+]
+
+[tool.pyright]
+include = ["code", "exercises"]
+extraPaths = ["code", "exercises"]
+typeCheckingMode = "basic"
