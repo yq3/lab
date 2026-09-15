@@ -168,10 +168,12 @@ py-night-school/
 └── units/
     └── unit<N>-<slug>/
         ├── README.md            # 单元导学
-        ├── L<N>.<m>-<slug>/     # 每课时一目录
+        ├── L<N>.<m>-<slug>/     # 每课时一目录（本身即独立 uv 项目）
         │   ├── README.md        # 六段式讲义
-        │   ├── code/            # 动手代码（uv 项目，独立 uv.lock）
-        │   ├── exercises/       # TODO + pytest + hints.py
+        │   ├── pyproject.toml   # 依赖与工具配置（uv.lock 同目录提交）
+        │   ├── .env.example     # 模型端点三变量约定
+        │   ├── code/            # 讲义动手模块 + 示例测试
+        │   ├── exercises/       # TODO 挖空 + test_*.py 验收 + hints.py
         │   └── solution/        # 参考答案（不在学员主线视野）
         └── milestone/           # 单元里程碑项目
 ```

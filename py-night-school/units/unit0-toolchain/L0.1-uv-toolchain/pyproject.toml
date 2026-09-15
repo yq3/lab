@@ -1,0 +1,32 @@
+[project]
+name = "l01-uv-toolchain"
+version = "0.1.0"
+description = "L0.1 环境与工具链：夜校第一个 uv 项目（工具链模板 + 报销明线种子）"
+requires-python = ">=3.12"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "ruff>=0.12",
+    "pyright>=1.1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["code", "exercises"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["budget", "ex1_preapprove"]
+
+[tool.pyright]
+include = ["code", "exercises"]
+extraPaths = ["code", "exercises"]
+typeCheckingMode = "basic"
