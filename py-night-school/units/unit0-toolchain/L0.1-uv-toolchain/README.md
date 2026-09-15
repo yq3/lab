@@ -47,21 +47,35 @@ uv run pyright         # 无类型错误
 ### Step 1 安装 uv（10 分钟）
 
 ```bash
-# 官方独立安装器（装到 ~/.local/bin，不碰系统目录）
+# macOS / Linux（官方独立安装器，装到 ~/.local/bin，不碰系统目录）
 curl -LsSf https://astral.sh/uv/install.sh | sh
 # 按提示把 ~/.local/bin 加进 PATH，或：
 source $HOME/.local/bin/env
 uv --version
 ```
 
+```powershell
+# Windows（PowerShell）
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+uv --version   # 新开一个终端后生效
+```
+
 ### Step 2 网络受限配置（国内环境建议，5 分钟）
 
 ```bash
-# PyPI 镜像（写入 ~/.zshrc 持久化）：
+# macOS / Linux（PyPI 镜像，写入 ~/.zshrc 持久化）：
 export UV_DEFAULT_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple
 # （可选）uv 下载 Python 解释器走镜像：
 export UV_PYTHON_INSTALL_MIRROR=https://gh-proxy.com/https://github.com/astral-sh/python-build-standalone/releases/download
 ```
+
+```powershell
+# Windows（PowerShell）
+$env:UV_DEFAULT_INDEX = "https://pypi.tuna.tsinghua.edu.cn/simple"      # 当前会话
+setx UV_DEFAULT_INDEX "https://pypi.tuna.tsinghua.edu.cn/simple"        # 持久化（新终端生效）
+```
+
+Node 也提前说清：pyright 需要 Node 运行时，本项目已把 `nodejs-wheel-binaries` 钉进 dev 依赖——Node 随 PyPI 安装（走上面的镜像），不会去 nodejs.org 直连下载；你机器上若已有 Node，pyright 也会直接复用。
 
 ### Step 3 理解本课项目（5 分钟）
 
@@ -82,7 +96,7 @@ cd units/unit0-toolchain/L0.1-uv-toolchain
 uv sync               # 创建 .venv 并按 uv.lock 安装（≈ mvn dependency:resolve + test scope）
 ```
 
-想体验「从零建项目」的话，找个临时目录玩一遍 `uv init demo && cd demo && uv add --dev pytest` 即可——感受与 `mvn archetype:generate` 的对应关系。
+想体验「从零建项目」的话，找个临时目录依次跑 `uv init demo`、`cd demo`、`uv add --dev pytest`——感受与 `mvn archetype:generate` 的对应关系。
 
 ### Step 4 跑通讲义示例（15 分钟）
 
@@ -110,20 +124,51 @@ uv run ruff check .        # 全仓检查——现在 exercises/ 里有练习 3 
 ### Step 6 pyright 类型检查（5 分钟）
 
 ```bash
-uv run pyright             # 首次运行会自动下载 Node 运行时（一次性）
+uv run pyright
 ```
 
-`code/budget.py` 的每个函数都有完整的类型标注（`list[int] -> str`）。Python 的类型是「可选的」——但夜校全程要求标注，理由和你在 Java 里的体感一致：**类型是给读代码的人 and IDE 看的，不是给解释器看的**。
+`code/budget.py` 的每个函数都有完整的类型标注（`list[int] -> str`）。Python 的类型是「可选的」——但夜校全程要求标注，理由和你在 Java 里的体感一致：**类型是给读代码的人和 IDE 看的，不是给解释器看的**。
 
-### Step 7 模型端点约定（5 分钟）
+（Node 从哪来：pyright 的解析顺序是 ① 依赖里的 `nodejs-wheel-binaries`——随 PyPI 走镜像；② 系统 Node——装过就直接复用；③ 在线下载——我们从不依赖这条慢路。）
+
+### Step 7 断点调试与 IDE 接入（15 分钟，对照 IDEA）
+
+先体验最原始的方式——命令行：
 
 ```bash
-cp .env.example .env   # 然后填入你的端点；L2 之前不用真的填
+uv run python code/debug_demo.py
+```
+
+程序在 `breakpoint()` 处暂停，进入 pdb（Python 内置调试器，零安装；`breakpoint()` 等价于 IDEA 里的红点）。常用命令对照：
+
+| pdb | IDEA / VS Code 对应 |
+|---|---|
+| `n`（next） | Step Over |
+| `s`（step） | Step Into |
+| `c`（continue） | Resume |
+| `p 变量名` | Evaluate Expression |
+| `q` | Stop |
+
+试试在暂停时输入 `p items_cents`（不行的话就 `p [1200, 8800]`）、`n`、`c`。
+
+然后选一把称手的 IDE（**二选一，今晚定下来，后面 29 课都靠它**）：
+
+| 选择 | 适合谁 | 备注 |
+|---|---|---|
+| VS Code + Python 扩展（Pylance） | 想轻快、贴近 Python 社区主流 | **Pylance 就是 pyright 的微软发行版**——终端里跑的 pyright 检查和 IDE 里是同一套引擎，工具链故事闭环；再装 ruff 官方扩展，format/lint 直接进 IDE |
+| PyCharm（Community 版够用） | 重度 IDEA 用户 | 键位与操作习惯零迁移，JetBrains 全家桶体验；装 ruff 插件补齐 lint/format |
+
+共同动作：用 IDE 打开本课目录（`L0.1-uv-toolchain/`），`.venv` 解释器会被自动识别；右键 `code/test_budget.py` → Run / Debug（图形化跑 pytest）；给 `code/debug_demo.py` 打一个图形化断点跑一遍——刚才 pdb 的 `n`/`s`/`c`/`p` 在这里全是按钮。
+
+### Step 8 模型端点约定（5 分钟）
+
+```bash
+cp .env.example .env   # Windows: copy .env.example .env；然后填入你的端点，L2 之前不用真的填
 ```
 
 三变量的含义：`OPENAI_BASE_URL`（任一 OpenAI 兼容端点：GLM / DeepSeek / Qwen / vLLM 本地……）、`OPENAI_API_KEY`、`MODEL_NAME`。这是夜校「端点中立」的落地——微软课程绑 Azure Foundry，我们只绑「OpenAI 兼容协议」这一个约定。
 
-### Step 8（可选）Jupyter 草稿纸（10 分钟）
+### Step 9（可选）Jupyter 草稿纸（10 分钟）
 
 ```bash
 uv run --with jupyter jupyter lab
@@ -131,22 +176,23 @@ uv run --with jupyter jupyter lab
 
 以后调 prompt、试 API 返回结构，都在这里草稿——不用装进任何项目。
 
-### Step 9 看一眼你的未来客户（3 分钟）
+### Step 10 看一眼你的未来客户（3 分钟）
 
 打开 `data/expense/budget_mock.json`：三张报销单（一张合法、一张单餐超标、一张录了负数）。**Unit 2 的 mini-agent 将对它们调用你今晚写的 `preapprove()`；Unit 5 的毕业设计会给它加上审批流**。今晚你手写了规则本体。
 
 ## 4. 练习（本课过关点）
 
-规则：**单变量编辑约束**——每题只改标注的 TODO 区，其余文件与代码区不要动。卡住先想 5 分钟，再看渐进提示：
+规则：**单变量编辑约束**——每题只改标注的 TODO 区，其余文件与代码区不要动。卡住先想 5 分钟，再看渐进提示（`uv run` 命令跨平台，Windows 学员不用纠结 python3/py）：
 
 ```bash
-python3 -c "from hints import hint; print(hint('ex1', 1))"   # 在 exercises/ 目录下
+cd exercises
+uv run python -c "from hints import hint; print(hint('ex1', 1))"
 ```
 
 | 题 | 文件 | 考察 |
 |---|---|---|
 | ex1 | `exercises/ex1_preapprove.py` | 补全 `preapprove()` 三条规则（基础语法：循环 / any / sum） |
-| ex2 | `exercises/test_ex2_cases.py` | 为参数化测试补全用例表（含边界：恰好等于上限应 PASS） |
+| ex2 | `exercises/test_ex2_cases.py` | 补全参数化用例表：四种结果各≥1 组、含边界（恰好等于上限应 PASS）、共≥5 组——覆盖是否达标由文件内的 meta-test 机器验收，全 PASS 用例混不过去 |
 | ex3 | `exercises/ex3_ruff_fix.py` | 修复 3 处 ruff 违规（F401 未用 import / F841 未用变量 / E501 超长行——单字符串字面量，`ruff format` 拆不了它） |
 
 验收（三条同时全绿 = 本课毕业）：
@@ -174,6 +220,8 @@ uv run pyright
           return "REJECT"
       return "REVIEW"        # 把这行改成与 return "REJECT" 同级缩进，语义就变了——但没有报错
   ```
+
+  **验证一个惊喜**：把 `check2` 的 `return "REVIEW"` 缩进进 `if` 块里（上面的静默变体），pyright 会立刻标红——声明的返回类型是 `str`，而函数出现了一条「什么都不返回就结束」的路径。缩进坑不是无解，工具链兜得住。
 
 - **Java 直觉为何失效**：Java 里花括号是语法、缩进只是风格；Python 里**缩进就是语法**（等价于每个块都有隐式 `{ }`），Tab 和空格混用甚至直接 `TabError`。
 - **修复与纪律**：统一 4 空格（别手输 Tab）；让编辑器把 Tab 转空格；提交前 `uv run ruff format .` 一键归一——格式问题尽量交给工具，但格式化器**永远不会改写字符串内容**（练习 3 的 E501 就是为这条能力边界设计的）。

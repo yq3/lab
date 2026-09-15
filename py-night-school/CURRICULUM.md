@@ -2,7 +2,7 @@
 
 > 本文是教程的骨架：设计原则 → 课时模板 → 练习机制 → 30 课时明细 → 节奏建议。
 > 设计前的竞品调研见 [research/agent-tutorials/](../research/agent-tutorials/)：市场扫描（landscape.md）+ 课时内容级解剖综合（report.md）+ 逐仓档案（profiles/ ×8）。
-> 夜校话术对照：单元 = 学期，课时 = 晚课讲次，Unit 5 = 结业考；结构性术语保持工程清晰，不硬套主题。
+> 夜校话术对照：单元 = 学段，课时 = 晚课讲次，Unit 5 = 结业考；结构性术语保持工程清晰，不硬套主题。
 
 ## 1. 设计原则（承袭个人学习计划，经用户确认）
 
@@ -37,9 +37,10 @@
 ## 3. 练习机制（rustlings 模式）
 
 - 每课 `exercises/` 下 2–5 个练习文件，关键实现留 `# TODO`，附测试；练习文件首行注释声明**单变量编辑约束**（只改这个文件/只改标注区）。
-- `uv run pytest exercises/` 全绿 = 本课通过；练习文件头部注释写明考察点。
+- `uv run pytest` 全绿 = 本课通过（`testpaths` 已限定收集 code/ 与 exercises/）；练习文件头部注释写明考察点。
 - **答案分离**：`solution/` 不进学员主线视野；每题配 `hints.py` 渐进披露（需显式 `from hints import ...` 才可见，借鉴 anthropics-courses 档案 §4.1）。
 - **三方对齐**：题目注释、hints、pytest 断言同一验收口径（借鉴其「判分标准在 hints 第一句复述」）。
+- **覆盖型练习配 meta-test**：当题目要求是对用例表的覆盖（先例：L0.1 ex2），验收测试直接检查用例表本身——结果种类、边界、数量，防止「全 PASS 用例」偷懒过关。
 - 开放设计题不硬造判分，给行尾 golden answer 诚实降级（借鉴 anthropics 对 6/20 道题的处理）。
 - 形态分工：讲义用 md、动手 code/（.py 为主）、**验收只测 .py**；Jupyter 仅语言实验课使用（依据调研报告 §3.6）。
 - 每单元结束有一个里程碑小项目（见各单元「里程碑」）。
@@ -62,15 +63,15 @@
 
 ## Unit 0 起步：工具链一次到位（1 课）
 
-**L0.1 环境与工具链（uv / pytest / ruff / pyright / Jupyter）**
+**L0.1 环境与工具链（uv / pytest / ruff / pyright / IDE / Jupyter）**
 - Maven→uv、JDK 管理→uv python、Checkstyle→ruff、javac→pyright、JUnit→pytest 全对照表；
-- 动手：`uv init` 项目、加依赖、配国内 PyPI 镜像、三件套全绿、断点调试一次、Jupyter 起一次；
+- 动手：`uv init` 项目、加依赖、配国内 PyPI 镜像（bash / PowerShell 双版本）、三件套全绿、断点调试与 IDE 接入（VS Code+Pylance 或 PyCharm，图形化跑 pytest 与断点）、Jupyter 起一次；
 - 产出：`units/unit0/` 项目模板，后续每课复制起步。
 - 里程碑：模板仓库三件套全绿。
 
 ## Unit 1 Python 语言核心·Java 对照（9 课）
 
-第一梯队「框架血管」（L1.1–L1.3）→ 第二梯队「行为魔法」（L1.4–L1.7）→ 第三梯队「重中之重」（L1.8–L1.9）。
+第一梯队「框架血管」（L1.1–L1.3）→ 第二梯队「行为与错误处理」（L1.4–L1.7）→ 第三梯队「重中之重」（L1.8–L1.9）。
 
 | 课 | 主题 | Java 对照要点 |
 |---|---|---|
@@ -80,7 +81,7 @@
 | L1.4 | 函数是一等公民 | 闭包/`*args/**kwargs`/lambda 差异/函数作参数 |
 | L1.5 | 装饰器 vs 注解 | 运行时高阶函数可直接替换行为；functools.wraps；框架里的 `@tool`/`@step`/`@mcp.tool()` |
 | L1.6 | 迭代器与生成器 | `yield` 惰性管线；异步生成器是流式输出底座 |
-| L1.7 | 上下文管理器 | `with` vs try-with-resources；`@contextmanager` 自定义 |
+| L1.7 | 上下文管理器与异常处理 | `with` vs try-with-resources、`@contextmanager`；异常体系（**无 checked exception**）、EAFP vs LBYL、`except Exception` 陷阱与清理顺序——L2.4「校验错误回喂重试」的直接前置 |
 | L1.8 | asyncio ① | 事件循环/协程/`await`；vs CompletableFuture/虚拟线程；「一个 await 不让出就阻塞全场」事故剖析 |
 | L1.9 | asyncio ② | task/gather/超时取消/异步生成器；综合练习 |
 
@@ -183,6 +184,7 @@ py-night-school/
 - 每课是独立 uv 项目并提交 `uv.lock`——竞品反例：MS 钉版与 `%pip install -U` 自相矛盾、GenAI_Agents 依赖 pin 分裂、Anthropic 同课三份手工拷贝漂移。
 - 讲义图片本地化存储，不外链 CDN（langchain-academy 反例）；仓库克隆即完整可学，教学主体不外置（HF 全外置 Colab 反例）。
 - 所有外链延伸材料锚定 commit；源码路标格式 `仓库@commit#路径`。
+- **平台中立**：学员命令一律 `uv run ...`（macOS / Windows / Linux 一致），多步命令分行走（**不用 `&&` 串联**——Windows PowerShell 5.1 默认不支持）；平台差异（安装脚本、环境变量语法、cp/copy）在课时内以对照块标注，不默认 macOS。约定：学员命令统一放 bash 代码块——`check_lesson.py` 只检查 bash 块内的 `&&`，Java 对照示例（`a && b`）不受影响。
 
 ## 7. 验收标准（结业自查）
 

@@ -29,6 +29,9 @@ def test_single_oversized_item_rejected() -> None:
         ([0], "REJECT:INVALID_AMOUNT"),
         ([-100, 200], "REJECT:INVALID_AMOUNT"),
         ([4000] * 126, "REJECT:TOTAL_OVER_LIMIT"),  # 合计 504000 分
+        # 冲突用例：三条规则的判定顺序就是返回优先级（脏数据 > 单笔 > 合计）
+        ([8800, -1], "REJECT:INVALID_AMOUNT"),
+        ([5001] + [4999] * 100, "REJECT:ITEM_OVER_LIMIT"),
     ],
 )
 def test_rules(items: list[int], expected: str) -> None:

@@ -50,7 +50,7 @@
 
 ## 入学指南
 
-- **环境**：只需安装 [uv](https://docs.astral.sh/uv/)（教程第一课带你配好），每课是独立可运行的 uv 项目。
+- **环境**：只需安装 [uv](https://docs.astral.sh/uv/)（教程第一课带你配好，macOS / Windows / Linux 均可，平台差异处会对照标注），每课是独立可运行的 uv 项目。
 - **模型端点中立**：任何 OpenAI 兼容端点均可（GLM / DeepSeek / Qwen / OpenAI / 本地 vLLM），不绑定任何云厂商——这是与微软课程（Azure/Foundry）的显著差异。
 - **练习即测试**：每课 `exercises/` 提供带 TODO 的练习文件，`uv run pytest` 全绿即完成本课（rustlings 式验收，Java 同学可以理解为 Exercism 模式）。
 - **节奏**：标准节奏每周 6–8 小时、约 16 周走完；紧凑节奏 8–10 周。也可以只走主干（见 CURRICULUM「调节旋钮」）。

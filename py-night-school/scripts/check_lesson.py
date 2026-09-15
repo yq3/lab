@@ -17,6 +17,27 @@ from pathlib import Path
 
 REQUIRED_SECTIONS = ["## 1.", "## 2.", "## 3.", "## 4.", "## 5.", "## 6."]
 COMMIT_ANCHOR = re.compile(r"@[0-9a-f]{7,40}#")
+BASH_FENCE = ("```bash", "```sh", "```shell")
+
+
+def bash_block_concat_lines(text: str) -> list[int]:
+    """返回 bash/sh/shell 围栏代码块内包含 && 的行号（学员命令块）。
+
+    只查 bash 块——Java 对照代码里的逻辑与 a && b 不受影响。
+    """
+    violations: list[int] = []
+    in_block = False
+    for lineno, line in enumerate(text.splitlines(), start=1):
+        stripped = line.strip()
+        if not in_block and stripped.startswith(BASH_FENCE):
+            in_block = True
+            continue
+        if in_block and stripped == "```":
+            in_block = False
+            continue
+        if in_block and "&&" in line:
+            violations.append(lineno)
+    return violations
 
 
 def check_lesson(lesson: Path) -> list[str]:
@@ -30,6 +51,11 @@ def check_lesson(lesson: Path) -> list[str]:
             problems.append(f"讲义缺少章节「{section}」")
     if not COMMIT_ANCHOR.search(text):
         problems.append("延伸段源码路标未锚定 commit（格式：仓库@commit#路径）")
+    concat_lines = bash_block_concat_lines(text)
+    if concat_lines:
+        problems.append(
+            f"bash 代码块内出现 && 串联命令（PowerShell 5.1 不支持，分行走）：第 {', '.join(map(str, concat_lines))} 行"
+        )
 
     if not (lesson / "code").is_dir():
         problems.append("缺少 code/（讲义动手代码）")

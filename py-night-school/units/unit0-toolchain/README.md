@@ -10,6 +10,7 @@
 | pytest | 练习即测试的「验收老师」 | JUnit 5 |
 | ruff | lint + format | Checkstyle + Spotless 二合一 |
 | pyright | 静态类型检查 | IDEA 内置编译检查 |
+| VS Code + Pylance 或 PyCharm（二选一） | 编辑 / 调试 / 测试的日常界面 | IDEA 的等价物 |
 | Jupyter（可选） | 实验草稿纸 | 超级版 jshell |
 
 ## 课时
