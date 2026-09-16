@@ -1,0 +1,49 @@
+[project]
+name = "l31-openai-agents"
+version = "0.1.0"
+description = "L3.1 openai-agents：极简原语 Agent/handoff-as-tool/guardrail/RunState HITL（先关 trace 外发），同题报销单审查 demo"
+requires-python = ">=3.12"
+dependencies = [
+    "openai-agents==0.22.2",
+    "pydantic>=2",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "ruff>=0.12",
+    "pyright>=1.1",
+    "nodejs-wheel-binaries>=1.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["code", "exercises"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+extend-exclude = ["*.md"]  # 讲义代码块是手工对齐的教学代码，不参与 format
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+
+[tool.ruff.lint.isort]
+known-first-party = [
+    "advice",
+    "demo",
+    "demo_handoff",
+    "demo_guardrail",
+    "demo_hitl",
+    "mock_endpoint",
+    "mock_tools",
+    "review_rules",
+    "ex1_handoff",
+    "ex2_guardrail",
+    "ex3_budget",
+]
+
+[tool.pyright]
+include = ["code", "exercises"]
+extraPaths = ["code", "exercises"]
+typeCheckingMode = "basic"

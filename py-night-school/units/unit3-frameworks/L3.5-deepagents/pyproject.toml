@@ -1,0 +1,47 @@
+[project]
+name = "l35-deepagents"
+version = "0.1.0"
+description = "L3.5 deepagents：harness 形态——虚拟文件系统 / 子代理 / MemoryMiddleware（固定收尾：与 mini-agent 对照）"
+requires-python = ">=3.12"
+dependencies = [
+    "deepagents==0.7.13",
+    "langchain-openai>=1.0",
+    "pydantic>=2",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "ruff>=0.12",
+    "pyright>=1.1",
+    "nodejs-wheel-binaries>=1.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["code", "exercises"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+extend-exclude = ["*.md"]  # 讲义代码块是手工对齐的教学代码，不参与 format
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+
+[tool.ruff.lint.isort]
+known-first-party = [
+    "advice",
+    "demo",
+    "mock_endpoint",
+    "mock_tools",
+    "review_rules",
+    "ex1_custom_tool",
+    "ex2_budget_subagent",
+    "ex3_write_dossier",
+]
+
+[tool.pyright]
+include = ["code", "exercises"]
+extraPaths = ["code", "exercises"]
+typeCheckingMode = "basic"

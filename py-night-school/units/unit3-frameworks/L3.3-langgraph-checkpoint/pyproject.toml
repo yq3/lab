@@ -1,0 +1,49 @@
+[project]
+name = "l33-langgraph-checkpoint"
+version = "0.1.0"
+description = "L3.3 langgraph ②：checkpointer / interrupt——暂停→杀进程→恢复（HITL 机制底层）"
+requires-python = ">=3.12"
+dependencies = [
+    "langgraph==1.2.11",
+    "langgraph-checkpoint-sqlite==3.1.1",
+    "langchain-openai>=0.3",
+    "pydantic>=2",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "ruff>=0.12",
+    "pyright>=1.1",
+    "nodejs-wheel-binaries>=1.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["code", "exercises"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+extend-exclude = ["*.md"]  # 讲义代码块是手工对齐的教学代码，不参与 format
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+
+[tool.ruff.lint.isort]
+known-first-party = [
+    "advice",
+    "demo",
+    "demo_resume",
+    "mock_endpoint",
+    "mock_tools",
+    "review_rules",
+    "ex1_memory",
+    "ex2_gate",
+    "ex3_audit",
+]
+
+[tool.pyright]
+include = ["code", "exercises"]
+extraPaths = ["code", "exercises"]
+typeCheckingMode = "basic"

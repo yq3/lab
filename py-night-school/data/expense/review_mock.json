@@ -1,0 +1,91 @@
+{
+ "note": "夜校 Unit 3「框架四重奏」的同题审查素材：部门预算余额 mock + 发票校验 mock + 报销单→部门/发票映射。金额单位一律整数分（宪法业务约定）。CLM-2026-0001~0003 的明细与 budget_mock.json 同源（Unit 2 明线，原文件不动，本表为其补部门与发票映射）；CLM-2026-0004 是本单元新增的发票无效场景单。expect_* 字段是共用验收脚本（四课对版 test_contract.py）的判分依据——覆盖型检查要求四种结论场景齐、三种 decision 齐、两个部门齐。",
+ "limits": {
+  "item_over_cents": 5000
+ },
+ "budgets": [
+  {
+   "dept": "SALES",
+   "budget_cents": 200000,
+   "spent_cents": 190000
+  },
+  {
+   "dept": "DEV",
+   "budget_cents": 100000,
+   "spent_cents": 60000
+  }
+ ],
+ "invoices": [
+  {
+   "id": "INV-2026-0001",
+   "valid": true,
+   "reason": "抬头、税号与报销人一致"
+  },
+  {
+   "id": "INV-2026-0002",
+   "valid": true,
+   "reason": "抬头、税号与报销人一致"
+  },
+  {
+   "id": "INV-2026-0003",
+   "valid": true,
+   "reason": "抬头、税号与报销人一致"
+  },
+  {
+   "id": "INV-2026-0004",
+   "valid": true,
+   "reason": "抬头、税号与报销人一致"
+  },
+  {
+   "id": "INV-2026-0005",
+   "valid": false,
+   "reason": "发票已作废（连号重开）"
+  }
+ ],
+ "claims": [
+  {
+   "id": "CLM-2026-0001",
+   "submitter": "王工",
+   "purpose": "客户拜访：交通 + 工作餐",
+   "items_cents": [1200, 3500, 2400],
+   "dept": "SALES",
+   "invoice_ids": ["INV-2026-0001"],
+   "expect_decision": "APPROVE",
+   "expect_reason": "PASS",
+   "expect_remaining_cents": 10000
+  },
+  {
+   "id": "CLM-2026-0002",
+   "submitter": "李工",
+   "purpose": "项目验收宴请（单餐超标）",
+   "items_cents": [8800],
+   "dept": "SALES",
+   "invoice_ids": ["INV-2026-0002"],
+   "expect_decision": "REJECT",
+   "expect_reason": "REJECT:ITEM_OVER_LIMIT",
+   "expect_remaining_cents": 10000
+  },
+  {
+   "id": "CLM-2026-0003",
+   "submitter": "赵工",
+   "purpose": "打车费冲账（录入了负数）",
+   "items_cents": [-500],
+   "dept": "DEV",
+   "invoice_ids": ["INV-2026-0003"],
+   "expect_decision": "ESCALATE",
+   "expect_reason": "REJECT:INVALID_AMOUNT",
+   "expect_remaining_cents": 40000
+  },
+  {
+   "id": "CLM-2026-0004",
+   "submitter": "钱工",
+   "purpose": "展会物料采购（发票校验未过）",
+   "items_cents": [4200, 800],
+   "dept": "DEV",
+   "invoice_ids": ["INV-2026-0005"],
+   "expect_decision": "REJECT",
+   "expect_reason": "REJECT:INVOICE_INVALID",
+   "expect_remaining_cents": 40000
+  }
+ ]
+}
