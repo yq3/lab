@@ -1,0 +1,59 @@
+[project]
+name = "l53-event-sourcing"
+version = "0.1.0"
+description = "L5.3 毕业设计③：事件溯源与审计——append-only 事件表（SQLite）、缓存即审计（决策缓存表）、图版本绑定（拓扑签名进审计键）"
+requires-python = ">=3.12"
+dependencies = [
+    "langgraph==1.2.11",
+    "langchain-openai>=0.3",
+    "pydantic>=2",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "ruff>=0.12",
+    "pyright>=1.1",
+    "nodejs-wheel-binaries>=1.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["code", "exercises"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+extend-exclude = ["*.md"]  # 讲义代码块是手工对齐的教学代码，不参与 format
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+
+[tool.ruff.lint.isort]
+known-first-party = [
+    "advice",
+    "audit_cache",
+    "demo",
+    "demo_flow",
+    "demo_trace",
+    "eventstore",
+    "executor",
+    "graph",
+    "mock_endpoint",
+    "mock_tools",
+    "plan",
+    "prompts",
+    "review_rules",
+    "step1_sqlite",
+    "step2_replay",
+    "step2_signature",
+    "versioning",
+    "ex1_store",
+    "ex2_cache",
+    "ex3_version",
+]
+
+[tool.pyright]
+include = ["code", "exercises"]
+extraPaths = ["code", "exercises"]
+typeCheckingMode = "basic"

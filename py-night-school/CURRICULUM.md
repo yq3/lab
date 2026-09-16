@@ -134,6 +134,7 @@
 | L4.3 | Vibe-Trading | 以读为主：`live/enforcement.py`（fail-closed 八查）/`governance/ledger.py`（哈希链）/`live/pending_action.py`（对账不重发）→ 改造：mock 券商连接器，把 mandate 检查链抽出写 pytest 单测 |
 
 - 明确不选 OpenHands（HEAD 已清仓迁移 TS，Python 学习价值打折，详见 landscape）；
+- 每课两层（L3.7 先例的推广）：**主线**是把产品核心机制抽取成对版机制件（锚定 commit、报销域、零 key 三态可验收），真跑产品与本地分支改造是**可选加餐**；
 - 每课改造在本地分支完成，产出「改造说明 + 截图/日志」。
 - 里程碑：3 个产品各 1–2 个可复现改造。
 

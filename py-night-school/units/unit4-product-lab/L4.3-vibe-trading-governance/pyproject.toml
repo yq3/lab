@@ -1,0 +1,50 @@
+[project]
+name = "l43-vibe-trading-governance"
+version = "0.1.0"
+description = "L4.3 Vibe-Trading：治理合规——fail-closed 门、哈希链与对账不重发（零框架零网络，纯标准库）"
+requires-python = ">=3.12"
+# 刻意零运行时依赖：产品 mandate 刻意用 frozen dataclass 不用 Pydantic（零验证面），
+# 本课全链路只用标准库（dataclasses/json/hashlib/pathlib/datetime），讲义 §2.4 说明这个取舍。
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "ruff>=0.12",
+    "pyright>=1.1",
+    "nodejs-wheel-binaries>=1.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["code", "exercises"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+extend-exclude = ["*.md"]  # 讲义代码块是手工对齐的教学代码，不参与 format
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+
+[tool.ruff.lint.isort]
+known-first-party = [
+    "broker",
+    "demo",
+    "enforcement",
+    "gate",
+    "halt",
+    "ledger",
+    "mandate",
+    "pending",
+    "step1_chain",
+    "step2_ledger",
+    "step3_reconcile",
+    "ex1_chain",
+    "ex2_ledger",
+    "ex3_reconcile",
+]
+
+[tool.pyright]
+include = ["code", "exercises"]
+extraPaths = ["code", "exercises"]
+typeCheckingMode = "basic"
