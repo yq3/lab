@@ -152,14 +152,14 @@ GLM/DeepSeek/本地 vLLM，会话内容也会发往 OpenAI。没配 key 时不�
 （`to_string()` 是 JSON，实测约 18KB），批准/拒绝后 `Runner.run(agent, state)`
 从断点恢复。没有引擎、没有数据库——毕业设计「审批暂停→恢复」的最小形态（Step 5）。
 源码：openai/openai-agents-python@fbd2dbca#src/agents/run_state.py（5271 行，
-实现远比概念厚：会话对账、schema 版本、并发恢复守卫——导读见 §6）。
+wc -l 口径；实现远比概念厚：会话对账、schema 版本、并发恢复守卫——导读见 §6）。
 
 ## 3. 动手代码
 
 先 `uv sync`。共享素材与共用验收：`code/mock_tools.py`（两个 mock 工具）、
 `code/review_rules.py`（规则表 + 离线剧本生成器）、`code/advice.py`（统一出口）、
 `code/mock_endpoint.py`（L2.3 服役的协议级替身端点）、`code/test_contract.py`
-（四课对版的共用验收）。被测对象是**框架的管道**，不是模型的质量（离线台词由
+（契约五课对版的共用验收——L3.1/L3.2/L3.4/L3.5/L3.6）。被测对象是**框架的管道**，不是模型的质量（离线台词由
 review_rules 预生成，与真实模式下 system 提示里的规则同源）。
 
 ### Step 1：离线跑同题 demo（20 分钟）
@@ -299,8 +299,8 @@ CALL_LOG: ['check_budget', 'verify_invoice', 'log_decision']（log_decision 被�
 final_output: Advice(claim_id='CLM-2026-0002', decision='REJECT', reason='REJECT:ITEM_OVER_LIMIT', remaining_cents=10000)
 ```
 
-诚实边界：`run_state.py` 是这个 commit 上最重的模块（5271 行：会话对账、schema
-版本门禁、并发恢复守卫），本课只消费它的**公共契约**（to_state / approve /
+诚实边界：`run_state.py` 是这个 commit 上最重的模块（5271 行，wc -l 口径：
+会话对账、schema 版本门禁、并发恢复守卫），本课只消费它的**公共契约**（to_state / approve /
 from_string / Runner.run 恢复），不深入实现——L3.3 讲 checkpoint 时会拿它当
 「另一个框架的同一件事」对照。
 
@@ -398,7 +398,7 @@ uv run pyright
 - openai/openai-agents-python@fbd2dbca#src/agents/agent.py —— `Agent` dataclass
   与全部字段语义（instructions 可为函数、handoffs/output_type/guardrails 的挂载点）；
 - openai/openai-agents-python@fbd2dbca#src/agents/run.py —— `Runner.run` 的循环
-  docstring（四步循环 + 两类异常）；1726 行起 `asyncio.gather(guardrail_task,
+  docstring（四步循环 + 两类异常）；1737 行起 `asyncio.gather(guardrail_task,
   model_task)` 是「护栏并行赛跑」的现场；
 - openai/openai-agents-python@fbd2dbca#src/agents/tool.py —— `function_tool` 的
   schema 生成（签名 + docstring → params_json_schema）与 strict 模式；

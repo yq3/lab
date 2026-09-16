@@ -1,6 +1,6 @@
 """讲义区测试：L3.5 demo 的 harness 机制断言（契约之外的本课考点）。
 
-与 test_contract.py（四课共用）的分工：contract 只认 run_review 的输出与
+与 test_contract.py（五课共用）的分工：contract 只认 run_review 的输出与
 CALL_LOG；本文件断言 deepagents 特有的机制——五轮剧本的结构（谁是主代理
 谁是子代理）、审查底稿落盘、task 工具目录、子代理隔离、MemoryMiddleware
 注入、默认工具清单与显式收窄。

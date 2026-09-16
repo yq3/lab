@@ -78,9 +78,15 @@ dify 自部署用 docker compose 起**一组**互相依赖的服务。先补两�
   今晚的解析代码要两种都认（ex3）。对照 `application.yml`：Spring 程序员对这套缩进语法
   其实是熟的，陌生的是它在这里定义的不是配置而是**系统本身**。
 
-dify 的模板（`docker/docker-compose-template.yaml`，1322 行）声明了 **39 个服务**——其中
-20 个是可选向量库（`VECTOR_STORE` 环境变量选中谁谁上岗），核心骨架是这 12 个（本课
-`data/compose_excerpt.yaml` 就是按它裁剪的）：
+dify 的模板（`docker/docker-compose-template.yaml`，1322 行）声明了 **39 个服务**（pyyaml
+口径：顶层 services 键计数；模板按 compose profiles 分档，档位引擎是
+`COMPOSE_PROFILES=${VECTOR_STORE:-weaviate},${DB_TYPE:-postgresql},collaboration`）：
+**21 个服务挂在向量库档位后面**（17 个向量库本体 + 4 个配套件：milvus 的 etcd/minio、
+opensearch 的 dashboards、elasticsearch 的 kibana），13 个常驻骨架件，5 个其他档位件
+（db_postgres / api_websocket 默认开；db_mysql / certbot / unstructured 可选）。本课
+`data/compose_excerpt.yaml` 裁的是默认上岗骨架 12 个：常驻 13 件里留 10（略去
+ssrf_proxy / agent_ssrf_proxy / local_sandbox 三个代理沙箱件），加上默认档的
+db_postgres 与 weaviate：
 
 ```text
 nginx :80（唯一入口，depends_on: [api, web]）
@@ -90,7 +96,7 @@ nginx :80（唯一入口，depends_on: [api, web]）
    worker_beat    Celery 定时调度（同镜像，MODE=beat）
    db_postgres    业务库：app / 会话 / 工作流定义（DSL 存在这）
    redis          缓存 + Celery broker + 暂停中的人机表单
-   weaviate       向量库（知识库的一格，20 选 1）
+   weaviate       向量库（知识库的一格，17 个本体选 1 的默认档）
    sandbox        代码节点执行沙箱
    plugin_daemon  插件运行时（工具/模型供应商以插件包安装）
    agent_backend  v2 新组件：dify-agent 的 FastAPI 服务
@@ -124,7 +130,10 @@ workflow:       # workflow / advanced-chat 模式的正文
 `end` / `answer` / `llm` / `knowledge-retrieval` / `code` / `template-transform` /
 `http-request` / `tool` / `if-else` / `iteration` / `loop` / `question-classifier` /
 `parameter-extractor` / `document-extractor` / `variable-aggregator` / `list-operator` /
-`assigner` / `human-input`。
+`assigner` / `human-input`。更狠的一手是：本版把 start/llm 这些**经典节点类型的定义
+本身**搬去了外部 pip 包 `graphon`（`langgenius/dify@79effdd498#api/pyproject.toml`
+钉 `graphon==0.7.0`）——在 dify 仓内 grep NodeType 枚举会落空。平台代码也在拆包演进，
+这是「读平台源码必须锚 commit」的又一实证。
 
 对照 L3.2 记住这个反转：langgraph 的 StateGraph 是**代码构图**（Python 函数、条件边
 lambda），平台的图是**数据**（YAML 里的 nodes/edges）。图是数据，所以能离线静态审查——

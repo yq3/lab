@@ -118,8 +118,11 @@ langgraph 这边是「默认不发、想开再开」，方向相反，纪律一�
 
 ## 3. 动手代码
 
-先 `uv sync`。`code/` 里除了四课对版的共享模块（advice / mock_tools / review_rules /
-mock_endpoint / test_contract），本课新增五个文件：`demo.py`（图的全部本体）与四个讲义脚本。
+先 `uv sync`。`code/` 里除了对版共享件——advice / mock_tools / review_rules /
+mock_endpoint 六课对版（L3.1–L3.6 字节相同）、`test_contract.py` 五课对版
+（L3.1/L3.2/L3.4/L3.5/L3.6 字节相同）——之外，本课新增六个文件：`demo.py`
+（图的全部本体）、四个讲义脚本（step1_reducer / step4_recursion / step5_subgraph /
+demo_trace）与讲义区测试 `test_demo.py`。
 
 ### Step 1：覆盖 vs 合并（10 分钟，零模型调用）
 
@@ -198,12 +201,15 @@ uv run pytest code/
 ```
 
 ```text
-........                                                                 [100%]
-8 passed in 5.35s
+.........                                                                [100%]
+9 passed in 5.49s
 ```
 
-8 个测试 = 共用契约 2 个（四用例逐单 + 覆盖型 meta）+ 讲义区 6 个（路由分支、工具分发与
-unknown_tool 回喂、节点序列与审计流水、逐单与剧本预期全等、finalize 解析、reducer 注解 meta）。
+9 个测试 = 共用契约 2 个（四用例逐单 + 覆盖型 meta）+ 讲义区 7 个（路由分支、工具分发与
+unknown_tool 回喂、节点序列与审计流水、逐单与剧本预期全等、finalize 解析、reducer 注解
+meta、规则表五条走查）。走查测试补的是规则表视角的留白：mock 四单只命中规则 1/2/3/5，
+规则 4（总额超剩余预算 → BUDGET_EXCEEDED）无用例触达——由讲义区测试用合成视图直接
+调 `review_rules.decide` 对表，五条规则的 decision/reason 全覆盖。
 
 ### Step 4：recursion_limit 硬终止实测（10 分钟）
 
@@ -276,7 +282,10 @@ uv run python -c "from hints import hint; print(hint('ex1', 1))"
 | ex2 | `exercises/ex2_events.py` | 自定义 reducer：给状态加 `events: Annotated[list[str], operator.add]`，各节点登记审计事件；两条分支流水精确断言 + 注解 meta 检查 |
 | ex3 | `exercises/ex3_gate.py` | subgraph 改造：模型+工具打包成子图，外层 precheck 拦非法单号直接短路；验收断言 mock 端点请求数为 0 |
 
-三题都是改造题（在 demo 同构结构上完成指定修改），骨架自包含：ex1/ex2 零 HTTP，ex3 用
+形态标注（诚实起见）：ex2 是**改造前可跑型**——装配已给定、TODO 前图就能跑，改的是给
+运行中的图加审计通道；ex1/ex3 是**连线型骨架**——TODO 前图尚未装配（build 直接
+NotImplementedError），可跑参照见讲义 `code/demo.py`（ex1 同构）与 Step 5 的
+`code/step5_subgraph.py`（ex3 的外层图）。骨架自包含：ex1/ex2 零 HTTP，ex3 用
 L2.3 服役至今的 mock 端点。验收（三条同时全绿 = 本课毕业）：
 
 ```bash

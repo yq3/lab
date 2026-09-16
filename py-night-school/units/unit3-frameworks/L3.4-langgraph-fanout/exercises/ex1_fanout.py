@@ -40,8 +40,9 @@ class BatchState(TypedDict):
 
     claim_ids: list[str]
     # TODO(ex1): 把下面这行改成 Annotated[dict[str, Advice], 你的自定义 reducer]——
-    #   reducer 是你自己写的具名函数（签名 (旧: dict, 新: dict) -> dict，返回 {**旧, **新}），
-    #   定义放在模块顶部、Annotated 第二参放「函数对象」（不是函数调用）
+    #   reducer 是你自己写的具名函数（签名形状 (旧值, 新值) -> 合并值），语义要求：
+    #   dict 的并集语义、同名键后到覆盖先到（worker 各自带着 claim_id 键值写入，合并不丢单）；
+    #   函数定义放在模块顶部、Annotated 第二参放「函数对象」（不是函数调用）
     results: dict[str, Advice]  # <- 改这一行（目前是覆盖语义：Send 分支同超步多写会直接炸）
     counts: NotRequired[dict[str, int]]
 
@@ -74,7 +75,9 @@ def dispatch(state: BatchState) -> dict:
 
 def fan_out(state: BatchState) -> list[Send]:
     """扇出条件边：按 claim 列表造 N 个动态分支（你的 TODO）。"""
-    # TODO(ex1): 返回 [Send("review", {"claim_id": claim_id}) for claim_id in state["claim_ids"]]
+    # TODO(ex1): 返回一个 Send 列表——claim_ids 里每单一个 Send；每个 Send 的两个参数想清楚：
+    #   目标节点名用装配里注册的哪个字符串？arg 给什么形状的状态——
+    #   worker（review_worker）身上读的 claim_id 从哪来？（hints 第 2 级）
     raise NotImplementedError("TODO(ex1): 补 Send 列表")
 
 

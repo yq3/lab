@@ -129,6 +129,17 @@ Java 对照：`extends` 一个 Bean 加字段。但 Pydantic 里父类的校验�
 还有一个 db 线程没退）。对照 try-with-resources：Python 的 `with` 是鸭子类型的
 `__aenter__/__aexit__` 协议，不要求实现某个接口（L1.2 结构化类型的又一次兑现）。
 
+顺带一条生产边界：`SqliteSaver` / `AsyncSqliteSaver` 是**单进程、演示量级**的存档——
+`SqliteSaver` 的类 docstring 原话（`libs/checkpoint-sqlite/.../sqlite/__init__.py`，§6
+路标）："This class is meant for lightweight, synchronous use cases (demos and small
+projects) and does not scale to multiple threads"。本课的两个「进程」先后各开各的连接、
+串行读写，正好在这个安全区内。生产上多个 worker 进程要共享同一份图状态时，得换
+`langgraph-checkpoint-postgres` 的 `PostgresSaver`（路标
+`langchain-ai/langgraph@e539ac122#libs/checkpoint-postgres/langgraph/checkpoint/postgres/__init__.py`，
+`PostgresSaver` 类在 40 行起）——`compile(checkpointer=...)` 的接线一行不改，换的只是
+saver 的构造。对照 Java：这就是 H2 与 Postgres 的关系——课程里 H2 帮你把机制跑通，
+上生产换数据库不换代码。
+
 ## 3. 动手代码
 
 先 `uv sync`。`code/` 里共享模块照旧（advice / mock_tools / review_rules / mock_endpoint），

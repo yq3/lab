@@ -1,6 +1,6 @@
 """本课的「装配车间」：把 mock 工具装配成 adk 的 LlmAgent + Runner（四课 demo 的 adk 版骨架）。
 
-四课对版的题面（mock_tools / review_rules / mock_endpoint）一个字不改；
+六课对版的题面（mock_tools / review_rules / mock_endpoint）一个字不改；
 这层只回答一个问题：**同一个题，全家桶框架怎么装配**——
 
 - 工具绑定：L2.2 我们手写 JSON Schema 注册表，adk 直接放裸函数——

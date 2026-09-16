@@ -89,3 +89,37 @@ def test_finalize_parses_advice_from_final_message() -> None:
     update = asyncio.run(demo.finalize(state))
     assert update["advice"].decision == "APPROVE"
     assert update["events"] == ["finalize"]
+
+
+def test_review_rules_table_walkthrough_all_five_rules() -> None:
+    """规则表全走查：五条规则各配一个合成视图，decision/reason 逐条对表。
+
+    mock 四单只覆盖规则 1/2/3/5（data 的 expect_reason 里没有 BUDGET_EXCEEDED）；
+    规则 4（总额 > 部门剩余预算）无用例触达——留白由本测试用合成入参直接走查补上。
+    """
+    budget = {"budget_cents": 20000, "spent_cents": 10000}  # 剩余 10000 分（合成，不经 mock 表）
+    invoice_ok = {"id": "INV-SYNTH", "valid": True, "reason": ""}
+    invoice_bad = {"id": "INV-SYNTH", "valid": False, "reason": "发票已作废"}
+
+    def view(items_cents: list[int]) -> dict:
+        return {
+            "id": "CLM-SYNTH",
+            "submitter": "合成",
+            "purpose": "规则表走查",
+            "items_cents": items_cents,
+            "total_cents": sum(items_cents),
+            "dept": "DEV",
+            "invoice_ids": ["INV-SYNTH"],
+        }
+
+    cases = [
+        ("规则1 非正数金额", view([-100]), invoice_ok, "ESCALATE", "REJECT:INVALID_AMOUNT"),
+        ("规则2 单笔超限", view([6000]), invoice_ok, "REJECT", "REJECT:ITEM_OVER_LIMIT"),
+        ("规则3 发票未过", view([1000]), invoice_bad, "REJECT", "REJECT:INVOICE_INVALID"),
+        ("规则4 总额超预算", view([4000, 4000, 3000]), invoice_ok, "REJECT", "REJECT:BUDGET_EXCEEDED"),
+        ("规则5 全不命中", view([1000, 2000]), invoice_ok, "APPROVE", "PASS"),
+    ]
+    for name, v, inv, decision, reason in cases:
+        advice = review_rules.decide(v, budget, inv)
+        assert (advice.decision, advice.reason) == (decision, reason), name
+        assert advice.remaining_cents == 10000, name

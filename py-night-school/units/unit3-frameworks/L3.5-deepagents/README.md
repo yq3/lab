@@ -101,11 +101,15 @@ Advice                                                      ← response_format=
 源码清单（langchain-ai/deepagents@9e7d62ff6，行号在 `#` 路径内）：
 
 - 内置 8 件的工厂清单：`middleware/filesystem.py:1859`（tool_factories）+ `task`
-  由 `middleware/subagents.py:832` 装配；
+  由 `middleware/subagents.py` 的 `_build_task_tool`（577 行起）装配——`task` 工具
+  本体在 832 行 `StructuredTool.from_function(name="task", ...)` 落地；
 - `execute` 不在其中：它要求 backend 实现 SandboxBackendProtocol，默认的
   `StateBackend` 不满足（`graph.py:637` 默认 `StateBackend()`）；
-- **自动追加 general-purpose 子代理**：一个都没声明时也会塞一个进去
-  （`middleware/subagents.py:456` 的 `GENERAL_PURPOSE_SUBAGENT`，挂进 `task` 目录）；
+- **自动追加 general-purpose 子代理**：不管你声明没声明自己的子代理，都会往 `task`
+  目录塞一个 general-purpose——本课 demo 声明了 invoice-specialist，目录里照样多出
+  general-purpose（讲义区测试断言的正是这个更强事实）；想收掉它得显式干预：harness
+  profile 关掉 `general_purpose_subagent.enabled`，或自己声明同名 spec 覆盖
+  （判断在 `graph.py:796`，默认 spec 在 `middleware/subagents.py:456`）；
 - **递归预算默认 9999**（`graph.py:971`）——对照 L2.3 的 `max_turns` 纪律：harness
   默认「不设限」，预算责任回到你手里；
 - 0.7.0 起**不再有默认 system 提示**（`BASE_AGENT_PROMPT` 已废弃，`graph.py:124`
@@ -115,9 +119,9 @@ Advice                                                      ← response_format=
 
 ## 3. 动手代码
 
-先 `uv sync`。共享模块（advice / mock_tools / review_rules / mock_endpoint）与
-`test_contract.py` 和前三课字节相同；本课新增 `demo.py`（契约入口）与四个 Step
-演示脚本，产出全部可复现。
+先 `uv sync`。共享件（advice / mock_tools / review_rules / mock_endpoint）六课对版
+（L3.1–L3.6 字节相同），`test_contract.py` 五课对版（L3.1/L3.2/L3.4/L3.5/L3.6 字节
+相同）；本课新增 `demo.py`（契约入口）与四个 Step 演示脚本，产出全部可复现。
 
 ### Step 1：harness 跑通离线 demo（15 分钟）
 
@@ -331,8 +335,9 @@ uv run pyright
 - langchain-ai/deepagents@9e7d62ff6#libs/deepagents/deepagents/graph.py ——
   `create_deep_agent` 本体（271 行起）：默认中间件栈的装配顺序（Filesystem →
   SubAgent → Summarization → … → Memory → HITL）、`backend` 默认 StateBackend
-  （637 行）、递归预算 9999（971 行）。今晚「默认给了你什么」的每一句都能在这
-  200 行里找到出处。
+  （637 行）、递归预算 9999（971 行）。今晚「默认给了你什么」的每一句都能在
+  这段装配（271–978 行，函数体直到文件末行；区间为 git grep 定位 def 起始 +
+  wc -l 实测）里找到出处。
 - langchain-ai/deepagents@9e7d62ff6#libs/deepagents/deepagents/middleware/subagents.py ——
   SubAgent TypedDict（66 行起）、`_build_task_tool`（577 行起）：子代理如何被
   编译成 `task` 工具、目录怎么拼、回喂怎么取最后一条非空 AI 消息（698 行）。
@@ -361,7 +366,7 @@ deepagents 替你付掉的，是 mini-agent **完全没有的一整层工作环�
 （mini-agent 的上下文管理只有字符裁剪，这里是有存储形态的文件）。而 **agent
 循环本体一点没少也没换**——deepagents 的引擎就是 langgraph（L3.2 的图 + L3.4
 的 `create_react_agent`），harness 是图引擎之上的一叠中间件。反过来，mini-agent
-教你的东西在这里全部兑现：CALL_LOG 照样证明工具真实执行（test_contract 四课
+教你的东西在这里全部兑现：CALL_LOG 照样证明工具真实执行（test_contract 五课
 同款）、L2.4 的结构化出口变成了 `Advice` 工具、L2.3 的预算纪律变成了「覆盖
 9999 默认值」的自觉。**你付掉的抽象税**：对中间件栈顺序的理解成本 + §5 的
 默认值审计成本——工具越全的 harness，越要会收窄。

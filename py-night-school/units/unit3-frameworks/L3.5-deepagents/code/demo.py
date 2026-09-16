@@ -1,6 +1,6 @@
 """L3.5 同题 demo：deepagents（harness 形态）实现报销单审查 agent。
 
-统一出口（四课契约）：`async run_review(claim_id) -> Advice`。
+统一出口（五课契约）：`async run_review(claim_id) -> Advice`。
 离线确定性：内部起 MockLLMEndpoint（test-key / mock-model），台词由
 review_rules 预计算决策（script_for 的 expected），harness 特有的轮次
 （子代理转交 / 审查底稿落盘 / 结构化收尾）在本模块编排。
@@ -180,6 +180,6 @@ async def run_review_with_trace(claim_id: str) -> tuple[Advice, dict]:
 
 
 async def run_review(claim_id: str) -> Advice:
-    """契约入口（四课字节相同的 test_contract 只认它）。"""
+    """契约入口（五课字节相同的 test_contract 只认它）。"""
     advice, _ = await run_review_with_trace(claim_id)
     return advice

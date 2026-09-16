@@ -93,8 +93,10 @@ api_base=..., api_key=...)`——构造 kwargs 原样转交 litellm 的 `acomple
 ## 3. 动手代码
 
 先 `uv sync`（adk 依赖较重，litellm 链路第一次同步要等一会）。共享题面
-（`mock_tools.py` / `review_rules.py` / `mock_endpoint.py` / `advice.py`）与四课对版，
-本课新增的装配层在 `code/adk_review.py`——对照 L3.1 的同名装配层读，差异就是框架差异。
+（`mock_tools.py` / `review_rules.py` / `mock_endpoint.py` / `advice.py`）六课对版
+（L3.1–L3.6 字节相同），`test_contract.py` 五课对版（L3.1/L3.2/L3.4/L3.5/L3.6
+字节相同）；本课新增的装配层在 `code/adk_review.py`——对照 L3.1 的同名装配层读，
+差异就是框架差异。
 
 ### Step 1：库模式离线 demo——事件流与出网取证（20 分钟）
 
@@ -185,11 +187,16 @@ uv run python code/demo_eval.py
 `.test.json` eval set + 指标族（final_response_match 确定性；轨迹质量 / 幻觉 / rubric
 要 LLM-as-judge 裁判模型）——诚实边界：裁判类指标需要真实端点，本课离线不跑。
 
-`adk web`（加餐，需真实端点）：`adk web <agents 目录>` 起本地 API 服务 + 浏览器调试器，
-可以看事件流、翻会话、改 state 再重放——全家桶里「调试器」那一格。动手姿势：
-把本课 agent 按约定放进 `google_adk/agents/*.py`（模块级 `root_agent`），
-`.env` 配好三变量后 `uv run adk web`。默认它用 Gemini 系模型——加 `LiteLlm` 前缀
-（§2.4）即可指到你的 OpenAI 兼容端点。
+`adk web`（加餐，需真实端点；本课离线未实测起过它——目录约定以 cli 源码为证）：
+`adk web <agents 目录>` 起本地 API 服务 + 浏览器调试器，可以看事件流、翻会话、
+改 state 再重放——全家桶里「调试器」那一格。动手姿势：**每个 agent 一个子目录**，
+本课 agent 放成 `google_adk/agents/expense_reviewer/agent.py`（模块级 `root_agent`
+——`adk create` 生成的就是这个形态），命令指向 agents 父目录：
+`uv run adk web google_adk/agents`。发现逻辑在 `cli/utils/agent_loader.py` 的
+`AgentLoader`：只把该目录下的子目录当 agent 认（子目录里要有 `agent.py` /
+`__init__.py` / `root_agent.yaml` 之一，`agent.py` 里定义模块级 `root_agent`）。
+`.env` 配好三变量；默认它用 Gemini 系模型——加 `LiteLlm` 前缀（§2.4）即可指到
+你的 OpenAI 兼容端点。
 
 ## 4. 练习（本课过关点）
 
@@ -206,6 +213,10 @@ uv run python -c "from hints import hint; print(hint('ex1', 1))"
 | ex1 | `exercises/ex1_tool.py` | 工具注册改造：新写 lookup_policy，让 declaration 从你的 docstring + 签名长出来（meta 验证 schema 三信息源） |
 | ex2 | `exercises/ex2_state.py` | 状态改造：单笔上限从硬编码改为 create_session 注入，同一单注入 3000/5000 断言不同 decision |
 | ex3 | `exercises/ex3_guardrail.py` | guardrail 改造：before_model_callback 拦不合规单号，断言模型零请求（ep.requests 空） |
+
+形态标注（诚实起见）：ex1 是**新写型填空骨架**——docstring 与函数体都是 TODO，填空前
+不可跑（非「改造前可跑」型），可跑参照见讲义 Step 2 与 `code/mock_tools.py` 的既有
+工具；ex2/ex3 的给定件（装配、剧本、预期生成器）已完整，TODO 是待补的行为/装配函数。
 
 验收（三条同时全绿 = 本课毕业）：
 
@@ -257,8 +268,12 @@ uv run pyright
   确定性轨迹比对（Step 5 用的就是后者的 ANY_ORDER 语义）。
 - google/adk-python@7b246e01#src/google/adk/cli/cli_tools_click.py —— `adk web`
   命令的真实形态（挂 get_fast_api_app + 浏览器调试器），同文件还有 `adk eval`。
+- google/adk-python@7b246e01#src/google/adk/cli/utils/agent_loader.py ——
+  AgentLoader：`adk web` 的 agent 发现逻辑（每个 agent 一个子目录、`agent.py` 里
+  模块级 `root_agent`——Step 5 目录约定的源码出处；`cli_create.py` 的 `adk create`
+  生成的也是同一形态）。
 - 官方文档（版本对齐 2.x）：https://google.github.io/adk-docs/ —— 快速开始的
-  目录约定（`google_adk/agents/`）与 `adk web` 截图。
+  目录约定（agents 目录 + 每 agent 一个子目录）与 `adk web` 截图。
 
 ### 与 mini-agent 对照
 

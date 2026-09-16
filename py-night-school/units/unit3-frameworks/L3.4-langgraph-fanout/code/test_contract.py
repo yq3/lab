@@ -3,8 +3,10 @@
 
 它只依赖各课 demo 的统一入口 `run_review(claim_id) -> Advice`：
   - 用例不硬编码：直接读 data/expense/review_mock.json（明线素材唯一来源）；
-  - 覆盖型 meta 检查（L0.1 ex2 先例）：用例表必须覆盖四种结论场景、三种 decision、
-    两个部门——防止「删一个用例照样绿」；
+  - 覆盖型 meta 检查（L0.1 ex2 先例）：用例表必须在 claim / decision / reason 三个
+    维度分别覆盖——四种结论场景、三种 decision、四个 reason 枚举、两个部门，
+    防止「删一个用例照样绿」（先例：Unit 3 复盘——reason 维度曾缺口：把 0004 的
+    reason 改成与 0002 相同，整套 contract 依然全绿）；
   - CALL_LOG 证明工具被框架真实执行过（剧本模型不能自说自话）。
 """
 
@@ -26,6 +28,12 @@ def test_contract_covers_all_claims_and_decisions() -> None:
         "CLM-2026-0004",
     }
     assert {c["expect_decision"] for c in claims} == {"APPROVE", "REJECT", "ESCALATE"}
+    assert {c["expect_reason"] for c in claims} == {
+        "PASS",
+        "REJECT:ITEM_OVER_LIMIT",
+        "REJECT:INVALID_AMOUNT",
+        "REJECT:INVOICE_INVALID",
+    }
     assert {c["dept"] for c in claims} == {"SALES", "DEV"}
 
 

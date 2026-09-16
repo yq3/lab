@@ -117,10 +117,11 @@ agent = create_react_agent(model, tools=[check_budget, verify_invoice], prompt=S
 
 ## 3. 动手代码
 
-先 `uv sync`。`code/` 里除五课对版的共享模块（advice / mock_tools / review_rules /
-mock_endpoint / test_contract）外，本课五个新文件：`demo.py`（契约线）、`demo_trace.py`
-（轮次解剖）、`demo_batch.py`（扇出线）、`count_loc.py`（行数统计口径工具）、
-`step5_toolnode.py`（错误回喂对照）。
+先 `uv sync`。`code/` 里除共享件（advice / mock_tools / review_rules / mock_endpoint，
+六课对版 L3.1–L3.6；另加契约五课对版的 `test_contract.py`）外，本课六个新文件：
+`demo.py`（契约线）、`demo_trace.py`（轮次解剖）、`demo_batch.py`（扇出线）、
+`count_loc.py`（行数统计口径工具）、`step5_toolnode.py`（错误回喂对照）、
+`test_demo.py`（讲义区测试）。
 
 ### Step 1：一行装配跑通契约（10 分钟）
 
@@ -135,16 +136,16 @@ uv run pytest code/
 
 10 个测试 = 共用契约 2 个（四用例逐单 + 覆盖型 meta）+ 讲义区 8 个（官方节点名、轮次结构、
 逐单与剧本预期全等、reducer 直接行为、reducer 注解 meta、扇出形状、批量线 8 请求、批量跨跑确定性）。
-共用验收 `test_contract.py` 与 L3.1/L3.2 字节相同——题面没动，动的只是装配。
+共用验收 `test_contract.py` 与 L3.1/L3.2/L3.5/L3.6 字节相同（契约五课对版）——题面没动，动的只是装配。
 
 代码量对比（`count_loc.py` 的 ast 口径，§3 Step3 有完整说明）：
 
 | 装配 | 数量 | 说明 |
 |---|---|---|
 | L3.2 `demo.build_graph` | 10 loc | 手装：3 节点 + 4 边 + compile |
-| L3.2 手写节点函数 | 约 40 loc | reviewer / tools_node / finalize / 路由 |
+| L3.2 手写节点函数 | 20 loc | make_reviewer 5 + tools_node 10 + route_after_reviewer 2 + finalize 3（ast 口径，count_loc 实测） |
 | L3.4 `demo.build_agent` | **6 loc** | 一个 `create_react_agent` 调用（含告警过滤） |
-| 框架内部 `create_react_agent` | 414 loc | 其中装配三件事约 165 loc（Step3 拆账） |
+| 框架内部 `create_react_agent` | 414 loc | 其中装配三件事合计 165 loc（Step3 拆账，模型节点计 sync 版） |
 
 抽象没有消灭复杂度，只是把它**搬进了框架**——这正是 Unit 3 要你体感的事。
 
@@ -192,6 +193,7 @@ uv run python code/demo_trace.py CLM-2026-0003
 ```bash
 uv run python code/count_loc.py def ~/develop/opensource/langgraph/libs/prebuilt/langgraph/prebuilt/chat_agent_executor.py create_react_agent
 uv run python code/count_loc.py def ~/develop/opensource/langgraph/libs/prebuilt/langgraph/prebuilt/chat_agent_executor.py create_react_agent.call_model
+uv run python code/count_loc.py def ~/develop/opensource/langgraph/libs/prebuilt/langgraph/prebuilt/chat_agent_executor.py create_react_agent.acall_model
 uv run python code/count_loc.py def ~/develop/opensource/langgraph/libs/prebuilt/langgraph/prebuilt/chat_agent_executor.py create_react_agent.should_continue
 uv run python code/count_loc.py range ~/develop/opensource/langgraph/libs/prebuilt/langgraph/prebuilt/chat_agent_executor.py 861 1002
 ```
@@ -199,13 +201,17 @@ uv run python code/count_loc.py range ~/develop/opensource/langgraph/libs/prebui
 ```text
 #create_react_agent: lines=278-1002 loc=414 (docstring 已剔除)
 #create_react_agent.call_model: lines=661-694 loc=27 (docstring 已剔除)
+#create_react_agent.acall_model: lines=696-721 loc=20 (docstring 已剔除)
 #create_react_agent.should_continue: lines=831-859 loc=27 (docstring 已剔除)
 #861-1002: loc=111
 ```
 
-**它比想象短**：414 loc 里，真正的 ReAct 心脏只有三件事（合计约 165 loc）——
+**它比想象短**：414 loc 里，真正的 ReAct 心脏只有三件事（模型节点计 sync 版：27 + 27 +
+111，合计 165 loc）——
 
-1. **模型节点 `agent`**（`call_model` / `acall_model`，661-694，27 loc）：`_get_model_input_state`
+1. **模型节点 `agent`**（sync 版 `call_model` 661-694，27 loc / async 版 `acall_model`
+   696-721，20 loc——同一逻辑的成对实现，本课 ainvoke 实际走 async 版；sync 版多出的
+   7 行是「异步模型配同步调用」的守卫报错）：`_get_model_input_state`
    取消息 → `static_model.invoke(...)` → `{"messages": [response]}`。就是 L2.3 循环里
    「请求 + 入史」两行的函数化；多出来的行一半在处理 `remaining_steps` 不足时的哨兵句
    （689 行 `"Sorry, need more steps to process this request."`——预算护栏的另一形态，
@@ -329,10 +335,12 @@ uv run pyright
 - **现象**：方向一：四个 Send 分支共享一个 mock 端点的剧本队列，偶发地 B 单吃掉 A 单的台词、
   四单结果张冠李戴（复跑几次必现）；方向二：笃信「提交顺序 = 执行顺序」，在分支里做顺序敏感
   的消费（比如「第 N 个分支该读第 N 份剧本」），本地一直绿，上了多核机器/flaky CI 才炸。
-- **最小复现**（`demo_batch.py` 的设计过程就是这个坑的取证）：让 4 个 worker 各睡 50ms 并记录
-  开工时刻——四个分支在 0.5ms 内**同时开工**（并发执行）；而合并顺序跨进程跨次稳定（确定性
-  归并）。两个性质同时成立，恰恰说明「执行」与「归并」是两件事——Java 的任务队列心智模型
-  里它们是同一件事。
+- **最小复现**（`demo_batch.py` 的输出就是取证）：每个 worker 进分支时用 `time.perf_counter`
+  记开工时刻、收工前再记一次（区间随 timing 键落账），汇总时打印各分支相对最早开工的偏移
+  与时长——四个分支在 0.5ms 内**同时开工**，各自干满约 230ms 的真实两轮审查，分支耗时
+  合计约 912ms 但扇出墙钟只有约 230ms（并发执行）；而合并顺序跨进程跨次稳定（确定性
+  归并）。两个性质同时成立，恰恰说明「执行」与「归并」是两件事——Java 的任务队列心智
+  模型里它们是同一件事。
 
   ```python
   # 反例（demo_batch 的否决设计）：四单共享一个端点的 FIFO 剧本队列
@@ -363,8 +371,8 @@ uv run pyright
     （704-792 行，ast 口径 29 loc）：docstring 里就写着 map-reduce 用法与「sent state can
     differ from the core graph's state」；
   - `langchain-ai/langgraph@e539ac122#libs/prebuilt/langgraph/prebuilt/chat_agent_executor.py` ——
-    本课重头：`create_react_agent`（278-1002 行，414 loc；`call_model` 661-694 / `should_continue`
-    831-859 / 装配段 861-1002），v2 的 Send 扇出就在 849 行起；
+    本课重头：`create_react_agent`（278-1002 行，414 loc；`call_model` 661-694 / `acall_model`
+    696-721 / `should_continue` 831-859 / 装配段 861-1002），v2 的 Send 扇出就在 849 行起；
   - `langchain-ai/langgraph@e539ac122#libs/prebuilt/langgraph/prebuilt/tool_node.py` —— `ToolNode`
     （622-1579 行，559 loc）：`_func` 主路径 793-826（29 loc）、错误回喂的
     `_validate_tool_call` 1268 行起、独立可复用的路由函数 `tools_condition` 1582-1659；

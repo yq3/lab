@@ -9,10 +9,11 @@ data/ 用例推演（CLM-2026-0001，明细 [1200, 3500, 2400]，部门 SALES，
   注入 3000 → 3500 超限 → REJECT / REJECT:ITEM_OVER_LIMIT；
   注入 5000 → 无明细超限 → APPROVE / PASS。
 
-完成判据：uv run pytest exercises/test_ex2.py 全绿——共 2 个测试（各含三组断言）：
+完成判据：uv run pytest exercises/test_ex2.py 全绿——共 2 个测试（各含四组断言）：
   ① 注入 3000：decision==REJECT、reason==REJECT:ITEM_OVER_LIMIT、
-     CALL_LOG 含 "limit_check:3000"（state 真的流到了工具）；
-  ② 注入 5000：decision==APPROVE、reason==PASS、CALL_LOG 含 "limit_check:5000"。
+     CALL_LOG 含 "limit_check:3000"（state 真的流到了工具）、remaining_cents==10000；
+  ② 注入 5000：decision==APPROVE、reason==PASS、CALL_LOG 含 "limit_check:5000"、
+     remaining_cents==10000。
 
 所需的顶部 import（骨架未预置，自己加）：from adk_review import APP_NAME, USER_ID, ask, build_runner, final_text
 """

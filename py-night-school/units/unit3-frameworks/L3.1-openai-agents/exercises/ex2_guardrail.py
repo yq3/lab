@@ -46,11 +46,6 @@ def _extract_claim_id(text: str) -> str | None:
     return matched.group(0) if matched else None
 
 
-def _user_message(text: str) -> str:
-    """护栏练习的输入就是一条普通用户消息（单号可能合法、可能不存在）。"""
-    return f"请处理这条报销请求：{text}"
-
-
 def _build_model(ep: MockLLMEndpoint) -> Model:
     return OpenAIChatCompletionsModel(model=ep.model, openai_client=AsyncOpenAI(base_url=ep.url, api_key=ep.api_key))
 

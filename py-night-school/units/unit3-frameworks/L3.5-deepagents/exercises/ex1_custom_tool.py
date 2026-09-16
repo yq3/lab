@@ -59,8 +59,8 @@ POLICY_LOG: list[str] = []  # lookup_policy 真实执行的取证（对位 mock_
 def lookup_policy(purpose_keyword: str) -> dict:
     """按报销用途关键词查政策话术：返回政策行（含 policy 原文与限额，单位分）。"""
     # TODO(ex1-1): 子串匹配 POLICY_TABLE 的键（两边 lower 后用 in 判断）；
-    # 命中→POLICY_LOG.append("lookup_policy") 并返回该政策行的拷贝；
-    # 未命中→返回 {"keyword": <原词>, "error": "policy_not_found"}
+    # 命中→记一次取证（对位 mock_tools.CALL_LOG 的做法，工具名照旧）并返回该政策行的拷贝；
+    # 未命中→返回带原词与固定错误码 policy_not_found 的错误 dict（键名对照 test_ex1 的断言）
     raise NotImplementedError("TODO(ex1-1): 补全 lookup_policy")
 
 

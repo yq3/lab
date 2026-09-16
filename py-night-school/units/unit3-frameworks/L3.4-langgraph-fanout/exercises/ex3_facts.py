@@ -3,13 +3,13 @@
 
 读码对象（本地克隆 ~/develop/opensource/langgraph，HEAD e539ac122，行号按此锚定）：
   libs/prebuilt/langgraph/prebuilt/chat_agent_executor.py
-    - 装配段 861–1002：add_node("agent", ...) 与 add_node("tools", tool_node) 就在开头；
-    - 条件边函数 should_continue（831–859）：无 tool_calls → END；有 → version="v2"（默认）
-      时返回 [Send("tools", ...) for call in tool_calls]（849 行起的列表推导）；
+    - 装配段 861–1002：两个 add_node 就在开头——①② 的答案在它们的第一参数里；
+    - 条件边函数 should_continue（831–859）：无 tool_calls → END；有 tool_calls 时
+      v2 默认下的返回形态见 849 行起——③ 的三选一与 ④ 的扇出数都在这段代码里；
     - 预算哨兵（689/716 行）：remaining_steps 不足时模型节点替模型回那句英文文案；
     - response_format=... 时装配段会加一个结构化输出节点（899–910 行）。
   libs/prebuilt/langgraph/prebuilt/tool_node.py
-    - _validate_tool_call（1268 行起）：未注册工具名 → 回喂 error ToolMessage，不 raise。
+    - _validate_tool_call（1268 行起）：未注册工具名时 ToolNode 怎么处理，答案在函数体里（⑦ 的二选一）。
 
 完成判据：uv run pytest exercises/test_ex3.py 全绿——七个事实全部被行为验证消费：
   ①② 节点名被用来对照真实装配产物的图节点集；③④ 路由语义与扇出任务数用 stream 轨迹验证；

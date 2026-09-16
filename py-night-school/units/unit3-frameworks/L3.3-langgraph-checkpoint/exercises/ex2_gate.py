@@ -87,8 +87,10 @@ async def human_gate(state: GateState) -> dict:
     interrupt() 的返回值是人工决策，把它写进状态：human_decision 键（原样字符串）
     + 一条 user 消息把决策告知模型（讲义 human_gate 同构）。
     """
-    # TODO(ex2): advice = parse_last_advice(state)；answer = interrupt(带 claim_id/reason 的 dict)；
-    #   返回 {"messages": [一条 user 消息，内容含 answer], "events": ["human_gate"], "human_decision": answer}
+    # TODO(ex2): 三步——① 从状态解析出待审建议单（解析器随题给定，讲义同构）；
+    #   ② 调 interrupt() 暂停：payload 按上面 docstring 的键约定（单号 + 转审原因码），
+    #      恢复后拿到人工决策；③ 返回通道更新——messages 一条 user 消息把决策告知模型、
+    #      events 记 human_gate 事件、人工决策原样字符串单独一个键（键名见 GateState 与 hints 第 2 级）
     raise NotImplementedError("TODO(ex2): 补全 human_gate 的 interrupt 调用与状态更新")
 
 
@@ -145,6 +147,7 @@ async def resume_side(db_path: str, thread_id: str, decision: Literal["approve",
             if paused is None:
                 raise ValueError("暂停点状态里解析不出建议单")
             ep.script_text(demo.post_human_advice(paused, decision).model_dump_json())
-            # TODO(ex2): result = await graph.ainvoke(???, cfg) —— ??? 处放 Command(resume=decision)
+            # TODO(ex2): result = await graph.ainvoke(??, cfg) —— 第一参数怎么把人审决定
+            #   decision 递回去？（平时传状态 dict，恢复时传什么对象？hints 第 2 级）
             result: dict = {}
     return result

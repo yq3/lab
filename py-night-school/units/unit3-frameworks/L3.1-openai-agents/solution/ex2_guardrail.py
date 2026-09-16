@@ -30,11 +30,6 @@ def _build_model(ep: MockLLMEndpoint) -> Model:
     return OpenAIChatCompletionsModel(model=ep.model, openai_client=AsyncOpenAI(base_url=ep.url, api_key=ep.api_key))
 
 
-def _user_message(text: str) -> str:
-    """护栏练习的输入就是一条普通用户消息（单号可能合法、可能不存在）。"""
-    return f"请处理这条报销请求：{text}"
-
-
 def _script_if_known(ep: MockLLMEndpoint, message: str) -> None:
     claim_id = _extract_claim_id(message)
     if claim_id is not None and claim_id in {c["id"] for c in mock_tools.claims_table()}:

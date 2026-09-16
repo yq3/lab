@@ -44,7 +44,7 @@ SYSTEM_PROMPT = """你是报销单审查助手。审查规则（先命中先停�
 先用工具核实部门预算与发票校验，最后一条消息只输出建议单 JSON
 （claim_id / decision / reason / remaining_cents 四字段，金额单位分）。"""
 
-# 工具注册表：框架绑定只到这里——mock_tools 本体不 import 任何框架（四课对版）
+# 工具注册表：框架绑定只到这里——mock_tools 本体不 import 任何框架（六课对版）
 TOOL_REGISTRY: dict[str, Callable[..., dict]] = {
     "check_budget": mock_tools.check_budget,
     "verify_invoice": mock_tools.verify_invoice,

@@ -3,7 +3,7 @@
 装配对比（同一契约的第二种装配——题面不动，差异只在装配方式）：
 
     L3.2 手装：StateGraph(ClaimState) + 3 个 add_node + 4 条边 + 手写 bind_tools/finalize
-               （demo.build_graph 约 10 行装配 + 约 40 行节点函数）
+               （demo.build_graph 10 loc 装配 + 节点函数 20 loc，ast 口径 count_loc 实测）
     L3.4 prebuilt：create_react_agent(model, tools, prompt) 一个调用——
                模型节点（"agent"）、工具节点（ToolNode）、条件边（should_continue）全在框架里。
 

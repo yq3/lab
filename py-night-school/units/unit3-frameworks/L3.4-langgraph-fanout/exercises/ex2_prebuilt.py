@@ -71,8 +71,9 @@ async def run_review(claim_id: str) -> Advice:
     with MockLLMEndpoint() as ep:
         ep.script_tool_calls(first_turn)
         ep.script_text(advice_json)
-        # TODO(ex2): agent = build_agent(model_for_url(ep.url))，
-        #   然后 result = await agent.ainvoke({"messages": [{"role": "user", "content": user_brief(claim_id)}]},
-        #   config={"recursion_limit": RECURSION_LIMIT})，取最终一条消息的 content，
-        #   Advice.model_validate_json(...) 解析后返回
+        # TODO(ex2): 两步：先用当前端点装配 agent（模型客户端 model_for_url 已备好）；
+        #   再 await 装配产物的 ainvoke——入口输入是只含「消息史」一个键的 dict，
+        #   消息列表里一条 user 消息（内容用 user_brief 组装；system 由 prompt= 负责），
+        #   config 记得带递归预算（模块顶部的常量）；返回结果取消息史里最后一条消息的
+        #   content，交给 Advice.model_validate_json(...) 解析后返回
         raise NotImplementedError("TODO(ex2): 补 ainvoke 与出口解析")
