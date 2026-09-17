@@ -1,0 +1,7 @@
+.venv/
+.stage/
+dist/
+mkdocs.yml
+# 教程纪律要求课时项目提交 uv.lock；本目录是构建工具链，锁文件暂不提交（口径待拆仓时统一）
+uv.lock
+__pycache__/
