@@ -44,11 +44,13 @@ uv run build.py && python3 -m http.server 8347 -d dist
 4. **版本锚定**：mkdocs-material 9.x（MIT，9.7.5 起钉 `mkdocs<2`——MkDocs 2.0 是不兼容的
    预发布重写，material 9.7.2+ 会打迁移警告，构建脚本用 `NO_MKDOCS_2_WARNING=1` 静音）。
    pymdown-extensions 12.x 的 tabbed 配置键是 `alternate_style`（旧文档的 `alternate` 已删）。
-5. **设计系统 v2**（经历一轮推倒重做，见过程志）：夜色深蓝底 = 品牌（夜校）；
-   Java 物橙 / Python 物蓝是**双语义强调色**（对照表列、代码块语言顶边同套着色）；
-   灯光琥珀只给「离毕业又近的一块」仪式段。落地页 front-matter `hide: [navigation, toc]`
-   做成全幅封面（衬线大标题 + 红印章落款 + 桥形连线）；正文栏靠覆盖 `.md-main__inner`
-   的 61rem 上限放开到 72rem（≈936px）。
+5. **设计系统 v4「素纸双主题」**（v3 夜壳纸面被用户评价「浮夸」后素化，见过程志第 7 步）：
+   在线讲义 = 一册素纸书——单一表面、零装饰零动画；**浅色（素纸，默认跟随系统）/ 深色
+   （夜色）由读者顶栏自选、localStorage 记忆**（mkdocs palette media+toggle 双 entry）。
+   主页改扉页式（衬线大题 + 副题 + 安静按钮 + 目次表 + 凡例），去掉星空/呼吸灯/印章/
+   发光桥/浮纸阴影。保留的安静身份记号：衬线标题、六段式幽灵数字、Java 橙 / Python 蓝
+   语义（对照表列、代码语言顶边、链接）、琥珀灯卡。token 与规则见 [DESIGN.md](./DESIGN.md)；
+   参考 ddia.vonng.com 的朴实书感（仅 UI 气质）。
 6. **Material 集成陷阱备忘**（写 CSS 前先读，详见踩坑实录 #4–#7）：
    - 背景变量是 `--md-default-bg-color`（带 `-dark` 后缀的写法不存在，写错则主题灰底漏出）；
    - `rem` 基于 Material 的 20px 根字号——侧栏宽 11.4rem ≈ 228px，不是常规浏览器语义；
@@ -63,7 +65,9 @@ handbook/
 ├── build.py                     # 构建器：staging 转换 + 生成 mkdocs.yml + 调 mkdocs
 ├── src/
 │   ├── index.md                 # 落地页（站内页面，非课程源，不参与 check_lesson）
-│   └── assets/stylesheets/night.css
+│   └── assets/stylesheets/night.css   # 设计系统 v3「夜壳纸面」
+├── PRODUCT.md                   # 产品真相（impeccable init 产物）
+├── DESIGN.md                    # 设计系统记录（impeccable documenter 产物）
 ├── .stage/                      # 暂存副本（生成物，gitignore）
 ├── dist/                        # 站点产物（生成物，gitignore）
 └── mkdocs.yml                   # 由 build.py 生成（gitignore）
@@ -133,6 +137,64 @@ handbook/
 - 管线：全量构建 44 页通过；jp-table 检出逐单元核对（unit1:14 / unit2:4 / unit3:8 /
   unit4:4 / unit5:4）；课程源文件零改动（git status 核验）。
 
+### 第 6 步：v3「夜壳纸面」（2026-09-17 深夜，frontend-design + impeccable 全流程）
+
+用户对 v2 的判断仍是「low」。带截图重诊，结论收敛为三条结构病：**Material 文档骨架
+未换只换皮**（顶栏 8 个长 tab、空左栏、折行右栏）、**全页均匀密度无节奏**、**强调色
+过多且深底长文先天疲劳**。方向判断：品牌世界（夜/灯/橙蓝/衬线）是宪法与 README 钉定的
+既定承诺，属「确立世界内的阅读面重做」，不走方向海选；核心立意取「夜校的书是纸做的」——
+**封面留在夜里，内页摊在灯下**。
+
+- build.py：修灯卡正则（两种标题变体）、SEG_RE 行尾锚、`extra.generator`；去
+  `navigation.tabs` 换 `navigation.sections`；导航标签截短（冒号/括号前）；落地页改走
+  stage_page（frontmatter `hide` 合并进生成头，源文件再带 frontmatter 也不怕）；
+  方向契约注释随构建注入每页（dist 可 grep「DESIGN CONTRACT」审计）。
+- night.css 全量重写为纸面系统：夜/纸双令牌组、纸面三栏、衬线幽灵数字、铅线表格、
+  深色代码屏、灯卡纸面化、hints 折叠降噪（语义色只给图标与标题）、落地页保留夜空
+  hero 但六卡片改讲义凡例式目次（去无序列语义的 01–06 编号卡网格）。
+- 验证：DOM 断言（灯卡 41/41、TOC 无模板垃圾、jp-table 命中、课程源零改动、
+  Made with 消失）+ 截图五景 + impeccable 机械检测器零输出 + 外派无上下文
+  finish review（降级路径，本 harness 无该专用 subagent，已披露）：首轮 recapture
+  （封面截图误标）→ 全审 fix（六卡网格 + 契约注释缺落地页）→ 修复引入 frontmatter
+  泄漏回归 → 终审 **ship**。评审者抓出的回归（stage_page 不剥源 frontmatter）反哺了
+  build.py 的健壮性。
+
+### 第 7 步：v4「素纸双主题」（2026-09-17 深夜续，参考 ddia.vonng.com）
+
+用户认可 v3 有进步但主页仍「浮夸」，且不要深浅混搭——要简洁朴实 + 深/浅主题自选。
+看参考站（docsify 式在线书：纯白底、左目录、正文一栏、零装饰）后定方向：**素纸书**。
+
+- build.py：palette 改 media + toggle 双 entry（浅默认跟随系统，顶栏月亮/太阳切换，
+  localStorage 记忆）；契约注释更新为 v4。
+- night.css 全量素化重写：语义令牌 `--ns-*` 按双 scheme 映射（浅素纸 #ffffff / 深夜色
+  #0d1322），组件只引用语义名两主题自动成立；去浮纸阴影/灯沿/星空/呼吸灯/全部 keyframes；
+  代码块回归主题原生底色（浅色浅底 + 深色深底，pygments token 随 scheme 自动切换）。
+- src/index.md：封面改扉页（衬线大题 + 副题 + 两枚安静按钮），新增目次表（六学段一览），
+  去印章/桥/星幕；六特色保持凡例式。
+- 验证：DOM 断言不变量（灯卡 41、契约 43 页、课程源零改动）+ 双主题九景截图 +
+  真实切换按钮实测（点击翻转 + localStorage 持久 + 跨页保持）+ 检测器随 DESIGN.md v4
+  同步后归零 + 独立 finish review：首轮 recapture（深色四图 md5 重复——多语句 eval
+  静默失败，教训入踩坑 #21）→ 全量重审 **ship**，附 7 条改进建议当批落地
+  （ink-3 对比度、打印样式、tabular-nums、深色行悬停、主按钮 hover 实色、
+  PRODUCT.md 同步、lamp-ink 加深）。
+
+### 第 8 步：用户六条体验修正（2026-09-18）
+
+1. **顶栏去 logo**：Material 未配置 icon.logo 时仍无条件渲染回退图标（material/library），
+   且与主题切换图标撞脸。→ 删除 icon 配置不够，新增 `src/overrides/partials/header.html`
+   （custom_dir 主题覆盖，升 material 需重新 diff）：删 logo 锚点 + 站名包首页链接；
+   侧栏标题里的 logo 用 CSS 隐藏。
+2. **深色下切换图标不可辨**：图标色来自 Material 变量（暗色下仍深）。
+   → `.md-header__option .md-icon { color: var(--ns-ink-2) }`。
+3. **品牌名改英文**：site_name 与扉页大题改「Python Night School」，中文「Python 夜校」
+   降为副题。
+4. **CTA 改「从 Unit 0 开始」**→ 路由 unit0/（单元导读）。
+5. **侧栏滚轮上滑钻进顶栏**：scrollwrap 无 max-height 裁剪。
+   → `max-height: calc(100vh - 5.4rem)` + `overscroll-behavior: contain`。
+6. **正文居中 + 字号**：Material 以 `[dir=ltr]` + 侧栏邻接选择器（0-5-1）强制 1.2rem
+   边距使正文左偏；左右栏改等宽 11.8rem 后仍需同形后发压制 margin auto（gapL=gapR=84
+   实测）；正文字号 17.1→16px、栏宽 42→40rem。
+
 ## 踩坑实录（现象 → 根因 → 修法）
 
 1. **非交互 shell 里 `uv` 不存在**：本机 uv 装在 `~/.local/bin`，靠 `.zshrc` 加 PATH，
@@ -173,11 +235,60 @@ handbook/
     钉 `mkdocs<2`。→ `NO_MKDOCS_2_WARNING=1` 静音，版本决策记录在架构决策 #4。
 14. **链接改写首轮方式不对**：把 `x/README.md` 改写成 `x/` 导致 mkdocs 报 unrecognized
     relative link。→ 改写成 `x/index.md`（mkdocs 原生认识，目录 URL 由它规范化）。
+15. **整页截图伪影误判白底 bug**：playwright fullPage 截图遇 `background-attachment: fixed`
+    时首屏以下不绘制背景（露出 html 白底，文字看似不可见），实际浏览正常。→ 视觉验证用
+    视口截图 + 滚动定位；整页截图只看结构布局，不判断色彩。
+16. **「Made with」查错地方**：material 9.7 页脚模板（partials/copyright.html）检查的是
+    `config.extra.generator == false`，不是 `theme.generator`（后者只管 meta 标签）。
+    → mkdocs 模板补 `extra: generator: false`。
+17. **表格被接管变量画成夜色**：material 9.7 以 `.md-typeset table:not([class])` 用
+    `--md-default-bg-color` 画表格底（0-2-1 特异性）——该变量被设计系统接管成夜色后，
+    普通的 `.md-typeset table` 压不过它。→ 同形选择器 `.md-typeset table:not([class])`
+    后发压制。**接管主题变量 = 接管所有引用它的主题规则，逐个排查引用点。**
+18. **`:has(...) .md-typeset X` 永不命中**：material 的 article 同时挂 `.md-content__inner`
+    与 `.md-typeset`，二者是同一元素——选择器要求的「后代 .md-typeset」不存在。
+    v2 全局是夜色语法，落地页文字颜色靠继承侥幸正确；v3 全局换墨色后立刻全部暴露。
+    → 上下文覆盖块一律去掉 `.md-typeset` 跳步（`.md-content__inner:has(> .ns-hero) h2`）。
+19. **admonition 类型类名与特异性双坑**：pymdownx/details 的类型类是 `note/tip/success`
+    （写 `admonition-note` 选择器 = 死规则）；material 的 per-type 标题底色是
+    `.md-typeset .note > summary`（0-3-1），普通规则压不过。→ 选择器用真类名 +
+    `[data-md-color-scheme="slate"]` 前缀同特异性后发压制。
+20. **stage_page 不剥源 frontmatter**：源 MD 自带 frontmatter（落地页的 hide）时，
+    生成头 + 源头共存，第二块被当正文渲染（还顺带破坏 hide 解析，封面长出侧栏）。
+    → stage_page 识别并合并源 frontmatter 的 hide 列表。
+21. **playwright-cli 多语句 eval 静默失败**：`eval "stmt1; stmt2"` 会被包成表达式
+    求值而语法错误，且 stderr 被吞后毫无迹象——滚动/换肤脚本整段没跑，深色截图四张
+    同 md5 还自以为有效。→ 一律块形式 `eval "() => { ...; return ... }"`；截图证据
+    要 md5 去重 + 角落像素采样（sips 裁图）核对，不轻信目测。
+22. **Material 未配置 logo 仍渲染图标**：`theme.icon.logo` 留空时 partials/logo.html
+    回退 `material/library` 图标，且 header.html 无条件渲染 logo 锚点（侧栏标题同款）。
+    → 覆盖 `partials/header.html`（custom_dir）删锚点，侧栏 logo 用 CSS 隐藏；升级
+    material 需重新 diff 覆盖文件。
+23. **正文左偏的元凶带方向前缀**：Material 用 `[dir=ltr] .md-sidebar--…~.md-content>
+    .md-content__inner`（0-5-1）给正文钉 1.2rem 边距，普通选择器压不过；且左右栏宽
+    不等时正文盒本身就不居中。→ 左右栏等宽 + `[dir]` 同形选择器后发 margin auto。
+
+## 第二轮诊断清单（2026-09-17 晚 · 已全部随 v3 修复）
+
+功能 bug（当轮即修）：
+
+1. ~~灯卡漏包 L0.1~~：`FINAL_HEADING` 写死「离毕业又近的一块」，而全课实存两种变体
+   「离毕业又近**了**一块」（unit0/1 部分）/「离毕业又近**的**一块」（其余 40 页）。
+   → 容错正则 `^## 离毕业又近[了的]?一块[ \t]*$`，44 页内容页灯卡 41/41 全亮。
+2. ~~SEG_RE 吞换行致围栏失效~~：`split_fences` 切块后标题块以「）\n\n」结尾，贪婪
+   `\s*$` 吃掉块尾换行，替换串无换行 → `{: .seg}` 与下一行围栏粘连，CURRICULUM.md 3 处
+   模板内容进 TOC。→ 行尾锚改 `[ \t]*$`。
+3. ~~`generator: false` 未生效~~：material 9.7 页脚模板检查的是 `config.extra.generator`
+   而非 `theme.generator`。→ mkdocs 模板补 `extra: generator: false`。
+
+视觉短板（4–8 条 + 更深的三条结构病：骨架模板感、无节奏、强调色噪声）→ 一并由
+设计系统 v3「夜壳纸面」重做（见过程志第 6 步）。
 
 ## 已知限制（原型阶段）
 
 - 中文搜索分词弱（lunr 默认按空白切分，CJK 长句召回差）——待引入 CJK tokenizer 或换索引方案。
-- 单暗色主题（品牌即夜色）；亮色切换待做。
+- ~~单暗色主题；亮色切换待做~~ → v4 已交付浅/深双主题（默认跟随系统，顶栏切换，
+  localStorage 记忆）。
 - 讲义内的 Tab / 折叠渐进披露组件目前只在落地页演示；课程 MD 逐课采用需要先在
   宪法 §3/§4 补约定（对照块语法、坑位折叠语法），避免各课各写一套。
 - `uv.lock` 暂列 gitignore：这是构建工具链锁文件，是否随仓提交待拆仓时与课程

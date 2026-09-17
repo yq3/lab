@@ -37,8 +37,25 @@ STAGE_DOCS = HANDBOOK / ".stage" / "docs"
 DIST = HANDBOOK / "dist"
 MKDOCS_YML = HANDBOOK / "mkdocs.yml"
 
-FINAL_HEADING = "## 离毕业又近的一块"
-SEG_RE = re.compile(r"^## (\d)\.\s*(.+?)\s*$", re.M)
+FINAL_HEADING_RE = re.compile(r"^## 离毕业又近[了的]?一块[ \t]*$", re.M)
+# 方向契约（impeccable：随构建产物留存，可审计——dist 任一页 grep「DESIGN CONTRACT」）
+DESIGN_CONTRACT = """<!--
+DESIGN CONTRACT 「素纸双主题」v4 · code-led（品牌锚不变：夜/灯/橙蓝语义/衬线标题）
+THESIS: 在线讲义是一册素纸书——单一表面、零装饰零动效；深/浅双主题由读者自选；
+拒绝封面夜空动效与深浅混搭（v3 已废）。
+OWN-WORLD: 浅色 = 素纸（#ffffff × 墨 #232936），深色 = 夜（#0d1322 × 星墨 #dde4f2）；
+细铅线分隔；Java 橙 / Python 蓝只承担信息（对照表列、代码语言顶边、链接）；
+琥珀只给灯卡与读数；宋体标题、黑体正文、等宽代码；零图片零外链零动画。
+STORY: 读者选一种眼睛舒服的模式，像读一本书一样顺序读完一讲。
+FIRST VIEWPORT: 扉页式主页（衬线大题 + 副题 + 两枚安静按钮 + 目次表）；内页衬线标题起头，正文 ~840px。
+FORM: 既定品牌内的素化重做（surface-scope，code-led），参考 ddia.vonng.com 的朴实书感（仅 UI 气质）。
+FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, DESIGN.md, and every shipping raster carrying its provenance.
+-->
+"""
+# 行尾锚必须是 [ \t]*$ 而非 \s*$：\s 会吃掉块尾换行（split_fences 在围栏处切块，
+# 标题块以「）\n\n」结尾时贪婪 \s*$ 吞掉全部换行，替换串无换行 → 标题与下一个
+# 围栏 ``` 粘连成一行，围栏失效（CURRICULUM.md 曾因此 3 处模板内容泄漏进 TOC）。
+SEG_RE = re.compile(r"^## (\d)\.[ \t]*(.+?)[ \t]*$", re.M)
 H1_RE = re.compile(r"^#\s+(.+?)\s*$", re.M)
 MD_LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
 
@@ -93,9 +110,9 @@ def wrap_final_note(text: str) -> str:
     offset = 0
     for is_code, chunk in split_fences(text):
         if not is_code:
-            hit = chunk.find(FINAL_HEADING)
-            if hit != -1:
-                pos = offset + hit
+            m = FINAL_HEADING_RE.search(chunk)
+            if m:
+                pos = offset + m.start()
                 break
         offset += len(chunk)
     if pos == -1:
@@ -163,16 +180,34 @@ def transform(body: str) -> str:
 
 # ---------------------------------------------------------------- 暂存与导航
 
+FM_RE = re.compile(r"\A---\n(.*?)\n---\n", re.S)
+
+
 def stage_page(src: Path, dst: Path, title_override: str | None = None) -> str:
-    """暂存一篇 MD（应用全部转换），返回页面标题。"""
+    """暂存一篇 MD（应用全部转换），返回页面标题。源文件若带 frontmatter，
+    其 hide 列表会被合并进生成的 frontmatter（落地页的 hide: navigation/toc）。"""
     text = src.read_text(encoding="utf-8")
+    hide: list[str] = []
+    if m := FM_RE.match(text):
+        for line in m.group(1).splitlines():
+            if (item := line.strip().removeprefix("- ").strip()) and line.startswith((" ", "-")):
+                hide.append(item)
+        text = text[m.end():]
     m = H1_RE.search(text)
     title = title_override or (m.group(1) if m else src.parent.name)
     if m:
-        text = text[: m.start()] + text[m.end() :]  # 剥离一级标题，页面标题交给主题
+        text = text[: m.start()] + text[m.end():]  # 剥离一级标题，页面标题交给主题
+    fm = f"title: {title}\n"
+    if hide:
+        fm += "hide:\n" + "".join(f"  - {h}\n" for h in hide)
     dst.parent.mkdir(parents=True, exist_ok=True)
-    dst.write_text(f"---\ntitle: {title}\n---\n{transform(text)}", encoding="utf-8")
+    dst.write_text(f"---\n{fm}---\n{DESIGN_CONTRACT}{transform(text)}", encoding="utf-8")
     return title
+
+
+def short_label(title: str) -> str:
+    """导航短标签：课时全标题截到冒号/括号前（侧栏与 tab 用；页面大标题不受影响）。"""
+    return re.split(r"[：（(]", title, 1)[0].strip()
 
 
 def build_nav(staged: dict[str, dict[str, str]]) -> str:
@@ -182,33 +217,42 @@ def build_nav(staged: dict[str, dict[str, str]]) -> str:
         tab, pages = unit["tab"], unit["pages"]
         lines.append(f"  - {json.dumps(tab, ensure_ascii=False)}:")
         for label, path in pages:
-            lines.append(f"      - {json.dumps(label, ensure_ascii=False)}: {path}")
+            lines.append(f"      - {json.dumps(short_label(label), ensure_ascii=False)}: {path}")
     return "\n".join(lines)
 
 
 def write_mkdocs_yml(nav: str) -> None:
     MKDOCS_YML.write_text(
         f"""# 由 build.py 生成——不要手改；改源文件后重跑构建。
-site_name: Python 夜校
+site_name: Python Night School
 site_description: 写给 Java 工程师的 Python Agent 开发晚课
-copyright: Python 夜校 · 以 Java 心智模型为桥
+copyright: Python Night School · Python 夜校 · 以 Java 心智模型为桥
 docs_dir: .stage/docs
 site_dir: dist
 
 theme:
   generator: false               # 页脚不显示主题署名
   name: material
+  custom_dir: .stage/overrides   # 覆盖 header.html：去 logo、站名可点击回首页
   language: zh
   font: false                    # 宪法：不外链 CDN，字体走系统栈（night.css 定义）
-  icon:
-    logo: material/weather-night
   palette:
-    scheme: slate
-    primary: custom
-    accent: custom
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-night
+        name: 切换到夜间模式
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-sunny
+        name: 切换到日间模式
   features:
-    - navigation.tabs
-    - navigation.expand
+    - navigation.sections          # 单元 = 左栏分组标题（不占顶栏 tab）
     - navigation.top
     - navigation.tracking
     - toc.follow
@@ -230,6 +274,9 @@ markdown_extensions:
   - toc:
       permalink: true
       toc_depth: 3
+
+extra:
+  generator: false                # material 9.7 页脚「Made with」检查的是 extra.generator
 
 extra_css:
   - assets/stylesheets/night.css
@@ -263,9 +310,11 @@ def main() -> int:
         shutil.rmtree(STAGE_DOCS)
     STAGE_DOCS.mkdir(parents=True)
     shutil.copytree(HANDBOOK / "src" / "assets", STAGE_DOCS / "assets")
+    shutil.copytree(HANDBOOK / "src" / "overrides", HANDBOOK / ".stage" / "overrides",
+                    dirs_exist_ok=True)
 
-    # 落地页 + 课表
-    shutil.copyfile(HANDBOOK / "src" / "index.md", STAGE_DOCS / "index.md")
+    # 落地页 + 课表（落地页也走 stage_page：带方向契约注释；无 h1/六段/表格，转换全部空转）
+    stage_page(HANDBOOK / "src" / "index.md", STAGE_DOCS / "index.md", title_override="Python 夜校")
     stage_page(ROOT / "CURRICULUM.md", STAGE_DOCS / "curriculum.md", title_override="课表 · 30 讲")
 
     staged: dict[str, dict] = {}

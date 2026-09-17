@@ -5,45 +5,51 @@ hide:
   - toc
 ---
 
-<!-- 落地页：站内页面（不属于 units/ 课程源，不参与 check_lesson 校验）。文案取自仓库 README.md。 -->
+<!-- 扉页：站内页面（不属于 units/ 课程源，不参与 check_lesson 校验）。文案取自仓库 README.md。 -->
 
-<div class="ns-hero">
-<div class="ns-shell">
-<p class="ns-eyebrow">PY NIGHT SCHOOL · 晚课讲义</p>
-<h1 class="ns-title">Python <em>夜校</em><span class="ns-seal">夜校</span></h1>
-<p class="ns-sub">写给 Java 工程师的 Python Agent 开发晚课——以 agent 开发为场景学 Python，以 Java 心智模型为桥，一个学期从语言核心学到金融合规毕业设计。</p>
-<p class="ns-bridge"><span class="j">Java</span><span class="line"></span><span class="p">Python</span></p>
-<p class="ns-cta"><a class="ns-btn ns-btn--primary" href="unit0/L0.1-uv-toolchain/">从 L0.1 开始</a><a class="ns-btn" href="curriculum/">先看课表</a></p>
+<div class="ns-cover">
+<h1 class="ns-title">Python Night School</h1>
+<p class="ns-sub">Python 夜校——写给 Java 工程师的 Python Agent 开发晚课：以 agent 开发为场景学 Python，以 Java 心智模型为桥，一个学期从语言核心学到金融合规毕业设计。</p>
 <p class="ns-meta">6 学段 · 30 讲 · 练习即测试 · 金融合规毕业设计</p>
+<p class="ns-cta"><a class="ns-btn ns-btn--primary" href="unit0/">从 Unit 0 开始</a><a class="ns-btn" href="curriculum/">先看课表</a></p>
 </div>
-<div class="ns-horizon"></div>
-</div>
+
+## 目次
+
+| 学段 | 主题 | 讲次 |
+|---|---|---|
+| [Unit 0](unit0/) | 起步：环境与工具链 | L0.1 |
+| [Unit 1](unit1/) | Python 语言核心 · Java 对照 | L1.1 – L1.9 + 里程碑 |
+| [Unit 2](unit2/) | 无框架手写 mini-agent | L2.1 – L2.5 + 里程碑 |
+| [Unit 3](unit3/) | 框架四重奏 | L3.1 – L3.8 + 里程碑 |
+| [Unit 4](unit4/) | 开源产品实战 | L4.1 – L4.3 + 里程碑 |
+| [Unit 5](unit5/) | 毕业设计 | L5.1 – L5.4 + 里程碑 |
 
 ## 这门课的六个不一样
 
 <div class="ns-feats">
 <div class="ns-feat">
-<h4><span class="no">01</span> Java 心智桥</h4>
+<h4>Java 心智桥</h4>
 <p>概念先给「Java 对应物 + 关键差异」对照表再动手；每个坑按「现象 / 最小复现 / Java 直觉为何失效 / 修复」四段命名化拆解。</p>
 </div>
 <div class="ns-feat">
-<h4><span class="no">02</span> 练习即测试</h4>
+<h4>练习即测试</h4>
 <p>每课练习是带 TODO 的代码，<code>uv run pytest</code> 全绿即过关。八个头部教程解剖的结论：练习验收是全行业空白——这是我们的核心差异。</p>
 </div>
 <div class="ns-feat">
-<h4><span class="no">03</span> 对照组教学</h4>
+<h4>对照组教学</h4>
 <p>Unit 2 先手写 ~300 行 mini-agent，之后每个框架课都回来对照「这层抽象替我付掉了什么」。</p>
 </div>
 <div class="ns-feat">
-<h4><span class="no">04</span> 源码路标</h4>
+<h4>源码路标</h4>
 <p>每课延伸给出 <code>仓库@commit#路径</code> 精确导读——学框架同时学读生产级 Python 源码。</p>
 </div>
 <div class="ns-feat">
-<h4><span class="no">05</span> 双贯穿线</h4>
+<h4>双贯穿线</h4>
 <p>明线「报销单审查」从第一课种下、四大框架同题重做；暗线财务 agent 毕业设计每课长一块。</p>
 </div>
 <div class="ns-feat">
-<h4><span class="no">06</span> 夜校纪律</h4>
+<h4>夜校纪律</h4>
 <p>中文原创、模型端点中立、每课独立 uv 项目锁定依赖、克隆即学——竞品的系统性短板在这里默认不发生。</p>
 </div>
 </div>
@@ -102,4 +108,4 @@ hide:
 
 阅读站只负责「读」。练习在仓库里：每课目录是独立 uv 项目，`uv sync` 后 `uv run pytest` 全绿即毕业——三命令验收、hints 渐进、参考答案分离，这些机制都以文件形态躺在课时目录里，克隆即学。
 
-> 本站当前为**原型**：已放量 Unit 0（1 讲，课表全量可见）。Unit 1–5 讲义在仓库 `units/` 全量就绪，构建命令去掉单元过滤即全量渲染。
+> 全部 6 学段 44 页已上线；课程内容以仓库 `units/` 的 Markdown 为唯一事实源，改源文件后重跑构建即可。右上角的月亮 / 太阳可切换夜间 / 日间模式。
