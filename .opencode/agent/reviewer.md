@@ -2,7 +2,7 @@
 name: Reviewer
 description: 方案文档审查（由用户在 build/plan 模式主动调用）：审查设计方案、测试用例、技术方案、实施计划等文档，输出结构化问题清单与结论。不审代码（代码审查归 Committer）
 mode: subagent
-model: deepseek/deepseek-v4-pro
+model: deepseek/deepseek-v4.1-flash
 reasoningEffort: max
 permission:
   edit: deny
