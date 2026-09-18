@@ -1,5 +1,11 @@
 # L3.4 langgraph ③：Send 动态扇出 + create_react_agent 源码导读
 
+> 昨晚图学会了「等」：checkpointer 把状态沉进 sqlite，`interrupt` 让脏数据单
+> CLM-2026-0003 在人审门暂停，`start / approve / deny` 三个真进程接力把它跑完——
+> thread_id 就是暂停点的唯一凭证。今晚收 langgraph 三连的尾，图从「会等」长到
+> 「会分身」：`Send` 动态扇出，一张图同时审四张报销单，归并半边交给你写的自定义
+> reducer；再把 `create_react_agent` 源码读穿——414 loc 里哪些在替你干活，逐段数清。
+
 ## 1. 本课目标
 
 L3.2 你手装了一张图，L3.3 给它装了暂停恢复；今晚做两件事收尾 langgraph 三连：

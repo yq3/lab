@@ -1,5 +1,10 @@
 # L1.1 运行模型与模块系统：一个 .py 怎么变成运行中的程序
 
+> 上一学段（L0.1）你配齐了 uv / pytest / ruff / pyright 四件套，第一次以三命令全绿拿到课时毕业，
+> 还种下了明线的第一颗种子——报销单预审规则 `preapprove()`，此刻它还只是一条躺在单文件里的 if 链。
+> 工具会用了，今晚开始语言正课第一课：拆开这个 `.py` 文件本身——它怎么变成运行中的程序、`import`
+> 那一行到底干了什么，最后把这条单文件规则升级成真正的包。
+
 ## 1. 本课目标
 
 说清两件 Java 里「基础设施替你干了」的事：**一个 `.py` 文件怎么变成运行中的程序**，以及 **`import` 那一行到底发生了什么**。完成后你能：
@@ -57,7 +62,7 @@ print(f"hello from {__name__}")
 |---|---|---|
 | 类必须进包；公共类名必须与文件名一致 | **文件名就是模块名**，想放几个函数就放几个 | Python 没有「一个文件一个公共类」约束 |
 | `package com.acme.finance;` 声明 | 目录 + `__init__.py` 文件 | 包身份来自目录结构，不来自声明语句 |
-| `com.acme.finance.Rules`（全限定名） | `expense.rules`（包.模块） | 命名空间分隔符从 `.` 变 `.`，但单位是模块不是类 |
+| `com.acme.finance.Rules`（全限定名） | `expense.rules`（包.模块） | 分隔符同为 `.`，但命名单位是模块不是类 |
 | jar 打包 | （目录本身就是可分发的形态） | 无需打包即可 import |
 
 本课 `code/` 里的包结构：
@@ -188,7 +193,7 @@ import 找模块的搜索路径是 `sys.path` 列表，对照：
 
 没有 group 的直接后果：PyPI 上的名字是稀缺资源（`pytest` 被官方占了，你就只能叫 `pytest-anyio` 这类带前缀的名字）。
 
-### 2.7 顺手正式讲：f-string、字符串不可变、print 的 SEP/END（附推导式与切片）
+### 2.7 语言杂项补讲：f-string、字符串不可变、print 的 sep/end（推导式速览，切片与解包）
 
 前面代码反复用了几个「Java 没有对应物」的形态，这里一次讲透。
 
@@ -213,7 +218,8 @@ print("loading", end="...")  # 不换行，末尾改成 "..."
 print("done")  # loading...done（接在上行后面）
 ```
 
-**推导式（comprehension）**——从现有序列构造新序列的一行式，Java Stream 的 `map/filter` 心智可以直接平移：
+**推导式（comprehension）**——从现有序列构造新序列的一行式，Java Stream 的
+`map/filter` 心智可以直接平移（今晚先速览混脸熟，L1.4 §2.6 正式主讲）：
 
 ```python
 [int(part) for part in "1200,3500".split(",")]  # [1200, 3500]  ≈ map(Integer::parseInt)
@@ -388,6 +394,6 @@ uv run pyright
 - google/adk-python@7b246e01#src/google/adk/__init__.py —— 另一种生产做法：`__getattr__` + 懒加载表，把 `__init__.py` 做成「按需 import」的门面（读懂它需要 L1.4 的函数为一等公民，先混个眼熟）。
 - 《Fluent Python》第 2 版第 1 章（数据模型）：dunder 名字体系的出处，`__name__` 是你遇到的第一个，后面还有一整个家族。
 
-## 离毕业又近了一块
+## 离毕业又近的一块
 
 今晚你把 L0.1 的单文件规则升级成了**包**——毕业设计的 fail-closed 执行门就是这种形态：检查链按「一个规则一个模块」拆进包里，入口统一 `python -m` 启动，`__name__` guard 保证检查模块既能被 pytest import 又能被单独拉起排障。模块化，是 PoC 长成系统的第一块骨头。

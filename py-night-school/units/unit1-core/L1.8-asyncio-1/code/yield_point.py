@@ -1,4 +1,4 @@
-"""实验⑤：两个 await 之间是原子的——asyncio.sleep(0) 是显式让出。
+"""Step 5：两个 await 之间是原子的——asyncio.sleep(0) 是显式让出。
 
 两个「窗口」各处理三张单据。唯一的多线程感时刻：把 await asyncio.sleep(0)
 删掉再跑一遍——输出立刻变成 A 连跑三轮、B 才开张。让出点就是唯一的交错机会。

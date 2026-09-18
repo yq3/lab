@@ -1,7 +1,10 @@
 # L3.1 openai-agents：极简原语层
 
-> Unit 3 的第一课，也是四重奏里**最薄**的一层抽象。mini-agent（Unit 2）亲手写过的每一行，
-> 这门框架几乎都替你付掉了——但付掉不等于消失，今晚我们把每一笔账都翻出来对一遍。
+> 上一学段在里程碑收官：mini-agent 五块肌肉集齐，client / tools / agent / structured /
+> mcp_bridge 五模块 249 行裸逻辑三条命令全绿——手写版从此成为 Unit 3 的全程对照组。
+> Unit 3 今晚开张：同一道报销单审查题交给五个框架重做，按抽象光谱从最薄的一层起步——
+> openai-agents 是原语层，mini-agent 里你亲手写的每一行它几乎都替你付掉。付掉不等于
+> 消失：今晚逐笔对账，框架替你付的每一样，都要能指回 mini-agent 里的那几行。
 
 ## 1. 本课目标
 
@@ -67,7 +70,9 @@ class Agent(AgentBase, Generic[TContext]):
 也没有魔法会背着你做事**——这是极简原语层的设计哲学（官方 README 的原话是
 "no new abstractions, just plain objects"），也是 §5 坑位的根源。
 
-`model` 字段是本课的关键注入点：传字符串会走框架默认的 **Responses API**；要让
+`model` 字段是本课的关键注入点。OpenAI 官方端点有两套协议：老牌 **Chat Completions**
+（我们 L2.1 手撕的那套）与新推的 **Responses API**（有状态、内置工具）——传字符串会
+走框架默认的 Responses API；要让
 Agent 走我们 mock 端点说的 chat-completions 协议，得传一个
 `OpenAIChatCompletionsModel(model=..., openai_client=AsyncOpenAI(base_url=...))`
 实例（openai/openai-agents-python@fbd2dbca#src/agents/models/openai_chatcompletions.py）——
@@ -304,7 +309,7 @@ final_output: Advice(claim_id='CLM-2026-0002', decision='REJECT', reason='REJECT
 from_string / Runner.run 恢复），不深入实现——L3.3 讲 checkpoint 时会拿它当
 「另一个框架的同一件事」对照。
 
-### 加餐：真实端点（可选）
+### Step 6（可选）：真实端点
 
 ```bash
 cp .env.example .env
@@ -333,11 +338,11 @@ cd exercises
 uv run python -c "from hints import hint; print(hint('ex1', 1))"
 ```
 
-| 题 | 文件 | 改造内容 | 验收要点 |
-|---|---|---|---|
-| ex1 | `exercises/ex1_handoff.py` | 单 agent → 审查员+复核专员双 agent（handoff-as-tool） | 四用例契约决策不变；ESCALATE 单 3 请求且 last_agent 换人 |
-| ex2 | `exercises/ex2_guardrail.py` | 无护栏入口 → InputGuardrail 拦不存在单号 | 好单号照常出 Advice；坏单号抛 tripwire 异常且 output_info 对口径 |
-| ex3 | `exercises/ex3_budget.py` | 默认预算 → 显式小预算 + 取证记账 | `MaxTurnsExceeded` 恰在第 N 轮；REQUESTS 账本兑现 |
+| 题 | 文件 | 考察 |
+|---|---|---|
+| ex1 | `exercises/ex1_handoff.py` | 单 agent → 审查员+复核专员双 agent（handoff-as-tool）；验收：四用例契约决策不变、ESCALATE 单 3 请求且 last_agent 换人 |
+| ex2 | `exercises/ex2_guardrail.py` | 无护栏入口 → InputGuardrail 拦不存在单号；验收：好单号照常出 Advice、坏单号抛 tripwire 异常且 output_info 对口径 |
+| ex3 | `exercises/ex3_budget.py` | 默认预算 → 显式小预算 + 取证记账；验收：`MaxTurnsExceeded` 恰在第 N 轮、REQUESTS 账本兑现 |
 
 验收（三条同时全绿 = 本课毕业）：
 

@@ -1,5 +1,11 @@
 # L3.5 deepagents：harness 形态（虚拟文件系统 / 子代理 / MemoryMiddleware）
 
+> 昨晚 langgraph 三连收口：`Send` 扇出让一张图并审四张报销单，`create_react_agent`
+> 414 loc 逐段读穿——手装与 prebuilt 两种装配同题全绿。今晚光谱进第三站 **harness**：
+> deepagents 连「画图」这道作业都收走，一行装配发来整个工作环境——文件系统、子代理、
+> 记忆全成了默认件。抽象厚一层、问题换一轮：上一站你还在亲手连边，这一站你要清点的
+> 是「默认塞给了我什么、哪些必须收走」。
+
 ## 1. 本课目标
 
 抽象光谱走到第三站。L3.1 的 SDK 说「我只给你原语，循环自己搭」；L3.2–L3.4 的
@@ -258,7 +264,7 @@ backend 下载进 `state["memory_contents"]`（`PrivateStateAttr`，不进最终
 注释在注入前被剥离（作者备注不进 system）。「记忆更新」则反向复用 `edit_file`
 工具——模型改文件即改记忆。
 
-### Step 5：讲义区验收 + （可选）真实端点（15 分钟）
+### Step 5：讲义区验收（15 分钟）
 
 ```bash
 uv run pytest code/
@@ -267,6 +273,8 @@ uv run pytest code/
 九个测试：共用契约两个（四种结论场景全跑通）+ 本课机制七个（五轮结构的主/
 子代理分工、底稿落盘、structured_response 类型、task 目录含默认件、子代理隔离、
 memory 注入、默认工具清单与收窄）。
+
+### Step 6（可选）：真实端点
 
 ```bash
 uv run python code/demo_harness.py --real
@@ -285,7 +293,7 @@ cd exercises
 uv run python -c "from hints import hint; print(hint('ex1', 1))"
 ```
 
-| 题 | 文件 | 改造点 |
+| 题 | 文件 | 考察 |
 |---|---|---|
 | ex1 | `exercises/ex1_custom_tool.py` | 加自定义工具 `lookup_policy`（政策话术 mock）并注册——命中记日志、未命中回错误行 |
 | ex2 | `exercises/ex2_budget_subagent.py` | 声明「预算专员」子代理（SubAgent 四键），把 check_budget 转交出去 |

@@ -22,13 +22,51 @@
 
 ```markdown
 # L<单元>.<序号> 课程名
+
+> 承接段（2–3 句，blockquote）：昨晚产出了什么（点名具体产出物）→ 今晚解决什么新问题 →
+> 为何排在今晚 / 与后续哪课相接。每单元首课回收上一学段；L0.1 写入学引导。
+
 ## 1. 本课目标          —— 完成后你能做什么（一句话，可验证）
-## 2. 概念讲解          —— 含 Java↔Python 对照表
-## 3. 动手代码          —— step-by-step 可运行（本课 code/ 目录）
-## 4. 练习              —— exercises/ 填空（单变量编辑约束）+ hints 渐进披露 + pytest 验收
+## 2. 概念讲解          —— 开头先给全课 Java↔Python 对照表，再逐小节展开；含各小节局部表
+## 3. 动手代码          —— step-by-step 可运行（本课 code/ 目录）；小节统一命名「Step N」，可选项标「（可选）」
+## 4. 练习              —— exercises/ 填空（单变量编辑约束）+ hints 渐进披露 + pytest 验收；表头统一「| 题 | 文件 | 考察 |」
 ## 5. Java 人坑位        —— 命名化失败模式：现象 / 最小复现 / Java 直觉为何失效 / 修复
-## 6. 延伸              —— 官方文档 + 源码路标（仓库@commit#路径）
+## 6. 延伸              —— 官方文档 + 源码路标（仓库@commit#路径）；「与 mini-agent 对照」
+                          （若本单元有）排在 §6 开头、源码清单之前
++ 结尾固定段「离毕业又近的一块」—— 暗线进度（散文体，下集预告写在这里；不计入六段编号，拼写以此为准）
 ```
+
+写作契约（机器校验对象，check_lesson.py 落实）：
+
+- **三命令块全课只贴一次**（§1 末的完成判据）；§4 验收处以一句话引用（「验收命令同 §1」），不复贴整块。
+- **完成判据口径统一**为「三命令全绿」，可附一句复述自查；不再用「pytest 全绿 + 能复述 X」的缩水版。
+- **术语首现即定义**：本课首次用到的术语，要么一句话定义，要么显式标注「先混个眼熟，Lx.y 主讲」——禁止先用后定义；知识点的主讲课归属见 §2.1 登记表。
+
+### §2.1 知识点登记表（唯一主讲课；改归属须同步两侧互指）
+
+| 知识点 | 主讲课 | 复现课（指路不重讲） |
+|---|---|---|
+| f-string / print sep·end / 切片解包 | L1.1 §2.7（速览） | L1.2 起日常用 |
+| 类型标注 / `str \| None` / 泛型 | L1.2 | 全程 |
+| typing.Protocol（结构化类型） | L1.2 §2.5 | L2.3 ModelClient、L2.5 |
+| 类语法 / dunder | L1.3 | 全程 |
+| dataclass / Pydantic | L1.3 | L2.2 起 agent 建模主力 |
+| 闭包 / nonlocal / `*args/**kwargs` | L1.4 | L1.5 地基 |
+| 推导式（正式主讲） | L1.4 §2.6 | L1.1 §2.7 已速览 |
+| 装饰器（含 @retry 带参形态） | L1.5 | Unit 1 里程碑、L2.2 @tool |
+| 迭代器协议 / 生成器 / yield | L1.6 | L1.7 @contextmanager、L1.9 |
+| 异常树 / 异常链 / EAFP | L1.7 | L1.9 CancelledError |
+| with 协议 / @contextmanager | L1.7 | L2.1 `async with` |
+| 事件循环 / 协程 / await | L1.8 | L1.9、L2.1 起 |
+| gather / wait_for / Semaphore / async 生成器 | L1.9 | Unit 1 里程碑、L2.1 |
+| naive vs aware datetime | L4.3 §2.7 | L5.4 §2.6（结课深化） |
+| superstep / BSP 执行模型 | L3.4 §2（深讲）；L3.2 首现带一句定义 | L3.3 pregel |
+| checkpoint / interrupt | L3.3 | L5.2 |
+| Annotated reducer | L3.2 | L3.4、L5.1 |
+| fail-closed / 四态 Literal | L2.4 | L4.3、L5.4 |
+| MCP（server/client/桥接） | L2.5 | L5.x 工具层 |
+
+新增知识点入课时在此登记一行；同一知识点两课都宣称「主讲」视为违规（先例：推导式曾 L1.1/L1.4 双主讲，2026-09-18 修为「速览 + 主讲」互指）。
 
 - 六段式借鉴 microsoft/ai-agents-for-beginners 的「文 + 码 + 延伸链接」三件套，在其上增加 Java 对照与坑位两段（我们的差异化所在）。
 - 源码路标统一指向 GitHub 真实路径并**锚定 commit**（如 `langchain-ai/langgraph@e539ac122#libs/langgraph/langgraph/graph/state.py`），不粘贴大段源码。
@@ -52,7 +90,7 @@
 |---|---|---|---|
 | 0 起步 | 1 | W1 | 工具链模板 |
 | 1 语言核心 | 9 | W2–4 | 练习集 + 并发 fetcher |
-| 2 无框架手写 | 5 | W5–6 | mini-agent ~300 行 |
+| 2 无框架手写 | 5 | W5–6 | mini-agent ~250 行 |
 | 3 框架四重奏 | 8 | W7–10 | 4 框架 demo + 决策表 |
 | 4 产品实战 | 3 | W11–13 | 3 产品改造 |
 | 5 毕业设计 | 4 | W14–16 | 财务 agent PoC + 映射表 |
@@ -102,7 +140,7 @@
 | L2.5 | MCP | 官方 `mcp` SDK 写 server（财务 mock 工具×3）+ client 消费 |
 
 - 朴素上下文管理（token 计数 + 裁剪）作为 L2.3 的加餐；
-- 里程碑：**mini-agent ~300 行**（多工具 + 流式 + 结构化输出 + MCP server）——Unit 3 的全程对照组。
+- 里程碑：**mini-agent ~250 行**（多工具 + 流式 + 结构化输出 + MCP server）——Unit 3 的全程对照组。
 
 ## Unit 3 框架四重奏（8 课）
 

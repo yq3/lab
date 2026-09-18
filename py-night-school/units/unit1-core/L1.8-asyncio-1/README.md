@@ -1,5 +1,10 @@
 # L1.8 asyncio ①：事件循环与协程
 
+> 昨晚你给报销域立起了异常分层（`ExpenseError` → `AmountParseError`，`raise ... from exc` 保留因果
+> 链），还用 `@contextmanager` 写了临时限额覆盖——错误处理与资源清理两块拼图归位。今晚进入学段压轴
+> 主题 asyncio 的第一课：建立事件循环 / 协程 / 让出点三个模型，看 `await` 怎么让「两张单据同时
+> 在飞」，以及为什么 Java 的线程心智（含虚拟线程）在这里是同一问题的相反解法。
+
 ## 1. 本课目标
 
 建立 asyncio 的三个核心心智模型：**事件循环**、**协程**、**让出点**；理解它与 Java 线程模型（含虚拟线程）
@@ -35,7 +40,7 @@ Java 世界里你已经拥有三种并发写法：线程池 + `Future`、`Comple
 | sleep 的后果 | 合法：只挂起自己 | 合法：自动让出载体线程 | **毒药：`time.sleep` 冻住整个事件循环** |
 | 某任务死循环 | 饿死一个线程 | 占住一个载体线程，其余虚拟线程还能长在别的载体上 | **整个程序唯一线程卡死，全员陪葬** |
 | 写法外观 | 同步代码 | 同步代码（最大卖点） | 全链路 `async`/`await`「传染」 |
-| 切换成本 | 内核级微秒上下文切换 | 极低 | 接近一次函数调用（无栈协程） |
+| 切换成本 | 内核级微秒上下文切换 | 极低 | 接近一次函数调用（无栈协程：暂停不靠线程栈切换，靠函数自身的 await 点——延伸段给了深读入口） |
 | 心智负担 | 锁与竞态 | 几乎零新增 | **让出点纪律**：两个 `await` 之间是原子的 |
 
 三条推论，正好对应今晚的两类事故与一类传染：
@@ -76,7 +81,7 @@ Netty 跑的是回调（`channelRead`），asyncio 跑的是协程（`await` 处
 `async def` 定义的是**协程函数**；**调用它不执行任何函数体，只是返回一个协程对象**——一张「待办单」。
 这是 Java 里不存在的东西：Java 方法调用即执行，最接近的形态是拿到一个没调 `run()` 的 `Runnable`。
 
-实测（本课实验③的真实输出）：
+实测（本课 Step 3的真实输出）：
 
 ```python
 async def review(claim_id: str) -> str: ...
@@ -103,7 +108,7 @@ print(type(coro).__name__)  # coroutine —— 此刻函数体一行都没跑
 
 `await x` 三步：① 把当前协程挂起；② 控制权交回事件循环（回到 2.2 伪代码第 ④ 步的下一步）；③ `x` 完成后被
 排回就绪队列、恢复执行。所以 **`await` 是让出点，两个 `await` 之间是原子的**——中间的代码不可能被别的
-任务插队（单线程 + 协作式的直接推论，实验⑤眼见为实）。
+任务插队（单线程 + 协作式的直接推论，Step 5 眼见为实）。
 
 `await` 后面能跟的东西统称 awaitable，三层一句话分层：
 
@@ -124,7 +129,7 @@ print(type(coro).__name__)  # coroutine —— 此刻函数体一行都没跑
 ### 2.6 `await` 什么才让出：不是写了 await 就高枕无忧
 
 让出的触发条件是「await 到一个未完成的东西」：`await asyncio.sleep(0)` 是**显式让出**——立刻把我排到
-就绪队列尾（实验⑤）。反过来，**`time.sleep` 是阻塞毒药**：它不是 awaitable、不经过事件循环、也不让出——
+就绪队列尾（Step 5）。反过来，**`time.sleep` 是阻塞毒药**：它不是 awaitable、不经过事件循环、也不让出——
 在单线程世界里，它睡的每一毫秒都是全场的。同理：同步 IO（比如 `requests` 库的请求）、CPU 重活（大循环、
 解析大 JSON），都会把循环冻住。修复方向一句话预告：同步重活用 `asyncio.to_thread` 扔进线程池（后续课程用到再展开）。
 
@@ -132,20 +137,20 @@ print(type(coro).__name__)  # coroutine —— 此刻函数体一行都没跑
 
 五个实验都在 `code/` 目录（先 `uv sync`）。每个都是可独立运行的脚本，输出全是实测。
 
-### 实验① + ②：第一个 async 程序，与「一行换并发」
+### Step 1 + 2：第一个 async 程序，与「一行换并发」
 
 ```bash
 uv run python code/first_steps.py
 ```
 
 ```text
-== 实验①：顺序 await（总耗时 = 两段延迟相加）==
+== Step 1：顺序 await（总耗时 = 两段延迟相加）==
   log: ['start:CLM-A', 'done:CLM-A', 'start:CLM-B', 'done:CLM-B']
   结果: ['CLM-A:OK', 'CLM-B:OK']
   总耗时: 0.202s ≈ 0.1 + 0.1
   ——await 的字面意思：等它做完，我才能继续。
 
-== 实验②：gather 并发（总耗时 ≈ 最大延迟）==
+== Step 2：gather 并发（总耗时 ≈ 最大延迟）==
   log: ['start:CLM-A', 'start:CLM-B', 'done:CLM-A', 'done:CLM-B']
   结果: ['CLM-A:OK', 'CLM-B:OK']
   总耗时: 0.100s ≈ max(0.1, 0.1)——两张单据同时在飞
@@ -154,7 +159,7 @@ uv run python code/first_steps.py
 看两处：①的 log 里 B 要等 A 完全结束；②只改驱动方式（`gather`），两张单据同时在飞，总耗时 0.2s → 0.1s。
 `gather` 的完整规格（保序、异常传播）是 L1.9 的正餐，今晚只把它当「并发对照组」。
 
-### 实验③：协程对象——调用 ≠ 执行
+### Step 3：协程对象——调用 ≠ 执行
 
 ```bash
 uv run python code/coroutine_object.py
@@ -181,7 +186,7 @@ RuntimeWarning: Enable tracemalloc to get the object allocation traceback
 `never awaited` 警告——这就是坑位一的现场。开头那行被忽略的 `# pyright: ignore` 注释说明：
 pyright 本来能静态抓住这个事故（见坑位一的修复纪律）。
 
-### 实验④：阻塞事故——一个 time.sleep 冻住全场
+### Step 4：阻塞事故——一个 time.sleep 冻住全场
 
 ```bash
 uv run python code/blocking_disaster.py
@@ -210,7 +215,7 @@ uv run python code/blocking_disaster.py
 三个任务名义上「并发」，但事故版里 CLM-X 的 `time.sleep(0.3)` 让事件循环 0.3 秒无暇他顾——Y/Z 连
 「开始等待」的资格都被剥夺。同样等 0.3s，换成 `await asyncio.sleep` 立刻回到理想值。眼见为实。
 
-### 实验⑤：`asyncio.sleep(0)` 手动让出——交替的可见证据
+### Step 5：`asyncio.sleep(0)` 手动让出——交替的可见证据
 
 ```bash
 uv run python code/yield_point.py
@@ -259,7 +264,7 @@ uv run pyright
 - **现象**：调用了 async 函数，但忘了 `await`——什么都没发生，功能静默失效；唯一的线索是解释器回收协程对象时
   的 `RuntimeWarning: coroutine ... was never awaited`。更阴的是协程对象是真值、能打印、能当参数传——
   它不会像 None 一样在下一个分支炸出来。
-- **最小复现**（实验③第 3 节的浓缩）：
+- **最小复现**（Step 3 第 3 节的浓缩）：
 
   ```python
   async def send_report(claim_id: str) -> bool: ...
@@ -273,14 +278,14 @@ uv run pyright
   类比是拿到 `Runnable` 忘了 `run()`、或建了 `CompletableFuture` 忘了链下去——但 Java 编译器至少让你
   显式地看到「拿到一个对象」，Python 的裸调用看起来和普通函数调用一模一样。
 - **修复与纪律**：① 见到 `coroutine object` 字样或 `never awaited` 警告，立刻回头找漏写的 `await`；
-  ② pyright 的 `reportUnusedCoroutine` 检查能静态抓住裸调用（本课工具链已默认开启——实验③里那行
+  ② pyright 的 `reportUnusedCoroutine` 检查能静态抓住裸调用（本课工具链已默认开启——Step 3 里那行
   `# pyright: ignore[reportUnusedCoroutine]` 正是先关掉它才能演示事故）；③ 不打算跑的协程显式 `close()`。
 
 ### 坑二：time.sleep 毒害坑（「阻塞全场」）
 
 - **现象**：async 函数里一句 `time.sleep(0.3)`，全场所有任务被冻结 0.3 秒——并发消失、超时误报、
-  心跳停止，且没有任何报错指向肇事者（实验④：总耗时 0.406s，两个 0.1s 的任务连起步都被推迟）。
-- **最小复现**（实验④的浓缩）：
+  心跳停止，且没有任何报错指向肇事者（Step 4：总耗时 0.406s，两个 0.1s 的任务连起步都被推迟）。
+- **最小复现**（Step 4 的浓缩）：
 
   ```python
   async def fetch(claim_id: str) -> str:

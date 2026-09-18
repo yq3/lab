@@ -1,14 +1,58 @@
 # Unit 5 毕业设计：财务 agent
 
 > 把研究报告的推荐架构做成 Python PoC——用最低成本验证模式，再翻译回 Java。技术栈：langgraph + FastAPI + SQLite + 任一 OpenAI 兼容模型。
-> 蓝本：lab 仓 [research/agent-oss/report.md](../../../research/agent-oss/report.md) §4（18 仓解剖出的推荐架构；模式编号 A1–A30 贯穿四课讲义）。
+> 蓝本：lab 仓 [research/agent-oss/report.md](../../../research/agent-oss/report.md) §4（18 仓解剖出的推荐架构；讲义里以模式编号指代其中的模式，速查表见下节——不必去读研究报告）。
+
+## A 模式速查表（讲义里的编号都在这）
+
+四课讲义用编号指代推荐架构里的模式。**每个编号只需记住一句话**，讲义首次用到时会再提醒：
+
+| 编号 | 一句话 | 主战场 |
+|---|---|---|
+| A23 | 固定图 + 计划驱动路由：拓扑静态可审计，LLM 只产 Plan JSON（schema 强约束 + 工具白名单） | L5.1 |
+| A25 | 条件边循环 + 计数终止：回环可预算，不靠模型自觉 | L5.1 |
+| A29 | 失败原因显式状态键：拒绝原因进 state 驱动定向重生成，不是笼统重试 | L5.1 |
+| A15 | 审计绑定版本：图形状签名进 checkpoint key，改图自动作废旧执行态 | L5.1/L5.3 |
+| A1 | 审批外化 API 组：REST 建单 / 待审总表 / once-always-reject 回复 + SSE 推送，执行挂起等待 | L5.2 |
+| A2 | 审批是可重放事件：断线重订阅即重放，无人在线不丢单 | L5.2 |
+| A24 | 图上 human 节点回环：interrupt 暂停 + checkpoint 断点续跑（HITL） | L5.2 |
+| A6 | 审批与被审内容版本绑定：内容一改即撤销审批（批的是这一版，不是单据号） | L5.2/L5.4 |
+| A11 | 事件溯源存储：append-only 事件表，审批/成本/压缩皆一等事件 | L5.3 |
+| A13 | 缓存即审计：每个 LLM 决策的输入输出快照按内容寻址落盘 | L5.3 |
+| A7 | 执行侧二次校验：执行器收口处独立复核审批状态，与决策层纵深防御 | L5.4 |
+| A8 | fail-closed 决策门 + 三态裁决：任何输入不可解析即 DENY | L5.4 |
+| A9 | 授权不可达：限额/白名单不是工具、不进注册表，被劫持的 agent 无从发现 | L5.4 |
 
 ## 学法说明（先读这段）
 
-- **四课是一棵树的四次生长，不是一个课的四章**：L5.1 打地基（静态图 + 计划驱动），L5.2/L5.3 是地基上的两条并行生长线（审批外化：REST + SSE + interrupt 恢复；事件溯源：SQLite append-only + 缓存即审计），L5.4 汇合两条线加执行门（fail-closed 检查链）收口结业。**每课目录都含截至当课的完整 PoC**（对版纪律：共享件从基准课整目录复制再扩展，字节相同的文件保持字节相同；每处差异在 docstring 就地声明）——任何一课毕业，你手里都有一个能跑的完整系统。
-- **毕业设计的形状**（推荐架构 §4.1 的 Python 版）：固定拓扑「intake → planner（LLM 产 Plan JSON）→ plan_gate（校验+白名单）→ executor（确定性步进）→ drafter（LLM 叙述建议单）→ submit（送审，interrupt 暂停）→ 审批 API（once/always/reject）→ 执行门（fail-closed）→ 终态」。LLM 的动态性只出现在两个节点（规划与叙述），数字全部代码算，审批与执行全部代码门。
+- **四课是一棵树的四次生长，不是一个课的四章**：
+
+  ```
+              L5.1 静态图 + 计划驱动（地基）
+                    │
+        ┌───────────┴───────────┐
+   L5.2 审批外化 API          L5.3 事件溯源与审计
+   （REST+SSE+interrupt，      （SQLite append-only、
+     一条并行生长线）            缓存即审计，另一条并行线）
+        └───────────┬───────────┘
+                    │
+              L5.4 执行门 + 结业（汇合：以 L5.3 为底、并入 L5.2 的审批面）
+  ```
+
+  L5.2 与 L5.3 **相互独立、都只依赖 L5.1**（先做哪个都行），L5.4 汇合两条线加执行门
+  （fail-closed 检查链）收口结业。**每课目录都含截至当课的完整 PoC**（对版纪律：共享件
+  从基准课整目录复制再扩展，字节相同的文件保持字节相同；每处差异在 docstring 就地声明）
+  ——任何一课毕业，你手里都有一个能跑的完整系统。
+- **毕业设计的形状**（注意：这是 L5.4 长完的**终态**，L5.1 开局只有七节点核心图，审批面
+  和执行门是四次生长逐步长出来的）：固定拓扑「intake → planner（LLM 产 Plan JSON）→
+  plan_gate（校验+白名单）→ executor（确定性步进）→ drafter（LLM 叙述建议单）→
+  submit（送审，interrupt 暂停）→ 审批 API（once/always/reject）→ 执行门（fail-closed）→
+  终态」。LLM 的动态性只出现在两个节点（规划与叙述），数字全部代码算，审批与执行全部代码门。
 - **零 key 底线不变**：mock 端点继续服役；FastAPI 的验收走 httpx 内存态直连（ASGI transport，不起真端口、不开防火墙），SSE 在内存里照样逐事件断言；真实端点与 `uvicorn` 起服务都是 `--real` 可选加餐。
-- **Java 桥在这里换挡**：前四个学段用 Java 概念解释 Python，本学段开始反向——每引入一个模式，顺手记录它的 Java 对应物（spring-ai-alibaba graph / langgraph4j 的真实 API 名），这些记录最终汇成你的 **JAVA-MAPPING.md**：毕业后把 PoC 翻译回 Java 栈的开发任务拆解输入。这是本教程双目的的兑现点。
+- **Java 桥在这里换挡**：前四个学段用 Java 概念解释 Python，本学段开始反向——每课的
+  Java↔Python 对照表把模式的 Java 对应物给全（spring-ai-alibaba graph / langgraph4j 的
+  真实 API 名），这些对照在 L5.4 汇总成你亲手填写的 **JAVA-MAPPING.md**：毕业后把 PoC
+  翻译回 Java 栈的开发任务拆解输入。这是本教程双目的的兑现点。
 - **三条主链路是毕业判据**（里程碑集成测试）：①审批暂停→恢复（interrupt → 工作台批准 → 断点续跑）；②审批拒绝→回环（reject+反馈 → 重新规划/重生成）；③fail-closed 拒绝（超限 proposal → DENY → 审计链留痕）。三条全绿 + JAVA-MAPPING.md = 毕业。
 
 ## 课表

@@ -1,7 +1,8 @@
 # L5.4 毕业设计④：fail-closed 执行门与结业——最后一道门，以及回 Java 的桥
 
-> Unit 5 收官课，也是全教程最后一课。前三课把毕业设计一层层装起来：L5.1 图、L5.2 审批面、
-> L5.3 事件层；今晚把它们**汇合成完整 PoC**，在执行出口装上最后一道 fail-closed 门，并产出
+> 昨晚 L5.3 审计面就位：执行史 append-only 落账、模型决策可回放原话、每一版图自带身份。
+> 今晚是全教程最后一课，也是两条并行线的**汇合点**：以 L5.3 为底，并入 L5.2 的审批面
+> （interrupt 暂停、三元回复、拒绝回环），在执行出口装上 fail-closed 执行门收口，并产出
 > **JAVA-MAPPING.md**——本教程「双目的」的兑现物：每个模式在 Java 栈的对应物与翻译坑，
 > 拿去就能当 Java 侧开发任务的拆解输入。讲义末尾是结业自查表（CURRICULUM §7 逐条对照）。
 
@@ -129,12 +130,14 @@ L4.1 在 ai-hedge-fund 读过的总纲，今晚在自家 PoC 里长成了完整�
 
 ### 2.6 新 Python 件：naive vs aware datetime——「当日」窗口为什么不取 now()
 
+（L4.3 §2.7 已讲过 naive/aware 的类型学，此处结课深化：把它用到「当日限额窗口」这个真实决策点上。）
+
 Python 的 `datetime` 默认是 **naive**（不带时区）——它和 Java 的 `Instant`（必然带时区语义）
 是两种世界观，§5 坑位专门拆。本课只需要一条纪律的结论：
 
 - 门的「当日」窗口**不依赖 `datetime.now()`**，而是**注入 `today`**（ISO 日期字符串，
   `graph.DEFAULT_TODAY = "2026-09-16"`）：装配方显式给、测试随便改、两次运行可复现——
-  对版 L4.3 的 TodaySnapshot 与 L5.3 的事件钟（同一纪律的第三次出现：**边界数据一律注入，
+  对版 L4.3 的 TodaySnapshot 与 L5.3 的事件钟（同一纪律：**边界数据一律注入，
   不取墙钟**）；
 - 为什么不用 `date.today()`？三个理由：①时区——`today()` 取本机时区的今天，服务器时区一变，
   「当日」窗口漂移，限额/频次跟着漏判（跨时区主机上「同一时刻」甚至不是同一天）；②可测——
@@ -358,13 +361,7 @@ uv run python -c "from hints import hint; print(hint('ex1', 1))"
 | ex2 | `exercises/ex2_wire.py` | 门入图（复用讲义区真件 `gate.check_intent`）：execute 三出口接线（ALLOW 记账+paid_cents+事件 / DENY/PAUSE 写 gate_reject 交哨兵分码）+ route_after_execute；验收含链路①付款在账、链路③超限未付款且终态 ESCALATE、**审批 hash 不匹配整单 DENY**、clamp 裁剪值、最坏链不炸（RECURSION_LIMIT 足够） |
 | ex3 | `exercises/ex3_mapping.py` | 开放设计题·诚实降级：JAVA-MAPPING.md 的校验器（四列齐 + Java 列非空 + TODO 报未填）与行数统计；测试只查结构与统计，不硬造内容判分。**学员任务在文档里**：把 `code/JAVA-MAPPING.md` 的 4 行 TODO 补全（对照本地克隆核实），完整对照版在 `solution/JAVA-MAPPING.md`（行尾 golden answer） |
 
-验收（三条同时全绿 = 本课毕业；发货态 22 个练习测试红、3 个 given/meta 绿）：
-
-```bash
-uv run pytest
-uv run ruff check .
-uv run pyright
-```
+验收命令同 §1 的完成判据（三条同时全绿 = 本课毕业；发货态 22 个练习测试红、3 个 given/meta 绿）。
 
 ## 5. Java 人坑位：天真时间坑
 
@@ -412,10 +409,10 @@ uv run pyright
     —— interrupt 的 Java 形态：`interrupt(nodeId, state, config)` 返回
     `Optional<InterruptionMetadata>`——对照 Python 的 `interrupt()` 像不像「会返回值的
     await」，差异全在 JAVA-MAPPING 第四行；
-  - `spring-ai-alibaba/spring-ai-alibaba@f82da0b50#spring-ai-alibaba-graph-core/src/main/java/com/alibaba/cloud/ai/graph/StateGraph.java`
+  - `alibaba/spring-ai-alibaba@f82da0b50#spring-ai-alibaba-graph-core/src/main/java/com/alibaba/cloud/ai/graph/StateGraph.java`
     —— saa 的装配：`StateGraph(KeyStrategyFactory)` L170 + `addNode` L244 + `compile` L535；
     恢复原式在
-    `spring-ai-alibaba@f82da0b50#spring-ai-alibaba-graph-core/src/test/java/com/alibaba/cloud/ai/graph/InterruptionTest.java`
+    `alibaba/spring-ai-alibaba@f82da0b50#spring-ai-alibaba-graph-core/src/test/java/com/alibaba/cloud/ai/graph/InterruptionTest.java`
     ——`workflow.stream(null, RunnableConfig.builder().resume().build())`。
 - 研究蓝本（lab 仓内，写作输入）：A7 执行侧二次校验 / A8 fail-closed 决策门三态 / A9
   授权不可达的模式条目见

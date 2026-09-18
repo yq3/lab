@@ -1,5 +1,10 @@
 # L0.1 环境与工具链：从 Maven 到 uv
 
+> 欢迎入学。这门课**克隆即学**：仓库拉下来就是全部教材，每课目录是一个独立的 uv 项目，进目录让
+> `uv run pytest` / `uv run ruff check .` / `uv run pyright` 三条命令同时全绿，即本课毕业；卡住了
+> 先翻该课的「Java 人坑位」小节——你将踩的坑，前人都已命名归档。今晚第一课只干一件事：把
+> uv / pytest / ruff / pyright 工具链一次配齐，之后 29 课都踩在这套地基上开工。
+
 ## 1. 本课目标
 
 配齐夜校工具链，并种下「报销单审查」明线的第一颗种子。完成后你能：
@@ -112,7 +117,7 @@ uv run ruff check code/    # 示例代码无违规
 uv run ruff format --check code/   # 格式符合规范
 ```
 
-看一眼 `code/test_budget.py` 里的 `@pytest.mark.parametrize`——它对应 JUnit 5 的 `@ParameterizedTest`，但只需要一个装饰器 + 一个元组表。
+看一眼 `code/test_budget.py` 里的 `@pytest.mark.parametrize`——它对应 JUnit 5 的 `@ParameterizedTest`，但只需要一个装饰器 + 一个元组表。（`@` 是装饰器语法，L1.5 才主讲——今晚照抄这一行即可。）
 
 ### Step 5 体验 ruff 当老师（5 分钟）
 
@@ -232,8 +237,8 @@ uv run pyright
 - pytest 官方入门：https://docs.pytest.org/en/stable/getting-started.html
 - ruff 官方文档（规则一览）：https://docs.astral.sh/ruff/rules/
 - openai/openai-cookbook@9aad95f#articles/what_makes_documentation_good.md —— OpenAI 的「好文档写作宪法」，本教程讲义规范的同源出处；读它能让你具备鉴别好教程/坏教程的眼光。
-- microsoft/mcp-for-beginners@2f43408b#03-GenAI-Fundamentals —— 它的「练习三层结构」（Exercise 步骤引导 → Assignment 开放作业 → solution 分离）是本课练习机制的设计先例之一，Unit 2 讲 MCP 时还会回来。
+- microsoft/mcp-for-beginners@2f43408b#03-GettingStarted —— 它的「练习三层结构」（Exercise 步骤引导 → Assignment 开放作业 → solution 分离）是本课练习机制的设计先例之一，Unit 2 讲 MCP 时还会回来。
 
-## 离毕业又近了一块
+## 离毕业又近的一块
 
 `preapprove()` 就是毕业设计「fail-closed 执行门」里**限额检查**的雏形（纯函数、整数分、可参数化测试）。到 Unit 5 你会把它升级成检查链：授权有效 → kill switch → 对账 → 限额三态裁决——今晚你已经写下了最后一环的种子。

@@ -18,7 +18,7 @@
 机器证据。所以层① 用 verify.py 子进程逐课重跑 `uv run pytest code/`（只跑讲义区——
 `exercises/` 是各课自己的学员作答区，发货态含设计内 TODO 红，不进本里程碑判据）；
 层② 把真改造写成三份说明：**结构**（章节齐、任务卡的关键物点名）机器把关，
-**内容质量**你自己负责——开放设计题不硬造判分（宪法 §4 的里程碑形态）。
+**内容质量**你自己负责——开放设计题不硬造判分（里程碑的一贯形态：结构机器把关，内容自查）。
 
 ## 使用步骤
 
@@ -75,8 +75,8 @@ verify 退出码: 0（0=全绿；1=有 FAIL；2=全跳过）
    `exit_code` / `notes_status`）是纯函数；执行层（`run_lesson`）是薄壳——**runner
    可注入**：默认实现起真 subprocess（`subprocess.run([...], cwd=...)` ≈ Java 的
    `ProcessBuilder`，参数走列表不经 shell 解析），`tests/` 注入 fake runner 喂合成
-   输出离线验收 PASS/FAIL/超时分支。为什么 pytest 不直接去跑兄弟课时（宪法演进锚点
-   ⑧，Unit 3 先例）：三态验证的毕业态把本目录镜像到临时目录时只带 `milestone/` 与
+   输出离线验收 PASS/FAIL/超时分支。为什么 pytest 不直接去跑兄弟课时（Unit 3 里程碑的
+   先例）：三态验证的毕业态把本目录镜像到临时目录时只带 `milestone/` 与
    `data/`——兄弟课时不在镜像里，测试碰它们必红。真跑（`uv run python verify.py`）
    是学员命令；在毕业态镜像里跑会如实标 SKIPPED、退出码 2——「没跑」绝不伪装成
    「全绿」。

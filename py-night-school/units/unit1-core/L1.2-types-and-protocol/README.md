@@ -1,5 +1,10 @@
 # L1.2 类型系统与 Protocol：标注是承诺，Protocol 是形状
 
+> 昨晚你把单文件 `preapprove()` 升级成了 `expense` 包：规则拆进模块、入口用 `python -m expense.cli`
+> 启动、`__name__` guard 让规则模块既能被 pytest import 又能单独拉起排障。代码能跑了，但类型标注你
+> 一直只是照模板抄——今晚把它变成自己的语言：写出精确签名（含 `str | None` 与泛型），理解「标注不
+> 影响运行时」而 pyright 就是夜校的 javac，并用 `Rule` Protocol 表达「有这个方法就行」。
+
 ## 1. 本课目标
 
 读懂并写出现代类型标注（含泛型与 `str | None` 联合），理解「标注不影响运行时」与 pyright 在工作流里的角色，并用 **Protocol** 表达「有这个方法就行」。完成后你能：
@@ -36,7 +41,7 @@ uv run python -c "x: int = 'abc'; print('照样运行, x =', x)"
 
 声明 `int` 赋值 `str`，解释器毫无怨言。**但这不是标注没用的证据，而是分工不同的证据**：运行时不看标注，静态检查器看。夜校的纪律：全程标注 + `uv run pyright` 当编译器——L0.1 起每课验收都有它，理由和 Java 团队不开 `-Xlint:none` 一样。
 
-顺带一个运行时差异：标注是**真实存储在函数对象上的数据**（练习 1 的验收就是用 `typing.get_type_hints()` 把你写的标注取出来机器比对）——它不是注释，只是不被解释器强制。
+顺带一个运行时差异：标注是**真实存储在函数对象上的数据**（练习 1 的验收会把它取出来逐个比对）——它不是注释，只是不被解释器强制。
 
 ### 2.2 基础标注语法与现代写法
 
@@ -151,6 +156,7 @@ public class ItemLimitRule {          // 想用？必须改成 ... implements Pr
 
 ```python
 # code/protocols.py —— Python：什么都不用声明，长得像就行
+#（class 语法 L1.3 才主讲，此处只需看懂形状：一个只有方法签名、无实现的类）
 from typing import Protocol, runtime_checkable
 
 
@@ -190,6 +196,14 @@ def run_rules(rules: list[Rule], items: list[int]) -> str:  # 参数类型是协
 - `run_rules` 的参数类型 `list[Rule]` 传 `ItemLimitRule` 实例完全合法——**pyright 在编译期做结构化检查**（静态版的鸭子类型）。这正是个成语的工程化：「走起来像鸭子……」现在鸭子有了图纸。
 - `@runtime_checkable` 解锁 `isinstance(rule, Rule)`（运行时只查「方法名在不在」，**不查签名与类型**——比静态检查粗得多）。没有这个装饰器，isinstance 一个 Protocol 直接 TypeError。
 - 名义与结构不是宗教战争：框架两者都用（见 §6 路标——langchain 的 `Runnable` 是 ABC 名义基类，openai-agents 的 `Session` 是 runtime_checkable Protocol）。Python 给你选择权。
+
+### 2.5.1 岔路口：「协议」这个词的四个意思
+
+Python 世界说「协议」时，可能指四种东西，都**不是** Java 的 interface（除了今晚这个
+最像）：① **typing.Protocol**（今晚）——结构化类型的声明工具；② **魔法方法协议**
+（L1.3 起）——`__init__`/`__len__` 这类 dunder 约定，长出这些方法就算实现了「协议」；
+③ **迭代器协议**（L1.6）——`iter()`/`next()` 那套;④ **with 协议**（L1.7）——
+`__enter__`/`__exit__`。共性是「按形状认、不看出身」；看到「协议」先问自己指哪一种。
 
 ### 2.6 TypedDict：JSON 形状的轻量标注（一笔带过）
 
@@ -379,6 +393,6 @@ uv run pyright
 - langchain-ai/langchain@348c9dc572#libs/core/langchain_core/runnables/base.py —— 对照组：langchain 的 `Runnable` 是 **ABC（名义基类）** 而非 Protocol——同一个生态里两种类型风格并存，读完你能说清为什么（Runnable 有共享实现，纯形状才用 Protocol）。
 - 《Fluent Python》第 2 版「Type Hints in Depth」与「Interfaces, Protocols, and ABCs」两章：本课的展开版，Protocol 一章尤其值得。
 
-## 离毕业又近了一块
+## 离毕业又近的一块
 
 今晚的 `Rule` Protocol 就是毕业设计 fail-closed 执行门的**检查链接口**：限额 clamp、黑名单、频次检查各写成一个「长得像 Rule」的纯函数对象，链起来就是 L5.4 的三态裁决；`str | None` 与收窄纪律则是 Plan JSON 解析（L5.1）每天要打的仗——每个可空字段都是一扇要先锁上的门。类型这一课，是 PoC 敢叫「可维护」的底座。

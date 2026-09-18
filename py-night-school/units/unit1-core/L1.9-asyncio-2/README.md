@@ -1,12 +1,17 @@
 # L1.9 asyncio ②：并发原语与异步生成器
 
+> 昨晚你建立了事件循环 / 协程 / 让出点三个模型，写出第一个 async 主流程，诊断了「假 await」与
+> 「阻塞全场」两类事故——`gather` 还只是实验里的对照组。今晚给它配上工程化的全套护栏：`gather`
+> 保序、`wait_for` 预算、`Semaphore` 限流、取消这场「协作式异常」怎么接；最后写异步生成器把 token
+> 一段段吐出来——L2.1 手撕 SSE 流时你会认出它。
+
 ## 1. 本课目标
 
 把昨晚的「两张单据同时在飞」升级成工程化的并发控制，并集齐**学段里程碑的全部零件**。完成后你能：
 
 - 用 `create_task` / `gather` 组织多端点并发拉取（保序收集）；
 - 用 `wait_for` 给慢端点套预算、超时降级；理解取消是**协作式异常**（`CancelledError`），以及它为何是
-  `BaseException` 的子类（接不上 L1.7 的异常家族树）；
+  `BaseException` 的子类——挂在 `Exception` 家族树之外，`except Exception` 接不住它（L1.7 家族树的补全）；
 - 用 `Semaphore` 做并发上限限流（对照 `java.util.concurrent.Semaphore`，几乎零成本迁移）；
 - 写异步生成器（`async def` + `yield`，`async for` 消费）——这是 L2.1 手撕 SSE 流式解析的直接前置，
   也是所有框架 `astream_events` 类 API 的机制本体。
@@ -39,7 +44,7 @@ results = await asyncio.gather(fetch("north"), fetch("south"), fetch("east"))
 
 三个契约，每个都值得记：
 
-1. **并发**：所有协程同时进入调度（总耗时 ≈ 最慢者，实验②）；
+1. **并发**：所有协程同时进入调度（总耗时 ≈ 最慢者，Step 2）；
 2. **保序**：返回列表严格按传入顺序——谁先完成与谁排第几无关；
 3. **异常默认立即传播**：任何一个炸了，`await gather(...)` 立刻抛它（其余任务不会自动取消，继续在跑）。
 
@@ -68,7 +73,7 @@ async with asyncio.timeout(0.1):  # 3.11+ 上下文管理器版：块内统一�
 超时的内部机制就是**取消**：`wait_for` 到点后对内部任务 `cancel()`。而取消的语义是本课最要紧的新心智：
 **`CancelledError` 在任务的下一个让出点被注入**。由此两条推论：
 
-- 协作式：循环里没有 `await` 就没有落点——纯 CPU 循环杀不死（实验⑥B 实测）；
+- 协作式：循环里没有 `await` 就没有落点——纯 CPU 循环杀不死（Step 6B 实测）；
 - `CancelledError` 继承自 **`BaseException`** 而不是 `Exception`（L1.7 异常家族树回收）：
 
 ```python
@@ -122,7 +127,7 @@ L1.6 的同步生成器「翻译」成异步版，只动两处：
 | 节奏来源 | 惰性计算（拉一算一） | 网络事件（`await` 等下一段到达） |
 
 流式心智：**生产端一段段吐、消费端一段段处理，两端都在异步世界里等对方**。LLM 的流式输出（token 一段段
-到达）、langgraph 的 `astream`、SSE 的 event 流，全是这个形状（实验⑤是它的最小完整标本）。
+到达）、langgraph 的 `astream`、SSE 的 event 流，全是这个形状（Step 5 是它的最小完整标本）。
 
 ### 2.6 优雅收尾：TaskGroup（一句话）
 
@@ -131,29 +136,29 @@ L1.6 的同步生成器「翻译」成异步版，只动两处：
 
 ## 3. 动手代码
 
-六个实验都在 `code/` 目录（先 `uv sync`），输出全为实测。明线场景：报销汇总要并发拉 5 个区域台账端点。
+六个 Step 都在 `code/` 目录（先 `uv sync`），输出全为实测。明线场景：报销汇总要并发拉 5 个区域台账端点。
 
-### 实验①②：create_task 双任务并发；gather 5 端点保序
+### Step 1 + 2：create_task 双任务并发；gather 5 端点保序
 
 ```bash
 uv run python code/tasks_and_gather.py
 ```
 
 ```text
-== 实验①：create_task 双任务并发 ==
+== Step 1：create_task 双任务并发 ==
   log: ['start:north', 'start:south', 'done:north', 'done:south']
   总耗时: 0.102s（两个 0.1s 任务同时在飞，≈ max 而非相加）
 
-== 实验②：gather 并发拉取 5 个区域台账 ==
+== Step 2：gather 并发拉取 5 个区域台账 ==
   完成序（log 里 done 的出现序）: ['south', 'east', 'west', 'central', 'north']
   结果序（gather 的返回序）:      ['north', 'south', 'east', 'west', 'central']
   总耗时: 0.202s（串行 = 0.6s 相加；并发 ≈ 0.2s 最大延迟）
 ```
 
-实验①看 log 前两项：两个 `start` 挤在一起——`create_task` 的「已提交调度」眼见为实。实验②看两行序：
+Step 1 看 log 前两项：两个 `start` 挤在一起——`create_task` 的「已提交调度」眼见为实。Step 2 看两行序：
 south 最先完成却排在结果第二位——保序契约不是理论，是可断言的事实。
 
-### 实验③：wait_for 超时降级
+### Step 3：wait_for 超时降级
 
 ```bash
 uv run python code/timeout_demo.py
@@ -166,7 +171,7 @@ uv run python code/timeout_demo.py
 
 慢端点没有拖垮任何人：预算到点，`wait_for` 取消内部任务、抛 `TimeoutError`，我们捕获后交付降级空台账。
 
-### 实验④：Semaphore(2) 限流，峰值眼见为实
+### Step 4：Semaphore(2) 限流，峰值眼见为实
 
 ```bash
 uv run python code/semaphore_demo.py
@@ -182,7 +187,7 @@ log: ['start:north', 'start:south', 'done:south', 'start:east', 'done:east',
 log 就是闸机记录：north 与 south 先进；south 出、east 进……始终最多 2 个在飞。限流不是「变慢的元凶」，
 是「别打挂对方」的礼数——里程碑会把峰值并发写进验收断言。
 
-### 实验⑤：异步生成器 token 流（L2.1 的彩排）
+### Step 5：异步生成器 token 流（L2.1 的彩排）
 
 ```bash
 uv run python code/token_stream.py
@@ -195,7 +200,7 @@ anext 手动推进一段: 「单据」——首 token 到手即可开始渲染�
 
 mock 模型按词吐出审批意见，消费端一段段拼——把 `CHUNK_DELAY` 想成网络节奏，这就是 SSE 流式的全部心智。
 
-### 实验⑥：取消的两种下场
+### Step 6：取消的两种下场
 
 ```bash
 uv run python code/cancel_demo.py

@@ -1,11 +1,17 @@
 # L5.2 毕业设计②：审批外化——REST 建单、SSE 推送与三元回复
 
+> 昨晚 L5.1 打好地基：静态拓扑、`plan_gate` 计划门、`topology_signature` 形状签名——结尾
+> 留了一个明确承诺：`submit` 还是桩，「送审」那一步的芯待换（暂停等人、恢复续跑）。今晚
+> 兑现这个承诺，把审批装成产品面。注意本课不是在 L5.1 上线性叠加，而是它的**并行分支
+> 之一**——与 L5.3（审计面）各长各的，L5.4 才汇合。
+
 ## 1. 本课目标
 
 L3.3 那晚你在命令行里手动 `Command(resume="approve")` 救活一张暂停的图；今晚这套机制
 **变成产品面**：图照旧在 submit 处 `interrupt()` 暂停，但等人的不再是你手敲的恢复命令，
 而是一个正经的审批 API 组（蓝本 [../../../../research/agent-oss/report.md](../../../../research/agent-oss/report.md)
-§2.1 A1/A2/A6，产品先例 opencode——server 即产品，TUI 只是 client）。完成后你能：
+§2.1 A1/A2/A6，产品先例 opencode——开源编码 agent（TS），「server 即产品、TUI 只是
+client」的 service 化形态即出自它）。完成后你能：
 
 - 把 L5.1 的 submit 桩**换芯**成真审批：`interrupt(payload)` 建「审批单」，payload 含
   run_id / claim_id / dept / total_cents / 建议单摘要 / **content_hash**（A6 内容绑定：
@@ -319,13 +325,7 @@ uv run python -c "from hints import hint; print(hint('ex1', 1))"
 | ex3 | `exercises/ex3_always.py` | always 规则修订：匹配器两维判定 + 自动批准接入 + 可审计规则记录（谁/何时/pattern/内容 hash）；验收含逐维断言、auto_applied 事件、超 cap/异部门留人工、内容变 hash 变 |
 
 三题都是同构填空（ex1 在讲义 ApprovalService 的迷你版上补 reply；ex2/ex3 补事件表与
-规则簿的核心函数），零真实网络。验收（三条同时全绿 = 本课毕业）：
-
-```bash
-uv run pytest
-uv run ruff check .
-uv run pyright
-```
+规则簿的核心函数），零真实网络。验收命令同 §1 的完成判据（三条同时全绿 = 本课毕业）。
 
 ## 5. Java 人坑位：事件循环里睡死
 

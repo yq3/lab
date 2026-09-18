@@ -1,5 +1,11 @@
 # L2.5 MCP：工具走出进程
 
+> 昨晚你的 `structured.py` 守住了 agent 的出口：`extract_json` 三层剥壳拆掉模型的花式
+> 包裹，`Literal` 值域拦住越界结论，校验失败就带着修复指令回喂、预算耗尽 fail-loud。
+> 四块肌肉集齐，只剩工具出不了进程：它们至今焊在你的进程里，别的进程用不上。
+> 今晚用官方 `mcp` SDK 把它们搬进独立 server 进程、桥接回 L2.3 的循环
+> ——最后一块肌肉（跨进程工具层），五块集齐就进里程碑组装。
+
 ## 1. 本课目标
 
 前四课的工具都焊死在 agent 进程里；今晚用官方 `mcp` SDK 把它们搬出去。完成后你能：
@@ -30,6 +36,15 @@ SDK 版本说明：夜校锚定官方 python-sdk **2.x**（`mcp>=2.2,<3`）。2.
 
 ## 2. 概念讲解
 
+先给全课对照表，再逐小节展开：
+
+| 你熟悉的 Java 物 | 今天的 Python 物 | 一句话差异 |
+|---|---|---|
+| `ProcessBuilder` 拉起的服务，管道上跑协议 | server 进程 + stdio 传输 | stdout/stdin 是通道——所以 §5 的坑存在 |
+| TCP 建连后的 HELLO / 能力协商 | `initialize` 握手 + 能力协商 | 版本与能力对齐后才准干活 |
+| 服务发现 + OpenAPI 契约 | `list_tools` 发现 + JSON Schema | schema 进了协议一等公民 |
+| RMI stub（远程方法的本地形状） | MCP client + 桥接回注册表 | 把远程工具还原成本地 registry 形状（§2.4） |
+
 ### 2.1 MCP 解决什么：工具的可移植性
 
 前四课的工具住在你的进程里——换一个 agent（或 IDE、或同事的项目）就得重写一遍。
@@ -45,13 +60,7 @@ MCP（Model Context Protocol）把「工具」变成**独立进程提供的服�
 └────────────────────┘                     └─────────────────────┘
 ```
 
-三个对照 Java 的锚点：
-
-| MCP 物 | Java 直觉对应物 | 一句话差异 |
-|---|---|---|
-| server 进程 + stdio 传输 | `ProcessBuilder` 拉起的服务，管道上跑协议 | stdout/stdin 是通道——所以 §5 的坑存在 |
-| `initialize` 握手 + 能力协商 | TCP 建连后的 HELLO/能力协商 | 版本与能力对齐后才准干活 |
-| `list_tools` 发现 + JSON Schema | 服务发现 + OpenAPI 契约 | schema 进了协议一等公民 |
+协议三锚点（server 传输 / 握手协商 / 发现与 schema）的 Java 对照已收进开头的全课总表。
 
 工具的**作者体验**几乎没变：`@server.tool()` 装饰器 + docstring 描述 + 类型标注出
 schema（L2.2 的纪律原样成立）；变的只是**运行时位置**——「一次编写，处处挂载」。
@@ -100,7 +109,8 @@ ClientSession 管协议会话，你管业务。`call_tool` 的 `arguments` 是 *
 结构化）——注意与 OpenAI 侧「arguments 是 JSON 字符串」的差异，桥接层正是翻译这
 半步的人（§2.4）。
 
-一个类型层细节（本课 pyright 全绿的功臣）：`result.content` 是**联合类型的列表**
+一个类型层细节，躲不开所以就地讲（本课 pyright 全绿的功臣）：MCP SDK 的返回类型是
+**联合类型的列表**，不收窄它 pyright 就报错
 （TextContent | ImageContent | ...）——只有 TextContent 有 `.text`，直接 `part.text`
 会被 pyright 拦下。两种收窄写法你都会遇到：`isinstance(part, TextContent)` 与
 `getattr(part, "text", None)`——前者类型安全更足，后者一行流。这不是 MCP 的刁难，
@@ -271,10 +281,10 @@ uv run pyright
 
 - MCP 官方规范（协议原文：传输、生命周期、工具/资源/提示词原语）：
   https://modelcontextprotocol.io/specification 
-- modelcontextprotocol/python-sdk@65c614e48#src/mcp/server/fastmcp/server.py —— 官方 SDK
+- modelcontextprotocol/python-sdk@65c614e48#src/mcp/server/mcpserver/server.py —— 官方 SDK
   的 server 实现本体（1.x 时代叫 FastMCP，2.x 改名 MCPServer——这个路径名是改名前的
   活化石）；`@server.tool()` 装饰器怎么从签名生成 schema，答案在这个目录里。
-- modelcontextprotocol/python-sdk@65c614e48#src/mcp/server/fastmcp/tools/base.py ——
+- modelcontextprotocol/python-sdk@65c614e48#src/mcp/server/mcpserver/tools/base.py ——
   Tool 对象与 `input_schema` 的生成逻辑：L2.2「Pydantic → JSON Schema」的同族实现。
 - modelcontextprotocol/python-sdk@9972c21aa#src/mcp/client/session.py —— client 会话
   本体：initialize 握手、list_tools、call_tool 的请求/响应序列化全在这里。

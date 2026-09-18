@@ -1,5 +1,9 @@
 # L1.6 迭代器与生成器：for 的真实面目与 yield 的暂停魔法
 
+> 昨晚你手写了带参 retry 装饰器、看清了 `@` 语法糖的展开，还让 `@register` 在函数定义的一瞬间把工具
+> 登记进 `TOOLS` 注册表。今晚拆一对用得最多、理解得最少的概念：`for` 背后的迭代器协议，与 `yield` 的
+> 「执行到这就暂停并吐值」——L1.9 的异步生成器、Unit 2 手撕 token 流，都从今晚这个 `yield` 长出来。
+
 ## 1. 本课目标
 
 拆掉 Python 里被用得最多、被理解得最少的一对概念。完成后你能：
@@ -9,9 +13,19 @@
 - 用生成器搭惰性管线（内存恒定、短路省功），并知道什么时候必须物化；
 - 为 L1.9 / Unit 2 的流式输出（async generator）装好心智模型——agent 逐 token 吐字，靠的就是它。
 
-**完成判据**：本目录下 `uv run pytest` 练习全绿，且你能不看讲义解释「为什么生成器第二次 for 是空的」。
+**完成判据**：本目录下 `uv run pytest` / `uv run ruff check .` / `uv run pyright` 三条同时全绿；附加自查：不看讲义解释「为什么生成器第二次 for 是空的」。
 
 ## 2. 概念讲解
+
+先给全课对照表，再逐小节展开：
+
+| 你熟悉的 Java 物 | 今天的 Python 物 | 一句话差异 |
+|---|---|---|
+| `Iterator<E>`：`hasNext()` + `next()` 二段式 | 迭代器：`next()` 一段式，耗尽抛 `StopIteration` | Java 先问再取；Python 直接取、用异常收尾 |
+| `Iterable<E>`（实现它才能 for-each） | 可迭代物（支持 `iter()`） | 概念同构：`iter(可迭代物)` 产迭代器，像 `iterable.iterator()` |
+| `for (X x : list)` | `for x in list:` | 都是糖衣，都落在迭代器协议上 |
+| `NoSuchElementException`（越界 next，一般是 bug） | `StopIteration`（正常控制流的一部分） | Python 把「结束」做成协议信号，for 靠它终止 |
+| Stream 惰性、一次性 | 生成器惰性、一次性 | 像，但生成器不需要创建「流对象」，函数本身就能产流（§5 坑位细比） |
 
 ### 2.1 for 循环的真实面目：一个三步协议
 
@@ -32,15 +46,7 @@ while True:
     total += item
 ```
 
-**Java↔Python 对照表**：
-
-| 你熟悉的 Java 物 | 今天的 Python 物 | 一句话差异 |
-|---|---|---|
-| `Iterator<E>`：`hasNext()` + `next()` 二段式 | 迭代器：`next()` 一段式，耗尽抛 `StopIteration` | Java 先问再取；Python 直接取、用异常收尾 |
-| `Iterable<E>`（实现它才能 for-each） | 可迭代物（支持 `iter()`） | 概念同构：`iter(可迭代物)` 产迭代器，像 `iterable.iterator()` |
-| `for (X x : list)` | `for x in list:` | 都是糖衣，都落在迭代器协议上 |
-| `NoSuchElementException`（越界 next，一般是 bug） | `StopIteration`（正常控制流的一部分） | Python 把「结束」做成协议信号，for 靠它终止 |
-| Stream 惰性、一次性 | 生成器惰性、一次性 | 像，但生成器不需要创建「流对象」，函数本身就能产流（§5 坑位细比） |
+**Java↔Python 对照表**：见本节开头的全课总表（迭代协议五行）。
 
 Python 这个「一段式 + 异常终止」不是偷懒，是哲学：**先斩后奏（出事了再处理）**，术语叫 EAFP，L1.7 正式讲——今天先在这里混个脸熟：迭代协议是你碰到的第一个「用异常当控制流」的 Python 惯用法。
 
@@ -207,11 +213,11 @@ cd exercises
 uv run python -c "from hints import hint; print(hint('ex1', 1))"
 ```
 
-| 题 | 文件 | 考察 | 验收要点 |
-|---|---|---|---|
-| ex1 | `exercises/ex1_paginate.py` | 生成器函数基本形 | 页数与内容（不满尾页 / 整除无空页 / 空输入 / `size<=0` 抛 `ValueError`） |
-| ex2 | `exercises/ex2_pipeline.py` | 三段管线组合 + 惰性 | 聚合结果 14000 + **计数器断言**：只消费前 2 条超标时底层恰好被拉 4 行 |
-| ex3 | `exercises/ex3_oneshot.py` | 修复一次性消费 bug | 两遍结果一致且正确（物化修复） |
+| 题 | 文件 | 考察 |
+|---|---|---|
+| ex1 | `exercises/ex1_paginate.py` | 生成器函数基本形；验收：页数与内容（不满尾页 / 整除无空页 / 空输入 / `size<=0` 抛 `ValueError`） |
+| ex2 | `exercises/ex2_pipeline.py` | 三段管线组合 + 惰性；验收：聚合结果 14000 + **计数器断言**（只消费前 2 条超标时底层恰好被拉 4 行） |
+| ex3 | `exercises/ex3_oneshot.py` | 修复一次性消费 bug；验收：两遍结果一致且正确（物化修复） |
 
 ex2 是本课的灵魂题：**惰性看不见，计数器让它现形**——测试里 `next()` 两次后断言 `len(pulled) == 4`，短路就是少干活。
 

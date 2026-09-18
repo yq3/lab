@@ -1,9 +1,11 @@
 # L3.8 对照总结课：mini-agent vs 四框架——决策表、跳读指南与结业自查
 
-> Unit 3 的收口。前七课你把同一道报销单审查题交给了五个框架重做（langgraph 占了两课），
-> 还隔着栏杆看了一眼平台；今晚把这些体感收成**一张能重新推导的决策表**——
-> 每个数字有口径、每个事实有出处、每个定性结论有源码证据。这是 CURRICULUM §7
-> 「框架」判据的结业形态：**决策表能自己重新推导**，而不是背下来。
+> Unit 3 收口。前七课你把同一道报销单审查题交给了五个框架重做（langgraph 占两课，
+> 末站还隔着栏杆看了一眼平台）；昨晚里程碑的选型工作台跑完——`bench.py` 五课时契约
+> 重验、`tablegen.py` 数出依赖数与手写总行数、五页对照笔记落定，手里握着**自己跑出
+> 的**选型数据。今晚把这些体感收成一张**能重新推导的决策表**：每个数字有口径、每个
+> 事实有出处、每个定性结论有源码证据——CURRICULUM §7「框架」判据的结业形态，是能
+> 重新推导，而不是背下来。
 
 ## 1. 本课目标
 
@@ -19,14 +21,15 @@
   已了解架构之后，「快速跳读」是有方法的；
 - 填完**结业自查表**（本课固定收尾）：对齐 CURRICULUM §7 框架判据，逐条可勾选。
 
-**完成判据**：本目录下三条命令同时全绿（发货态：`code/` 讲义区绿，`exercises/`
-是设计内的红——TODO 未填）：
+**完成判据**：本目录下三条命令同时全绿——
 
 ```bash
 uv run pytest
 uv run ruff check .
 uv run pyright
 ```
+
+发货态诚实说明：`code/` 讲义区绿，`exercises/` 是设计内的红（TODO 未填）。
 
 本课运行依赖**仅标准库**（解析 TOML 与统计行数都不需要第三方包）——决策表生成器
 本身就是一个「零依赖也能干重活」的样本。`.env.example` 照宪法随课携带（本课无
@@ -247,8 +250,7 @@ uv run pytest code/
   `build_runner`（7+2）。其中 10 与 6 和 L3.4 讲义发布的数字一字不差（口径自证）。
 - **自写节点/循环 loc —/0/20/0/0/0**：L3.2 手装图的四个节点/路由函数
   （`make_reviewer` 5 + `tools_node` 10 + `route_after_reviewer` 2 + `finalize` 3 = 20）
-  是「图引擎之外自己写的循环内脏」；L3.4 讲义粗估的「约 40 loc」含了 docstring 与
-  状态 schema 上下文——ast 精确口径是 20（口径升级，两个数字口径不同、都诚实）。
+  是「图引擎之外自己写的循环内脏」——ast 口径 20，与 L3.4 讲义发布的数字一字不差。
   mini-agent 的 249* 是完成态核心五模块（milestone README 口径；发货态 `run()`
   是 TODO 桩，生成器不数桩——静态列）。
 - **模型轮数 3/2/2/2/5/2**：全部是各课 `ep.requests` 实测的静态数字。两个导读点：
@@ -363,11 +365,11 @@ cd exercises
 uv run python -c "from hints import hint; print(hint('ex1', 1))"
 ```
 
-| 题 | 文件 | 改造内容 | 验收要点 |
-|---|---|---|---|
-| ex1 | `exercises/ex1_contract_column.py` | tablegen 扩展：加「契约测试是否在位」列——五课 test_contract.py 字节一致的校验 | 四个测试（合成夹具）：全对版 in-place / 漂移点名 drift / 缺文件 missing / 指纹并列时基准确定 |
-| ex2 | `exercises/ex2_scenario_map.py` | 六个选型场景 → 框架映射 + 理由 | 映射与验收期望表逐格一致；理由非空、够长、带课次证据 |
-| ex3 | `exercises/ex3_selfcheck.py` | 结业自查表数据补全（覆盖型 + meta-test） | 四个 meta 断言：12 行无空、框架判据在表、六个框架名齐、维度白名单 |
+| 题 | 文件 | 考察 |
+|---|---|---|
+| ex1 | `exercises/ex1_contract_column.py` | tablegen 扩展：加「契约测试是否在位」列——五课 test_contract.py 字节一致的校验；验收：四个合成夹具测试（全对版 in-place / 漂移点名 drift / 缺文件 missing / 指纹并列时基准确定） |
+| ex2 | `exercises/ex2_scenario_map.py` | 六个选型场景 → 框架映射 + 理由；验收：映射与期望表逐格一致、理由非空够长带课次证据 |
+| ex3 | `exercises/ex3_selfcheck.py` | 结业自查表数据补全（覆盖型 + meta-test）；验收：四个 meta 断言（12 行无空、框架判据在表、六个框架名齐、维度白名单） |
 
 验收（三条同时全绿 = 本课毕业）：
 

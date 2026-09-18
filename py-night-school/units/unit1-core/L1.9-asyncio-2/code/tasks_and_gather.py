@@ -1,4 +1,4 @@
-"""实验①与②：create_task 的「提交调度」，与 gather 的多端点并发拉取。
+"""Step 1 与 2：create_task 的「提交调度」，与 gather 的多端点并发拉取。
 
 明线场景：报销汇总要并发拉 5 个区域台账端点——串行 0.6s，gather 并发 ≈ 0.2s（最大延迟），
 且 gather 的返回结果严格按传入顺序排列（谁先完成与谁排第几无关）。
@@ -28,7 +28,7 @@ async def fetch_region(region: str, delay: float, total_cents: int, log: list[st
 
 
 async def run_two_tasks() -> tuple[list[dict[str, int | str]], list[str], float]:
-    """实验①：create_task 提交两个任务后再 await——两单同时在飞。
+    """Step 1：create_task 提交两个任务后再 await——两单同时在飞。
 
     create_task：协程立刻进入事件循环排期（「已提交调度」），返回 Task；
     随后的 await task 只是「等它出结果」，不再是「现在才开始跑」。
@@ -43,7 +43,7 @@ async def run_two_tasks() -> tuple[list[dict[str, int | str]], list[str], float]
 
 
 async def run_gather_all() -> tuple[list[dict[str, int | str]], list[str], float]:
-    """实验②：gather 一行并发拉取 5 个端点——结果按传入顺序保序。"""
+    """Step 2：gather 一行并发拉取 5 个端点——结果按传入顺序保序。"""
     log: list[str] = []
     t0 = time.perf_counter()
     results = await asyncio.gather(
@@ -53,12 +53,12 @@ async def run_gather_all() -> tuple[list[dict[str, int | str]], list[str], float
 
 
 def main() -> None:
-    print("== 实验①：create_task 双任务并发 ==")
+    print("== Step 1：create_task 双任务并发 ==")
     results, log, elapsed = asyncio.run(run_two_tasks())
     print(f"  log: {log}")
     print(f"  总耗时: {elapsed:.3f}s（两个 0.1s 任务同时在飞，≈ max 而非相加）\n")
 
-    print("== 实验②：gather 并发拉取 5 个区域台账 ==")
+    print("== Step 2：gather 并发拉取 5 个区域台账 ==")
     results, log, elapsed = asyncio.run(run_gather_all())
     print(f"  完成序（log 里 done 的出现序）: {[e.split(':')[1] for e in log if e.startswith('done')]}")
     print(f"  结果序（gather 的返回序）:      {[r['region'] for r in results]}")

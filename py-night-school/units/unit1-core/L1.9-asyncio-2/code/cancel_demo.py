@@ -1,4 +1,4 @@
-"""实验⑥：取消是「下一个让出点抛出的协作式异常」——task.cancel() 实录。
+"""Step 6：取消是「下一个让出点抛出的协作式异常」——task.cancel() 实录。
 
 两相对照：
   A. 有 await 的任务：cancel() 在它的下一个 await 点抛 CancelledError，

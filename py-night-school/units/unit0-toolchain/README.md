@@ -27,11 +27,14 @@ uv run ruff check .    # 无 lint 违规
 uv run pyright         # 无类型错误
 ```
 
-同时两条贯穿线在此种下：
+同时种下两颗贯穿全程的种子：
 
-- **明线**：`data/expense/budget_mock.json`（你的 agent 未来要预审的单据）+ 金额用整数「分」的约定；
-- **模型端点约定**：`.env` 三变量（`OPENAI_BASE_URL` / `OPENAI_API_KEY` / `MODEL_NAME`），L2 第一次真正调用模型前配好即可。
+- **业务明线**（一门贯穿 30 课的练习剧情）：`data/expense/budget_mock.json`——你的
+  agent 未来要预审的报销单数据，从今晚的 `preapprove()` 一路用到 Unit 5 的带门付款；
+  金额一律整数「分」；
+- **模型端点约定**：`.env` 三变量（`OPENAI_BASE_URL` / `OPENAI_API_KEY` / `MODEL_NAME`），
+  不绑任何厂商——L2 第一次真正调用模型前配好即可。
 
-## 离毕业又近了一块
+## 离毕业又近的一块
 
 本课的 `preapprove()` 纯函数就是毕业设计「fail-closed 执行门」中限额检查的雏形——纯函数、整数分、参数化测试，这三个习惯会一直用到 Unit 5。

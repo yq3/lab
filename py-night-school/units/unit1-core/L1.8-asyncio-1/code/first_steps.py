@@ -1,4 +1,4 @@
-"""实验①与②：两个协程的「顺序 await」与「gather 并发」对照。
+"""Step 1 与 2：两个协程的「顺序 await」与「gather 并发」对照。
 
 同样的函数、同样的延迟，只换驱动方式——总耗时从「相加」变成「最大值」。
 这是你人生第一个 async 程序与第一次并发初体验（gather 的完整规格是 L1.9 的正餐）。
@@ -26,7 +26,7 @@ async def fetch_receipt(claim_id: str, log: list[str]) -> str:
 
 
 async def run_sequential() -> tuple[list[str], list[str], float]:
-    """实验①：两个 await 排队——B 要等 A 完全结束才开始。"""
+    """Step 1：两个 await 排队——B 要等 A 完全结束才开始。"""
     log: list[str] = []
     t0 = time.perf_counter()
     a = await fetch_receipt("CLM-A", log)
@@ -35,7 +35,7 @@ async def run_sequential() -> tuple[list[str], list[str], float]:
 
 
 async def run_gather() -> tuple[list[str], list[str], float]:
-    """实验②：gather 一行换并发——两张单据同时在飞。"""
+    """Step 2：gather 一行换并发——两张单据同时在飞。"""
     log: list[str] = []
     t0 = time.perf_counter()
     results = await asyncio.gather(fetch_receipt("CLM-A", log), fetch_receipt("CLM-B", log))
@@ -43,14 +43,14 @@ async def run_gather() -> tuple[list[str], list[str], float]:
 
 
 def main() -> None:
-    print("== 实验①：顺序 await（总耗时 = 两段延迟相加）==")
+    print("== Step 1：顺序 await（总耗时 = 两段延迟相加）==")
     results, log, elapsed = asyncio.run(run_sequential())
     print(f"  log: {log}")
     print(f"  结果: {results}")
     print(f"  总耗时: {elapsed:.3f}s ≈ {CLAIM_DELAY} + {CLAIM_DELAY}")
     print("  ——await 的字面意思：等它做完，我才能继续。\n")
 
-    print("== 实验②：gather 并发（总耗时 ≈ 最大延迟）==")
+    print("== Step 2：gather 并发（总耗时 ≈ 最大延迟）==")
     results, log, elapsed = asyncio.run(run_gather())
     print(f"  log: {log}")
     print(f"  结果: {results}")

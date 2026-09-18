@@ -16,20 +16,23 @@
 2. **练习即测试**——TODO + pytest 自动验收，全绿即过关；
 3. **对照组教学法**——Unit 2 手写 mini-agent 是全程对照组，OpenAI cookbook `Orchestrating_agents.ipynb` 是对照原件；
 4. **源码路标**——`仓库@commit#路径`，读生产框架不读玩具；
-5. **双贯穿线 + 金融毕业设计**——明线「报销单审查」从 L0.1 种下；暗线每课结尾「离毕业又近了一块」；
+5. **双贯穿线 + 金融毕业设计**——明线「报销单审查」从 L0.1 种下；暗线每课结尾「离毕业又近的一块」；
 6. **夜校工程纪律**——竞品的系统性短板在这里默认不发生（见 §5）。
 
 ## 3. 课时模板：六段式（唯一结构，机器校验）
 
 ```
-## 1. 本课目标        （一句话、可验证）
-## 2. 概念讲解        （含 Java↔Python 对照表）
-## 3. 动手代码        （Step 化，code/ 目录支撑）
-## 4. 练习            （单变量编辑约束 + hints 渐进披露 + pytest 验收）
+> 承接段（2–3 句 blockquote：昨晚产出 → 今晚新问题 → 为何排在今晚；单元首课回收上一学段）
+## 1. 本课目标        （一句话、可验证；完成判据三命令块全课只贴这一次）
+## 2. 概念讲解        （开头先给全课 Java↔Python 对照表，再逐小节展开）
+## 3. 动手代码        （Step 化，code/ 目录支撑；小节统一「Step N」，可选标「（可选）」）
+## 4. 练习            （单变量编辑约束 + hints 渐进披露 + pytest 验收；验收处一句话引用 §1 判据，不复贴）
 ## 5. Java 人坑位      （命名化失败模式，四段式）
-## 6. 延伸            （官方文档 + 源码路标 仓库@commit#路径）
-+ 结尾固定段「离毕业又近的一块」（暗线进度）
+## 6. 延伸            （官方文档 + 源码路标 仓库@commit#路径；「与 mini-agent 对照」排在 §6 开头）
++ 结尾固定段「离毕业又近的一块」（暗线进度，散文体，下集预告写在这里）
 ```
+
+写作契约（与 CURRICULUM §2 一致，check_lesson 机器校验）：术语首现即定义或标注「先混个眼熟，Lx.y 主讲」；练习表头统一「| 题 | 文件 | 考察 |」；完成判据口径统一「三命令全绿」。
 
 话术约定：单元 = 学段、课时 = 晚课讲次、Unit 5 = 结业考；README 三个区块名固定为「招生对象 / 课表 / 入学指南」。
 
@@ -101,4 +104,6 @@ data/ 共享素材、覆盖 solution、跑全部命令；先例：L2.x 全课用
 
 Unit 3 关键决策（先例与锚点）：①四框架同题 demo 的**共享件多课对版**（advice/mock_tools/review_rules/mock_endpoint 六课字节相同，test_contract 五课——L3.4 prebuilt 也带契约，展示「同题换装配」；改一处同步全部副本）；②新共享素材 `data/expense/review_mock.json`（expect_* 判分字段 + 覆盖型 meta），budget_mock.json 不动（Unit 2 兼容）；③框架依赖 == 钉到本地克隆 HEAD 对应版本，源码路标锚同一 commit（openai/openai-agents-python@fbd2dbca、langchain-ai/langgraph@e539ac122、langchain-ai/deepagents@9e7d62ff6、google/adk-python@7b246e01、langgenius/dify@79effdd498）；④L2.3 的 MockLLMEndpoint 全单元服役（框架模型客户端一律指向它，零 key 离线；adk 经 litellm 注意 `openai/` 前缀会被剥掉、传参用 api_base/api_key）；⑤openai-agents 第一件事 `set_tracing_disabled(True)`（trace 外发端点硬编码 api.openai.com，端点中立 ≠ trace 中立）；⑥L3.4 实测：Send 分支真并发（执行次序不保证）→ 批量剧本用「每单专属 mock 端点」；create_react_agent 在 prebuilt 1.1.0 已挂迁名 DeprecationWarning；⑦行数量化双口径并存：L3.8 决策表拆「装配 loc / 自写节点 loc」两列，milestone 工作台数「手写总行数」——列名不得再撞（先例：初版都叫「装配行数」学员无法自查）；⑧里程碑跨课重验（bench.py 子进程跑五课 contract）不得进 pytest——三态毕业态镜像不含兄弟课时，测试只用合成夹具，真跑是学员动作；⑨一轮外部 review 复盘（3 P1 + 择要 P2）：量化结论换 ast 实测口径（L3.4「约 40 loc」→20）、contract meta 补 reason 维度、adk web 目录约定以 cli 源码为准（每子目录一 agent.py）、骨架 TODO 注释泄底入 §4 新先例、计数与对版集合数逐处对齐（「共享件六课、契约五课」）。
 
-Unit 4/5 关键决策（先例与锚点）：①**外部产品课型定式「机制抽取件 + 加餐」**（L3.7 先例推广入 CURRICULUM）：主线＝把产品核心机制对版搬到报销域（锚产品 commit、零 key 三态可验收），真跑产品与本地分支改造是可选加餐——产品仓不进课时依赖、不内置上万行代码；②Unit 4 三课沿**风控嵌入位置光谱**递进（dimensions/A §3：L4.1 处置层③ / L4.2 决策层② / L4.3 授权+执行层④⑤），「宣称 vs 实现对码」进课当教学点（TradingAgents README「PM 审批」无代码）；③产品锚定 HEAD：virattt/ai-hedge-fund@fc1bf25（**v2 全量重写版，v1 的 src/agents/ 结构已不存在——网上旧教程全部失效，讲义明示**）、TauricResearch/TradingAgents@be952b8、HKUDS/Vibe-Trading@f84b2977；④L4.3 零运行时依赖（纯标准库贴合产品 frozen dataclass 哲学）；flock/msvcrt 平台差异不进学员代码、就地注释声明合理差异；⑤Unit 5 四课**对版生长**：L5.2/L5.3 是 L5.1 的并行分支、L5.4 汇合（非线性叠加）——共享件字节相同为默认、演进差异 docstring 就地声明；EVENT_TYPES 封闭词汇表跨课登记制（9→12：gate.checked/payment.executed/gate.denied，新事件类型登记并全副本同灌）；⑥**JAVA-MAPPING 诚实纪律**：Java API 名必须到本地克隆核实（langgraph4j@c2cf2e33、spring-ai-alibaba-graph-core@f82da0b50）、不存在老实写「需自建」——先例：外审抓出 getDiagram/ChatLanguageModel 两个编造名改真（getGraph(GraphRepresentation.Type) / ChatModel）；⑦L5.2 实测坑：httpx ASGITransport 读不了常开 SSE 流——`?mode=replay` 重放面是产品正当形态，live 顺序断言走生成器直测，坑如实写进讲义；⑧Unit 5 milestone 布局方案 A（unit2 先例）：编码 TODO 放根模块（solution/*.py 覆盖得到——**覆盖不递归进 tests/**），文档件（JAVA-MAPPING）用两态 meta（有占位 ⇒ 必须有 solution 对照版，零占位 ⇒ 直接过）；⑨外审升级为**全实证**（宪法 §4 自查法真执行：hints 抄进练习文件跑验收、锚点到克隆验文件存在、数量词 collect-only 实数）——四轮 P0×1（L5.1 ex3 hints L2 泄底，实锤「抄过即全绿」）+P1×9+P2×13 全修并重跑三态。
+Unit 4/5 关键决策（先例与锚点）：①**外部产品课型定式「机制抽取件 + 加餐」**（L3.7 先例推广入 CURRICULUM）：主线＝把产品核心机制对版搬到报销域（锚产品 commit、零 key 三态可验收），真跑产品与本地分支改造是可选加餐——产品仓不进课时依赖、不内置上万行代码；②Unit 4 三课沿**风控嵌入位置光谱**递进（dimensions/A §3：L4.1 处置层③ / L4.2 决策层② / L4.3 授权+执行层④⑤），「宣称 vs 实现对码」进课当教学点（TradingAgents README「PM 审批」无代码）；③产品锚定 HEAD：virattt/ai-hedge-fund@fc1bf25（**v2 全量重写版，v1 的 src/agents/ 结构已不存在——网上旧教程全部失效，讲义明示**）、TauricResearch/TradingAgents@be952b8、HKUDS/Vibe-Trading@f84b2977；④L4.3 零运行时依赖（纯标准库贴合产品 frozen dataclass 哲学）；flock/msvcrt 平台差异不进学员代码、就地注释声明合理差异；⑤Unit 5 四课**对版生长**：L5.2/L5.3 是 L5.1 的并行分支、L5.4 汇合（非线性叠加）——共享件字节相同为默认、演进差异 docstring 就地声明；EVENT_TYPES 封闭词汇表跨课登记制（9→12：gate.checked/payment.executed/gate.denied，新事件类型登记并全副本同灌）；⑥**JAVA-MAPPING 诚实纪律**：Java API 名必须到本地克隆核实（langgraph4j@c2cf2e33、alibaba/spring-ai-alibaba@f82da0b50——**org 前缀是 alibaba，曾误写 spring-ai-alibaba/ 造成 12 处死链，2026-09-18 锚点复核修复**）、不存在老实写「需自建」——先例：外审抓出 getDiagram/ChatLanguageModel 两个编造名改真（getGraph(GraphRepresentation.Type) / ChatModel）；⑦L5.2 实测坑：httpx ASGITransport 读不了常开 SSE 流——`?mode=replay` 重放面是产品正当形态，live 顺序断言走生成器直测，坑如实写进讲义；⑧Unit 5 milestone 布局方案 A（unit2 先例）：编码 TODO 放根模块（solution/*.py 覆盖得到——**覆盖不递归进 tests/**），文档件（JAVA-MAPPING）用两态 meta（有占位 ⇒ 必须有 solution 对照版，零占位 ⇒ 直接过）；⑨外审升级为**全实证**（宪法 §4 自查法真执行：hints 抄进练习文件跑验收、锚点到克隆验文件存在、数量词 collect-only 实数）——四轮 P0×1（L5.1 ex3 hints L2 泄底，实锤「抄过即全绿」）+P1×9+P2×13 全修并重跑三态。
+
+通读评审修复轮（2026-09-18，先例与锚点，评审档案见 [reviews/](./reviews/2026-09-18-readthrough-review.md)）：**课间叙事层入模板**——每课 h1 后固定承接段（昨晚产出→今晚新问题→排位理由，blockquote），单元页承担结构地图（unit1 前置列 / unit3 光谱图 / unit4 双线倒挂 / unit5 树形），check_lesson 校验承接段与结尾段存在；**写作契约机器化**——§2 开头全课对照表、三命令块单贴、练习表头「| 题 | 文件 | 考察 |」、Step 命名统一、发货态说明独立行、「Step N（可选）」加餐定式；**知识点登记制**（CURRICULUM §2.1）：唯一主讲课 + 复现课指路，先例：推导式曾 L1.1/L1.4 双主讲修为互指；**内部坐标纪律**：作者元引用（宪法 §x / 调研 dimensions / 第 N 次登场）不进讲义，A 编号配 unit5 速查表，外部产品首现须一句话身份；**锚点复核命令化**：120 条锚点 gh api 全验，4 类死链（org 前缀 / FastMCP 改名 mcpserver / 目录更名）修复并同灌 JAVA-MAPPING 三副本。教训：单课视角的质量流水线（check_lesson + 单课外审）抓不住跨课叙事问题，全单元交付后应加一轮通读评审。

@@ -1,5 +1,10 @@
 # L2.1 裸调 LLM API：messages、流式与工具调用协议
 
+> 上一学段收官夜，你的 async 并发 fetcher 三命令全绿：retry 装饰器接住 east 的两次抖动、
+> 慢端点超时降级、信号量把并发摁在两路——九课铸的语言零件全部验收。今晚开新学段
+> Unit 2：零件不再单练，五个晚课手写一个不用任何框架的 mini-agent；第一晚从最底层
+> 开始，裸调 LLM API——五块肌肉的第一块（协议层）。
+
 ## 1. 本课目标
 
 Unit 2（无框架手写 mini-agent）的地基课。今晚不用任何 SDK，只用 `httpx` + 标准库 `json`
@@ -24,6 +29,15 @@ uv run pyright
 
 ## 2. 概念讲解
 
+先给全课对照表，再逐小节展开：
+
+| 你熟悉的 Java 物 | 今天的 Python 物 | 一句话差异 |
+|---|---|---|
+| `java.net.http.HttpClient` / OkHttp | `httpx.AsyncClient` | API 几乎同构；httpx 原生 async，返回 awaitable |
+| Jackson `ObjectMapper` | 标准库 `json` 模块 | `json.dumps` ≈ `writeValueAsString`，`json.loads` ≈ `readValue`；只有 dict/list，没有强类型 DTO |
+| 内部 REST 契约（OpenAPI 文档） | 端点的 API 文档 | 一样是「字段对齐就互通」的契约思维 |
+| `System.getenv` | `os.environ` / `os.getenv` | 无类型 dict；`.env` 文件要自己加载（或用 python-dotenv） |
+
 ### 2.1 先看全景：框架之下是什么
 
 LangGraph、openai-agents、crewai……所有 Python agent 框架在与模型对话这件事上，
@@ -36,14 +50,8 @@ LangGraph、openai-agents、crewai……所有 Python agent 框架在与模型�
 
 「OpenAI 兼容端点」的意思就是：这个 URL 契约、请求体字段、响应体字段与 OpenAI 的
 `/v1/chat/completions` 一致——GLM / DeepSeek / Qwen / 本地 vLLM 全都实现了它，所以换端点
-只是换 `.env` 三变量（夜校的端点中立纪律就建立在这层兼容上）。
-
-| 你熟悉的 Java 物 | 今天的 Python 物 | 一句话差异 |
-|---|---|---|
-| `java.net.http.HttpClient` / OkHttp | `httpx.AsyncClient` | API 几乎同构；httpx 原生 async，返回 awaitable |
-| Jackson `ObjectMapper` | 标准库 `json` 模块 | `json.dumps` ≈ `writeValueAsString`，`json.loads` ≈ `readValue`；只有 dict/list，没有强类型 DTO |
-| 内部 REST 契约（OpenAPI 文档） | 端点的 API 文档 | 一样是「字段对齐就互通」的契约思维 |
-| `System.getenv` | `os.environ` / `os.getenv` | 无类型 dict；`.env` 文件要自己加载（或用 python-dotenv） |
+只是换 `.env` 三变量（夜校的端点中立纪律就建立在这层兼容上）。本课工具层面的 Java 对照
+见开头的全课总表，下面只留速成：
 
 httpx 速成（本课只用到这四行）：
 
@@ -98,8 +106,8 @@ async with httpx.AsyncClient(base_url=..., headers={"Authorization": f"Bearer {k
   | `tool_calls` | 模型要调工具（此时 content 常为 `None`） | 执行工具、回喂、再来一轮 |
   | `length` | 到了 max_tokens 被截断 | 视为异常或续写 |
 
-- `usage`：token 计量（`prompt_tokens` / `completion_tokens` / `total_tokens`）——
-  成本核算与上下文预算（L2.3 加餐）的数据来源。
+- `usage`：token 计量（`prompt_tokens` / `completion_tokens` / `total_tokens`）——今晚
+  只需认得这三个字段，成本核算与上下文预算会用到（L2.3 的加餐数据来源）。
 
 `json` 模块三件套（对照 Jackson，一个能打的都没有但全都很轻）：
 
@@ -370,4 +378,4 @@ uv run pyright
 今晚你摸到的三层协议（messages / SSE / 工具调用）是毕业设计执行层的**全部外部接口**：
 L5 的执行器把它们包上重试与预算（Unit 1 里程碑的零件），流式是审批推送（L5.2 SSE）的
 机制本体，「历史在客户端」是事件溯源（L5.3）的第一推动。mini-agent（本学段里程碑）
-明晚开始长第一块肌肉：工具注册表。
+的第一块肌肉（协议层）今晚长出，明晚是第二块：工具注册表。

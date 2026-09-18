@@ -34,11 +34,11 @@
 - `langgraph4j/langgraph4j@c2cf2e33#langgraph4j-core/src/main/java/org/bsc/langgraph4j/state/Channels.java`
   —— `appender(Supplier)`/`base(Reducer)`（Reducer extends BiFunction）；
 - `langgraph4j/langgraph4j@c2cf2e33#langgraph4j-core/src/main/java/org/bsc/langgraph4j/checkpoint/MemorySaver.java`（同目录 `FileSystemSaver.java`；JDBC savers 在 langgraph4j-sqlite-saver / -postgres-saver 等模块）；
-- `spring-ai-alibaba/spring-ai-alibaba@f82da0b50#spring-ai-alibaba-graph-core/src/main/java/com/alibaba/cloud/ai/graph/StateGraph.java`
+- `alibaba/spring-ai-alibaba@f82da0b50#spring-ai-alibaba-graph-core/src/main/java/com/alibaba/cloud/ai/graph/StateGraph.java`
   —— 构造器 `StateGraph(KeyStrategyFactory)` L170、`addNode(String, AsyncNodeAction)` L244、`compile(CompileConfig)` L535；
-- `spring-ai-alibaba/spring-ai-alibaba@f82da0b50#spring-ai-alibaba-graph-core/src/main/java/com/alibaba/cloud/ai/graph/KeyStrategy.java`
+- `alibaba/spring-ai-alibaba@f82da0b50#spring-ai-alibaba-graph-core/src/main/java/com/alibaba/cloud/ai/graph/KeyStrategy.java`
   —— `REPLACE`/`APPEND`/`MERGE` 三策略常量；
-- `spring-ai-alibaba/spring-ai-alibaba@f82da0b50#spring-ai-alibaba-graph-core/src/test/java/com/alibaba/cloud/ai/graph/InterruptionTest.java`
+- `alibaba/spring-ai-alibaba@f82da0b50#spring-ai-alibaba-graph-core/src/test/java/com/alibaba/cloud/ai/graph/InterruptionTest.java`
   —— interrupt + 恢复的产品测试原式：`workflow.stream(null, RunnableConfig.builder().resume().build())`。
 
 ## 词汇表（两侧名词对齐，开 Java 侧任务会时用）

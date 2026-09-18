@@ -1,10 +1,11 @@
 # L3.7 dify 半日游：平台形态——画布、HITL 表单与能力清单
 
-> 抽象光谱之外的加演：L3.1–L3.6 全是**库**（pip 装进来、进你的进程、pytest 直接验收），
-> 本课是 8 课里唯一的**平台**形态——dify 不进你的依赖清单，它自己**是**一个跑着十余个
-> 服务的系统，你的 agent 是在它画布上画出来的一张图。这节课的全部意义就是让你亲手摸到
-> 「平台 vs 库」的分界线：课程主线照旧离线可验收（读懂平台的骨架：compose 拓扑 + DSL
-> 序列化格式 + 能力清单）；真的把平台跑起来是可选加餐（需要 Docker Desktop）。
+> 昨晚 adk 交卷：`LlmAgent + Runner` 装出全家桶版审查 agent，`session.state` 让同一
+> agent 换会话换策略，`before_model_callback` 把不合规单号拦在模型请求之前——四个
+> **库**框架至此全部跑完。今晚加演抽象光谱的终点形态：L3.1–L3.6 全是 pip 装进你
+> 进程的库，dify 却是自己跑着十余个服务的**平台**，你的 agent 只是画布上的一张图。
+> 本课的全部意义就是摸到「平台 vs 库」这条分界线——主线照旧离线可验收（compose
+> 拓扑 + DSL + 能力清单），真跑平台（Docker Desktop）是可选加餐。
 
 ## 1. 本课目标
 
@@ -72,7 +73,7 @@ dify 自部署用 docker compose 起**一组**互相依赖的服务。先补两�
 - **docker compose 是什么**：一个 YAML 文件声明「起哪些容器、每个用什么镜像、谁等谁就绪、
   暴露哪些端口」，`docker compose up -d` 一条命令把整套系统拉起来。Java 人可以理解成
   「把 application.yml 的思路用到部署上」——描述式地写**部署拓扑**，而不是写八篇运维文档。
-- **YAML 语法三件事**（首次出现，讲全）：① 缩进表达层级（**空格缩进，不用 tab**，缩进错了
+- **YAML 语法三件事**（你是 Spring 老手，缩进语法早就在 application.yml 里写熟了，这里只列三个易错点）：① 缩进表达层级（**空格缩进，不用 tab**，缩进错了
   整棵树就错了）；② `key: value` 是映射（相当于 JSON 对象），`- item` 是列表（相当于数组）；
   ③ 同名键下两种形态都是合法 YAML——比如 `depends_on` 既可写映射（带条件）也可写列表，
   今晚的解析代码要两种都认（ex3）。对照 `application.yml`：Spring 程序员对这套缩进语法
@@ -107,7 +108,8 @@ nginx :80（唯一入口，depends_on: [api, web]）
 状态全部外置，任何应用容器都可以随意扩缩（无状态设计的经典分发）；nginx 是唯一入口——
 端口收敛、TLS 终结都在这一格。**注意「平台自己也在演进」**：`agent_backend` 是 v2 架构
 新加的（仓库根的 `dify-agent/` 与 `dify-agent-runtime/` 目录），它把 agent 运行时拆成了
-独立服务——`dify-agent/` 的定位是「用 Agenton 组装 Pydantic AI 运行、藏在 FastAPI 后面」
+独立服务——`dify-agent/` 的定位是「用自研的 Agenton 包（`agenton`，组装 Pydantic AI
+运行；与 §2.3 的外部包 `graphon` 是两回事）藏在 FastAPI 后面」
 （其 pyproject 依赖 `pydantic-ai-slim`），Go 写的 runtime 负责 shell 沙箱。读旧博客的
 架构图时以源码为准，别把 2024 年的图当现状。
 

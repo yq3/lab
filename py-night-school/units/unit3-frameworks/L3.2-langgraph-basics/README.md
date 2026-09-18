@@ -1,5 +1,11 @@
 # L3.2 langgraph ①：StateGraph——把 ReAct 循环画成图
 
+> 昨晚 openai-agents 交卷：`Runner.run` 把循环、工具 schema、handoff、guardrail 全部
+> 付掉，你写的只有装配——双 agent 转交、一道输入护栏，四张单契约照旧全绿。今晚光谱
+> 进第二站**图引擎** langgraph：同一个 ReAct 循环不再藏在一把梭的 run 里，摊开成显式
+> 的节点与边——你手装，引擎照图跑。新问题随之换轴：结构从「下一步调谁」变成「状态
+> 怎么在节点间流动」，谁合并、谁覆盖，今晚逐个落定。
+
 ## 1. 本课目标
 
 今晚把 L2.3 手写的 ReAct 循环**画成一张图**：用 langgraph 的 StateGraph 装配「报销单审查
@@ -36,7 +42,7 @@ uv run pyright
 | 子流程 / call activity | 编译好的子图当节点 | 图即节点：`add_node("review", compiled_subgraph)` |
 | 排他网关（XOR gateway） | 条件边 `add_conditional_edges` | 分支判断从画布/XML 变成**一个收状态、返回节点名的普通函数** |
 | `Map.merge` / `Collectors.reducing` | `Annotated[list, reducer]` | 合并策略写进**类型注解**里给框架运行时读——Java 注解没有这种「值语义」 |
-| `AtomicReference.set`（最后写赢） | 无 reducer 的键（LastValue 通道） | 同是覆盖，但更严格：同一 superstep 双写直接抛 `InvalidUpdateError` |
+| `AtomicReference.set`（最后写赢） | 无 reducer 的键（LastValue 通道） | 同是覆盖，但更严格：同一 superstep（图引擎的一轮同步执行——所有就绪节点跑完、状态合并、进入下一轮；L3.4 §2 深讲）双写直接抛 `InvalidUpdateError` |
 | 线程池拒绝策略 / 超时兜底 | `recursion_limit`（默认 25） | superstep 计数烧满抛 `GraphRecursionError`——确定性护栏对冲图里的死环 |
 
 ### 2.1 图不是调用栈：状态是唯一媒介

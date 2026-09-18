@@ -5,3 +5,5 @@
 .playwright-cli/
 
 glossary-agent
+# ZCode 工具本地产物
+.zcode/

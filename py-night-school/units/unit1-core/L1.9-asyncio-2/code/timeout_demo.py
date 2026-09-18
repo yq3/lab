@@ -1,4 +1,4 @@
-"""实验③：wait_for 超时——慢端点 0.3s，预算 0.1s，超时降级默认值。
+"""Step 3：wait_for 超时——慢端点 0.3s，预算 0.1s，超时降级默认值。
 
 对应 Java 里给 HTTP 调用设 read timeout + fallback 的老习惯；asyncio 的版本是
 wait_for（或 3.11+ 的 asyncio.timeout 上下文管理器），超时抛 TimeoutError，捕获后降级。

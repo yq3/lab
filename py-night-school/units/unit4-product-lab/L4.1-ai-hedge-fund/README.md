@@ -1,9 +1,10 @@
 # L4.1 ai-hedge-fund：层级投票——LLM 影响力终止于 Signal
 
-> Unit 4 是「开源产品实战」：Unit 3 你在框架课里搭 demo，这三课换成**读真产品、抄真机制**。
-> 第一站 virattt/ai-hedge-fund（下称 ahf）——一个高星的 AI 对冲基金模拟器。它最值得
-> 学的不是金融，是一句话：**LLM 只形成观点，确定性代码管钱**。本课把这条架构思想抽取成
-> 「报销初审层级投票」机制件（code/ 目录，离线可验收），真跑产品是 §3 末尾的可选加餐。
+> Unit 3 结业那晚，五框架同题对照跑完，你手里多了一张**自己跑出来的选型决策表**——「为什么
+> 用 langgraph」从此有三行证据可引用。Unit 4 换打法：**读真产品、抄真机制**——三个真实的
+> 开源金融产品各解剖一课，把机制对版搬进报销域。第一站 virattt/ai-hedge-fund（下称 ahf），
+> 它最值得学的不是金融，是一句话：**LLM 只形成观点，确定性代码管钱**——本课把它抽成「报销
+> 初审层级投票」机制件（code/ 目录，离线可验收），真跑产品是 §3 末尾的可选加餐。
 
 ## 1. 本课目标
 
@@ -43,8 +44,9 @@ uv run pyright
 
 ### 2.1 产品架构总览：三层基金 + 一条管线三种模式
 
-ahf v2.2 是一次全量重写（经典 v1 的 `src/agents/` + LangGraph 结构已不存在），现在的代码
-全在 `hedge_fund/` 包里。组织结构三层（`fund/spec.py` 的 docstring 画的就是这张图）：
+先说一个防坑警告：ahf v2.x 全量重写过——经典 v1（`src/agents/` + LangGraph 结构）已不存在，
+网上基于 v1 的旧教程全部失效；本课锚定 v2.2，代码全在 `hedge_fund/` 包里。组织结构三层
+（`fund/spec.py` 的 docstring 画的就是这张图）：
 
 ```text
 FUND      = 资本切片 + 主风控（对合成后的总账 clamp）     FundSpec（YAML mandate）
@@ -72,7 +74,7 @@ Python 函数调用链，langchain 只当多厂商传输层用。它故意把 LL
 
 ### 2.2 层级投票 vs 辩论拓扑（预告 L4.2）
 
-两个产品代表了多 agent 共识的两极（调研报告 dimensions/A-金融交易组.md §2 的结论）：
+两个产品代表了多 agent 共识的两极（课程调研 18 个开源产品后的一致结论）：
 
 | | 层级投票（ahf，本课） | 辩论-裁决（TradingAgents，L4.2） |
 |---|---|---|
@@ -99,7 +101,8 @@ research 报告）：
 ⑤ 最后一道门（fail-closed 执行门）
 ```
 
-FinRobot 停在 ①（风险控制 = 让 LLM 写风险分析文本）；TradingAgents 到 ②；**ahf 到
+FinRobot（AI4Finance 系的开源金融 agent，调研样本里「宣称 vs 实现落差」的典型——
+辩论架构在闭源 V2）停在 ①（风险控制 = 让 LLM 写风险分析文本）；TradingAgents 到 ②；**ahf 到
 ③**；Vibe-Trading 覆盖 ①—⑤（L4.3 的主角）。本课机制件占两层：LLMCheckerBase 的
 「解析失败即弃权 + 原始响应留盘」是 ② 的哨兵语义；`apply_limits` 的确定性 clamp 是
 ③ 的处置语义——**"conviction requests, risk disposes"**：检查员只能请求，风控用算术
@@ -392,13 +395,7 @@ uv run python -c "from hints import hint; print(hint('ex1', 1))"
 （结构相同、你可以先读它们），但 TODO 区必须自己写——验收测试只认你自己文件里的实现。
 每题测试数：ex1 五个 / ex2 五个 / ex3 四个（docstring 里的判据与断言逐条对齐）。
 
-验收（三条同时全绿 = 本课毕业）：
-
-```bash
-uv run pytest
-uv run ruff check .
-uv run pyright
-```
+验收命令同 §1 的完成判据（三条同时全绿 = 本课毕业）。
 
 ## 5. Java 人坑位：相等不等哈希坑（缓存永不命中）
 

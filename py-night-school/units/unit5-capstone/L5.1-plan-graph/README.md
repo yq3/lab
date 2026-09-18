@@ -1,5 +1,10 @@
 # L5.1 毕业设计①：静态图与计划驱动——拓扑可审计，执行确定性
 
+> Unit 4 结业，三块蓝本就位：L4.1 的加权合成与 clamp、L4.2 的条件边循环与 REVIEW 哨兵、
+> L4.3 的检查链与哈希链——收官原话：「毕业设计不是从零写，是把这三块装进你自己的图」。
+> Unit 5 结业考就干这一件事，四课按**树形**生长：今晚 L5.1 打地基（静态图 + 计划驱动），
+> L5.2 审批面与 L5.3 审计面从地基并行生长，L5.4 汇合成完整 PoC。
+
 ## 1. 本课目标
 
 从 L0.1 那句「离毕业又近的一块」开始，每一课都在给财务 agent PoC 攒零件；今晚开始
@@ -38,7 +43,7 @@ uv run pyright
 | 服务注册表只对消费方暴露授权端点 | `TOOL_ALLOWLIST` 工具白名单 | 校验门与执行器共用同一份名单；deny 的工具根本不进计划 schema（看不见即不可被选） |
 | 错误码进工单状态字段，而非异常文本打日志 | `PlanRejection{reason_code, detail}` 入 state | 拒绝原因是**任务数据**：回喂 planner、进审计流水，不是打断图的异常（A29） |
 | BPMN 流程定义打版本号/做 diff | `topology_signature(graph) -> sha256` | 图形状（节点+边）序列化后哈希——同装配必同签名，改图自动露馅（A15） |
-| `Map.merge(key, v, BinaryOperator::apply)` | `Annotated[dict, merge_results]` 自定义 reducer | 上一课 `Annotated[list, operator.add]` 的 dict 版：合并语义写进类型注解，框架运行时读 |
+| `Map.merge(key, v, BinaryOperator::apply)` | `Annotated[dict, merge_results]` 自定义 reducer | L3.2 用过的 `Annotated[list, operator.add]` 的 dict 版：合并语义写进类型注解，框架运行时读 |
 
 ### 2.1 第一条轴：为什么拓扑要静态
 
@@ -58,7 +63,9 @@ human 节点回环；本课用到其中两个：**计划驱动路由**（planner
   drafter 叙述建议单（依取数结果说话）。对照 L3.2 的 ReAct 图——那边模型每轮自由选工具；
   这边模型只能**在计划里写白名单工具名**，选择权还在，选择空间被 schema 收窄了。
 
-Java 蓝本就是 DataAgent 的 `PlanExecutorNode`（见
+Java 蓝本就是 DataAgent 的 `PlanExecutorNode`（DataAgent：Java + spring-ai-alibaba graph
+的开源数据分析 agent，本教程调研的 18 仓之一——Java 栈里与毕业设计形态最接近的样本；
+档案见
 [../../../../research/agent-oss/profiles/DataAgent.md](../../../../research/agent-oss/profiles/DataAgent.md)
 §2.2）：图拓扑静态声明，LLM 规划产物（Plan JSON）作为状态变量驱动确定性 dispatcher——
 Spring AI Alibaba 把同一模式做成了 Java 原生件，今晚我们用 langgraph 手装一遍它的 Python 版。
@@ -117,7 +124,7 @@ StepUnion = Annotated[
 - **Literal 类型** ≈ 「只有编译器认识的 enum」：pyright 拿它做穷尽检查与拼写检查，但
   运行时它就是 str，塞什么都拦不住——Java enum 的运行时安全它没有，防线要建在 Pydantic
   校验门（这是 §5 坑位的主角）；
-- **自定义 reducer 合并 dict**：上一课 `Annotated[list[str], operator.add]` 的 dict 版——
+- **自定义 reducer 合并 dict**：L3.2 用过的 `Annotated[list[str], operator.add]` 的 dict 版——
   `results: Annotated[dict[str, dict], merge_results]`。声明在类型注解里，框架运行时读
   `__metadata__` 执行 `merge_results(旧, 新)`。本课 executor 是唯一写者，但合并语义先立
   契约：L5.2 审批回写、L5.3 事件回放都会成为第二个写者。
@@ -305,14 +312,8 @@ uv run python -c "from hints import hint; print(hint('ex1', 1))"
 | ex3 | `exercises/ex3_replan.py` | 重规划环补全：拒绝原因入 state + 条件边三分支；验收含回喂次数断言与超限哨兵（replans==2） |
 
 三题都是填空 + 改造混合（ex1/ex2 在同构骨架上补核心函数，ex3 在给定装配的图上补环的
-两个分支），零真实网络（ex3 的 planner 是离线替身 FakePlanner）。验收（三条同时全绿
-= 本课毕业）：
-
-```bash
-uv run pytest
-uv run ruff check .
-uv run pyright
-```
+两个分支），零真实网络（ex3 的 planner 是离线替身 FakePlanner）。验收命令同 §1 的完成判据（三条同时全绿
+= 本课毕业）。
 
 ## 5. Java 人坑位：假枚举 Literal 坑
 

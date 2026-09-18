@@ -1,5 +1,10 @@
 # L1.7 上下文管理器与异常处理：没有 checked exception 的世界
 
+> 昨晚你用 `yield` 串起了「解析 → 过滤 → 汇总」的惰性管线：只有被拉取才工作、短路即省功，还解释了
+> 「生成器第二次 for 是空的」——「流」的心智模型装好了。今晚处理流的另一半现实：出错怎么办。Python
+> 没有 checked exception，`except Exception` 也有拦不住的对象；你要画出异常家族树、用 `raise ... from`
+> 保留因果链，并以 `with` 和 `@contextmanager` 接管资源清理。
+
 ## 1. 本课目标
 
 Python 的错误处理与资源清理，是 Java 心智被冲击最狠的一站。完成后你能：
@@ -8,11 +13,23 @@ Python 的错误处理与资源清理，是 Java 心智被冲击最狠的一站�
 - 用 EAFP 风格写代码，并用「异常链 + 自定义异常分层」把底层错误翻译成领域语言；
 - 用类协议和 `@contextmanager` 两种方式实现 `with`，说清它对照 try-with-resources 的同与不同。
 
-这课是 **L2.4「校验错误回喂重试」的直接前置**（CURRICULUM 注明的依赖线）：把校验失败变成可分类的异常对象，才能决定「回喂模型 / 上抛人工 / 直接 DENY」。
+这课是 **L2.4「校验错误回喂重试」的直接前置**：把校验失败变成可分类的异常对象，才能决定「回喂模型 / 上抛人工 / 直接 DENY」。
 
-**完成判据**：本目录下 `uv run pytest` 练习全绿，且你能说出裸 `except:` 与 `except Exception:` 的差别。
+**完成判据**：本目录下 `uv run pytest` / `uv run ruff check .` / `uv run pyright` 三条同时全绿；附加自查：说出裸 `except:` 与 `except Exception:` 的差别。
 
 ## 2. 概念讲解
+
+先给全课对照表，再逐小节展开：
+
+| 你熟悉的 Java 物 | 今天的 Python 物 | 一句话差异 |
+|---|---|---|
+| checked exception（编译器强制处理/声明） | 不存在——全是运行时异常 | 「要么 catch 要么 throws」的编译期契约没了，纪律自己扛（§2.3） |
+| `catch (IOException e)` | `except IOException as e` | 形态几乎同构；except 还支持元组一次多捕（§2.5） |
+| `e.getCause()` / 手动 `initCause` | `raise ... from e` | 异常链是显式语法，不是事后补链（§2.6） |
+| try-with-resources | `with` 语句 + 上下文管理器 | 同为清理必达；Python 把协议做进语言（§2.7） |
+| `finally`（无论成败都执行） | `finally` + `else` | Python 多一个 else：没有异常才执行（§2.5） |
+| 自定义异常 `extends Exception` | `class ExpenseError(Exception)` | 同款领域分层，但没有 checked/unchecked 之分（§2.9） |
+| 匿名类 / lambda 装一段清理逻辑 | `@contextmanager` + `yield` | 清理写成生成器：yield 前后即 enter/exit（§2.8） |
 
 ### 2.1 异常体系全景：一棵两层的树
 
@@ -252,11 +269,11 @@ cd exercises
 uv run python -c "from hints import hint; print(hint('ex1', 1))"
 ```
 
-| 题 | 文件 | 考察 | 验收要点 |
-|---|---|---|---|
-| ex1 | `exercises/ex1_flow.py` | try/except/else/finally 完整结构 | 两条路径的 trace 顺序断言：`["try","else","finally"]` / `["try","except","finally"]` |
-| ex2 | `exercises/ex2_custom_error.py` | 异常分层 + `raise from` + `pytest.raises` | 类型（含 isinstance 分层）/ 消息 match / `__cause__` 三重断言 |
-| ex3 | `exercises/ex3_context.py` | `@contextmanager` | 正常路径限额改了又恢复；**异常路径**限额照样恢复且异常正常传播 |
+| 题 | 文件 | 考察 |
+|---|---|---|
+| ex1 | `exercises/ex1_flow.py` | try/except/else/finally 完整结构；验收：两条路径的 trace 顺序断言 |
+| ex2 | `exercises/ex2_custom_error.py` | 异常分层 + `raise from` + `pytest.raises`；验收：类型（含 isinstance 分层）/ 消息 match / `__cause__` 三重断言 |
+| ex3 | `exercises/ex3_context.py` | `@contextmanager`；验收：正常路径限额改了又恢复、**异常路径**限额照样恢复且异常正常传播 |
 
 ex2 顺带把 `pytest.raises` 的标准姿势教给你（`as exc_info` 取对象、`match=` 查消息）——L2 起天天用。
 

@@ -1,8 +1,10 @@
 # L3.6 adk-python：全家桶——连调试器与评估都配好的框架
 
-> 抽象光谱的最后一站：拒抽象的 SDK（L3.1）→ 图引擎（L3.2–L3.4）→ harness（L3.5）→
-> **全家桶（本课）**。前六课的每一样东西 adk 都有，而且多出三样别人没有的：
-> 会话存储、Web 调试器、评估工具链——代价是每一层都长在它的约定上。
+> 昨晚 deepagents 交卷：一行 `create_deep_agent` 发来整个工作环境——审查底稿落进
+> 虚拟文件系统、发票复核转交子代理、MemoryMiddleware 把「金额一律整数分」的审查
+> 记忆注进 system 消息。今晚光谱压轴**全家桶**：原语层（L3.1）→ 图引擎（L3.2–L3.4）
+> → harness（L3.5）→ adk（本课），前六课的每一样它都有。还多出三样别人没有的——
+> 会话存储、Web 调试器、评估工具链；代价是每一层都长在它的约定上。
 
 ## 1. 本课目标
 
@@ -17,13 +19,15 @@
 - 对全家桶形态给出自己的判断：它替你付掉哪些代码（甜），你被绑进哪些约定（重）——
   这是 L3.8 决策表的最后一列数据。
 
-**完成判据**：本目录下三条命令同时全绿（发货态：`code/` 讲义区绿，`exercises/` 是设计内的红）：
+**完成判据**：本目录下三条命令同时全绿——
 
 ```bash
 uv run pytest
 uv run ruff check .
 uv run pyright
 ```
+
+发货态诚实说明：`code/` 讲义区绿，`exercises/` 是设计内的红（TODO 未填）。
 
 ## 2. 概念讲解
 
@@ -208,7 +212,7 @@ cd exercises
 uv run python -c "from hints import hint; print(hint('ex1', 1))"
 ```
 
-| 题 | 文件 | 改造点 |
+| 题 | 文件 | 考察 |
 |---|---|---|
 | ex1 | `exercises/ex1_tool.py` | 工具注册改造：新写 lookup_policy，让 declaration 从你的 docstring + 签名长出来（meta 验证 schema 三信息源） |
 | ex2 | `exercises/ex2_state.py` | 状态改造：单笔上限从硬编码改为 create_session 注入，同一单注入 3000/5000 断言不同 decision |

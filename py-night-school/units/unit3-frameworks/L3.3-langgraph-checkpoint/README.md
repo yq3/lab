@@ -1,5 +1,11 @@
 # L3.3 langgraph ②：checkpoint 与 interrupt——暂停、杀进程、恢复
 
+> 昨晚第一张手装图全绿：reviewer / tools / 条件边的拓扑，连同 TypedDict 状态 schema
+> 与 reducer 语义，`run_review` 四用例跑在 langgraph 手装版上。但有个问题昨晚还没机会
+> 撞上：invoke 一返回、进程一退，图状态就没了——想「等一个人再继续」，状态必须先活
+> 过进程。今晚补上这一课：状态落盘、人审门暂停、换一个进程把图救活——三连从拓扑
+> （怎么跑）走到时间维（跑一半怎么办）。
+
 ## 1. 本课目标
 
 上一课我们手装了审查图（reviewer / tools / 条件边）；今晚给这张图装上**记忆与暂停**：
@@ -9,7 +15,8 @@ checkpointer 让状态活在 sqlite 文件里，interrupt 让图能在「等一�
 - 说清 **checkpointer** 是什么：每个 superstep 把整份图状态快照落盘；同一个 `thread_id`
   的多次 invoke（哪怕分属两个进程）共享一份状态——「杀进程后恢复」的全部秘密就这一个文件；
 - 说清 **interrupt 的真实语义**（以源码为准，不是文档比喻）：节点里 `interrupt(payload)`
-  第一次被调时**抛出** `GraphInterrupt`，被 pregel 引擎**捕获**后连同图状态一起**落盘暂停**——
+  第一次被调时**抛出** `GraphInterrupt`，被 pregel 引擎（langgraph 的执行引擎模块，
+得名于 Pregel 图计算模型——superstep 循环就在它里面）**捕获**后连同图状态一起**落盘暂停**——
   不是异常栈冒给调用方，`ainvoke` 正常返回；恢复时同一节点**从头重执行**，`interrupt()`
   不再抛，而是返回 `Command(resume=...)` 带来的人工决策；
 - 跑通**真分进程实验**：`start` 进程把 CLM-2026-0003（脏数据单）打到人审门暂停后正常退出，
@@ -81,7 +88,8 @@ async def human_gate(state: ClaimState) -> dict:
 checkpoint 的 writes 账本，图就此收工——`ainvoke` 正常返回暂停时刻的状态，**没有任何
 异常栈**。恢复：另一个进程 `graph.ainvoke(Command(resume="approve"), config)`，引擎把
 `("__resume__", "approve")` 也写进挂起写入；human_gate 任务**从头重执行**，这次
-`interrupt()` 那行发现 scratchpad 里有自己的恢复值——**不再抛，直接返回它**，节点接着
+`interrupt()` 那行发现 scratchpad（图状态里专存恢复指令的键）里有自己的恢复值——
+**不再抛，直接返回它**，节点接着
 往下跑。两条铁律（都写在 `interrupt()` 的 docstring 里）：
 
 1. **恢复是重放，不是续传**：「The graph resumes from the start of the node,
@@ -447,6 +455,13 @@ mini-agent（L2.3）的循环没有任何暂停/恢复能力——一轮到底�
 
 一句话总结：mini-agent 的 `while` 循环里没有「等一个人」这个动词——今晚这层装上之后，
 「跑一步、停下来等人、再继续」从产品话术变成了三个可对源码指认的机制件。
+
+顺带回收 L3.1 的一个承诺：openai-agents 的 `RunState`（HITL 的会话对账与恢复）在
+L3.1 只消费了公共契约、没深入——它就是「另一个框架的同一件事」：结果对象的
+`to_state()`（产出 RunState）与 `RunState.approve()` 对应今晚 `Command(resume=)` 的
+恢复入口，`Runner.run` 接续对应 thread_id 取快照续跑，
+schema 版本门禁对应 checkpoint 兼容策略。两个框架在这层各写了一座冰山，水面上是
+同一个「暂停等人再继续」。
 
 ## 离毕业又近的一块
 

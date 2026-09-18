@@ -1,5 +1,10 @@
 # L2.2 工具协议：Pydantic 模型 → JSON Schema → 注册表
 
+> 昨晚你的 `client.py` 裸调端点走通了工具调用两回合——`tools` 下行、`tool_calls` 上行、
+> `role=tool` 回喂，也亲手拆封了一次「字符串套娃」（`arguments` 是一层 JSON 字符串）。
+> 今晚让那份手抄的工具契约下岗：形状改由 Pydantic 参数模型声明、schema 一键生成、
+> 函数定义即注册——五块肌肉的第二块（工具层）。
+
 ## 1. 本课目标
 
 把昨晚手写的工具契约升级成「单一事实源」的工具注册表。完成后你能：
@@ -155,7 +160,8 @@ def run_tool(name: str, arguments_json: str, registry = TOOL_REGISTRY) -> str:
 ### 2.5 校验分层：schema 管形状，规则管业务值
 
 一个真实张力：`preapprove([-500])` 该在 schema 层被拦下吗？**不该**——
-`REJECT:INVALID_AMOUNT` 是这个工具的合法输出（L0.1 的四态之一），负数必须能进来，
+`REJECT:INVALID_AMOUNT` 是这个工具的合法输出（L0.1 预审的四态之一：PASS 与三个
+`REJECT:原因`——L2.4 会把这组值写成 `Literal` 值域），负数必须能进来，
 才能被业务规则判断并拒绝。所以：
 
 - schema 层（PreapproveArgs）：`items_cents` 是「至少 1 个元素的整数列表」——形状；
@@ -163,14 +169,15 @@ def run_tool(name: str, arguments_json: str, registry = TOOL_REGISTRY) -> str:
 
 把业务规则写进 schema（比如 `Field(gt=0)`）会**改变工具语义**：负数单据从「被规则
 拒绝的 REJECT」变成「进都进不来的 invalid_arguments」——上游永远看不到 INVALID_AMOUNT
-这个合法结论。这条分层纪律在毕业设计（L5.4 fail-closed 检查链）会再次出现。
+这个合法结论。这条分层纪律在毕业设计（L5.4 的 fail-closed 检查链——fail-closed：
+值域是闭合集合，宁可拒绝也不猜，L2.4 正式展开）会再次出现。
 
 ### 2.6 与 L2.1 的连接
 
 `to_openai_tools()` 的产物直接喂给 `complete(messages, tools=...)`；模型回的
 `tool_call["function"]["arguments"]` 直接喂给 `run_tool(name, arguments)`——
-L2.1 的协议层与本课的注册表层严丝合缝。实验②把昨晚的两回合 demo 原样重放，
-但每一行都是注册表驱动。
+L2.1 的协议层与本课的注册表层严丝合缝。Step 2 的 demo 走的还是昨晚那条工具调用
+时序，但每一行都是注册表驱动。
 
 ## 3. 动手代码
 

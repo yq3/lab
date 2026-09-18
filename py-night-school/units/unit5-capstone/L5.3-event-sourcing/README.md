@@ -1,5 +1,10 @@
 # L5.3 毕业设计③：事件溯源与审计——append-only、缓存即审计、图版本绑定
 
+> 昨晚 L5.2 审批面就位：图会停、人会答、账会记——但「断线重放不丢单」还是**进程内承诺**，
+> 事件表是内存 list，服务一重启全蒸发。今晚给 PoC 装审计面，把账本换成 SQLite 事件溯源，
+> 「不丢单」升级成跨重启承诺。本课与 L5.2 正交：图仍基于 L5.1（不含审批半边），审计面与
+> 审批面各长各的，L5.4 汇合。
+
 ## 1. 本课目标
 
 L5.1 装好了编排层（静态图 + 计划驱动），L5.2 在并行装审批面；今晚给 PoC 装**审计面**——
@@ -114,7 +119,8 @@ key 的纪律是 L4.1 §5「相等不等哈希」的正解落地：`canonical_pr
 
 ### 2.4 审计层怎么接进图：旁挂，不改写
 
-L5.1 的图一行拓扑未动（本课图的拓扑签名与 L5.1 **相同**——`5dbfa594e113…`，这是「审计层
+L5.1 的图一行拓扑未动——本课图的拓扑签名与 L5.1 Step 4 打出的值**相同**（`5dbfa594e113…`
+开头那个），这是「审计层
 是旁路」的可验证证据）。接线只有两类加法：
 
 - **节点旁挂事件发射**（`graph._with_events`）：节点本体先跑，再把它的 (输入状态, 输出
@@ -204,7 +210,7 @@ uv run python code/demo_flow.py
     seq  8  llm.decision   node=drafter cached=False prompt_hash=325ff2645353…
     seq  9  cost.recorded  node=drafter prompt=12 completion=8
     seq 10  advice.drafted APPROVE/PASS 剩余 10000 分
-    seq 11  submitted      {'sent': True}
+    seq 11  submitted      {'sent': True}      ← 直接送出，没有暂停——本课的图没有 L5.2 的审批半边
     …
   CLM-2026-0003@5dbfa594e113  12 条事件
     seq  0  run.started    claim=CLM-2026-0003 graph_version=5dbfa594e113… mode=always_dirty
@@ -337,14 +343,7 @@ uv run python -c "from hints import hint; print(hint('ex1', 1))"
 | ex3 | `exercises/ex3_version.py` | 图版本绑定补全：run_key 组装 + assert_compatible 守门；验收含加/删节点换签、旧 key 拒续新 key 正常、run.started 带 graph_version（demo 集成路径） |
 
 三题都是「同构骨架补核心函数」（讲义 `code/` 的 eventstore / audit_cache / versioning 是
-能跑的完整参照），零真实网络（ex2 的端点是 L2.3 服役至今的 MockLLMEndpoint）。验收
-（三条同时全绿 = 本课毕业；发货态 18 个练习测试里 17 个 TODO 红、1 个 meta 绿）：
-
-```bash
-uv run pytest
-uv run ruff check .
-uv run pyright
-```
+能跑的完整参照），零真实网络（ex2 的端点是 L2.3 服役至今的 MockLLMEndpoint）。验收命令同 §1 的完成判据（三条同时全绿 = 本课毕业；发货态 18 个练习测试里 17 个 TODO 红、1 个 meta 绿）。
 
 ## 5. Java 人坑位：自动提交错觉
 

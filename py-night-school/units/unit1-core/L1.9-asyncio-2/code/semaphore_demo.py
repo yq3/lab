@@ -1,4 +1,4 @@
-"""实验④：Semaphore(2) 限流——最多 2 个端点同时在飞，峰值眼见为实。
+"""Step 4：Semaphore(2) 限流——最多 2 个端点同时在飞，峰值眼见为实。
 
 对应 java.util.concurrent.Semaphore：几乎同构（acquire/release vs async with），
 差别只是获取名额的等待会让出事件循环而不是挂起线程。

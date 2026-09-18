@@ -1,5 +1,10 @@
 # L1.3 数据建模：dataclass 与 Pydantic v2
 
+> 昨晚你写出了 `Rule` Protocol 和它的零继承实现（长得像就行，无需 implements），还练了 `str | None`
+> 先收窄再运算的纪律——标注这层骨架有了，但数据本身还是散装的。今晚解决「数据长什么样」：先用手写
+> 类的 38 行痛苦换 `@dataclass` 的 11 行声明，再用 Pydantic `BaseModel` 做到「构造即验证」——agent
+> 框架里消息与工具 schema 的底座全是它。
+
 ## 1. 本课目标
 
 写出「Java record 的对应物」，并理解 agent 世界的血管为什么全是 Pydantic。完成后你能：
@@ -313,7 +318,7 @@ uv run python -c "from hints import hint; print(hint('ex1', 1))"
 - ex3 最终判据是 `model_dump()` 输出结构逐键断言；非法数据（坏单号 / 负金额 / 空类目）
   必须在构造那一刻被拒。
 
-发货态的诚实说明：现在跑 `uv run pytest`，练习区是设计内的红（TODO 未填）；跑 `uv run pyright`
+发货态的诚实说明（「发货态」= 仓库克隆下来、练习未做的初始状态；三命令全绿即「毕业态」）：现在跑 `uv run pytest`，练习区是设计内的红（TODO 未填）；跑 `uv run pyright`
 会顺带报 ex1 测试里「参数数量不匹配」——那是空壳 dataclass 还没字段的回声，补完字段自动消失。
 
 验收（三条同时全绿 = 本课毕业）：

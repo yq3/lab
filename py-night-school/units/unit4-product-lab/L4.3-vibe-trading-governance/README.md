@@ -1,9 +1,11 @@
 # L4.3 Vibe-Trading：治理合规——fail-closed 门、哈希链与对账不重发
 
-> Unit 4 收官课。三个产品同一条递进线：L4.1 无框架纯 Python、L4.2 LangGraph 实战、
-> 本课治理合规架构——前两课你在「读产品怎么想」，这一课读「产品怎么**不敢出错**」。
-> 全课零框架零网络零模型调用：机制件只用标准库（dataclasses / json / hashlib / pathlib /
-> datetime），连 Pydantic 都不用——这不是省事，是产品的刻意取舍（§2.4），本课照做并讲清为什么。
+> 昨晚 L4.2 的辩论图跑通：条件边循环 + 计数终止让回环可预算，REVIEW 哨兵守住「解析不了的
+> 裁决绝不捏造」。今晚 Unit 4 收官，第三站 Vibe-Trading——前两课读「产品怎么想」，这一课
+> 读「产品怎么**不敢出错**」，把风控光谱的④授权层⑤执行层走完整（L4.1 停在③处置层、
+> L4.2 停在②决策层）。全课零框架零网络零模型调用：机制件只用标准库（dataclasses / json /
+> hashlib / pathlib / datetime），连 Pydantic 都不用——这不是省事，是产品的刻意取舍
+> （§2.4），本课照做并讲清为什么。
 
 ## 1. 本课目标
 
@@ -40,13 +42,14 @@ uv run pyright
 | private 方法 / 模块访问边界 | **函数干脆不存在**（没有 `save_mandate`） | 授权不可达不靠访问修饰符，靠写路径物理缺席——被劫持的 agent 连试都没得试 |
 | 审计表 + DBA 权限 | 哈希链 JSONL 账本 | append-only + `prev_record_hash` 传播性：改/删任何一条历史，其后整条链都断（§2.5） |
 | 幂等消费 / JMS `JMSXGroupID` 去重 | `ref_id` 幂等键 + 对账不重发 | 付款域的铁律：**重试＝双倍付款**；恢复靠取证（by exact identity），永不靠重发 |
-| `Instant`（必然带时区）vs `LocalDateTime` | aware `datetime` vs naive `datetime` | naive/aware 在 Python 是**运行时属性不是类型**——两者一比较直接 TypeError（§2.6） |
+| `Instant`（必然带时区）vs `LocalDateTime` | aware `datetime` vs naive `datetime` | naive/aware 在 Python 是**运行时属性不是类型**——两者一比较直接 TypeError（§2.7） |
 | 注入 `Clock`（测试可控时间） | `clock: Callable[[], datetime]` 参数 | 同款思想：生产给系统钟、测试给固定钟；检查链本身**绝不自己取时钟** |
 | kill switch / 熔断开关（服务注册中心旗标） | `HALT` 文件哨兵 | 文件存在即停，payload 损坏仍算停——独立于 LLM/SSE/主循环存活的物理制动 |
 
 ### 2.1 风控光谱：Unit 4 三课收口
 
-把「风控嵌在管线哪一层」画成一张光谱，八个开源产品各归其位——Unit 4 三课正好按它收口：
+把「风控嵌在管线哪一层」画成一张光谱，调研过的八个开源金融产品各归其位——本学段
+解剖了其中三个（L4.1–L4.3 的主角），Unit 4 三课正好按它收口：
 
 | 层 | 名字 | 一句话 | 代表 |
 |---|---|---|---|
@@ -73,7 +76,8 @@ uv run pyright
 两者同时存在于产品里，靠「权威分离」划清边界：advisory never block; mandate gate remains
 the sole authority。为什么 advisory 必须 fail-open？因为它如果会阻塞，一个外部服务的
 可用性就变成了下单链路的可用性——那不是风控，是单点故障。反过来，**门**必须 fail-closed：
-门 fail-open 的下场见 §5（DB-GPT 四缺陷先例）。Java 对照：checked exception 曾强迫你
+门 fail-open 的下场见 §5（DB-GPT——开源数据库 agent 产品，本教程调研样本之一——的
+确认门四缺陷先例）。Java 对照：checked exception 曾强迫你
 「要么 catch 要么 throws 声明」，catch 了就得写清楚恢复策略；Python 的 `except` 是裸的，
 「检查链任何一处 `except Exception: return None`」没人拦你——fail-closed 在 Python 里
 是一种**你要主动写测试钉死的纪律**，不是语言给的。
@@ -389,13 +393,7 @@ uv run python -c "from hints import hint; print(hint('ex1', 1))"
 
 形态标注（诚实起见）：三题都是**补全型骨架**——0–3 查 / canonical_json / 标记原语已给，
 TODO 只挖关键环节；讲义 `code/` 里有同构完整版可对照读（ex1 对照 enforcement.py、
-ex2 对照 ledger.py、ex3 对照 pending.py），先自己写再看。验收（三条同时全绿 = 本课毕业）：
-
-```bash
-uv run pytest
-uv run ruff check .
-uv run pyright
-```
+ex2 对照 ledger.py、ex3 对照 pending.py），先自己写再看。验收命令同 §1 的完成判据（三条同时全绿 = 本课毕业）。
 
 ## 5. Java 人坑位：fail-open 兜底坑（`except Exception: return None`）
 

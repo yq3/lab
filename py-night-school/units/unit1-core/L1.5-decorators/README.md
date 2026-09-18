@@ -1,5 +1,10 @@
 # L1.5 装饰器 vs 注解：@ 的两副面孔
 
+> 昨晚你把三条规则函数排进 `RULES` 列表交给 `preapprove` 消费、在 `invoke_tool` 里用 `func(**params)`
+> 把 dict 摊开成参数，还写了 nonlocal 闭包工厂——函数当值用已经成了日常。今晚把它做成语法：`@` 只是
+> 「接收函数、返回函数」那层糖，你会手写带参的 `@retry` 与注册型装饰器（`functools.wraps` 保住原函数
+> 身份），并看懂框架里 `@tool` 定义完就自动进注册表的原因。
+
 ## 1. 本课目标
 
 读完框架源码里最常见的那个字符 `@`。完成后你能：
@@ -8,9 +13,20 @@
 - 说清 Java 注解与 Python 装饰器的**本质差异**：标签 vs 函数变换；
 - 看懂 langchain / crewAI 里 `@tool`、`@step` 风格代码背后发生了什么——为什么「函数定义完就自动进了注册表」。
 
-**完成判据**：本目录下 `uv run pytest` 练习全绿（exercises/ 三个练习），且你能不看讲义复述 `@deco` 的等价展开。
+**完成判据**：本目录下 `uv run pytest` / `uv run ruff check .` / `uv run pyright` 三条同时全绿（exercises/ 三个练习）；附加自查：不看讲义复述 `@deco` 的等价展开。
 
 ## 2. 概念讲解
+
+先给全课对照表，再逐小节展开：
+
+| 你熟悉的 Java 物 | 今天的 Python 物 | 一句话差异 |
+|---|---|---|
+| `@Override` / `@SuppressWarnings` | （无参装饰器） | Java 注解是**贴在元素上的数据**；Python 装饰器是**立即执行的函数变换** |
+| 注解处理器（APT / 编译期） | 不存在 | Python 装饰器不需要处理器兑现——`def` 时刻自己就兑现了 |
+| 反射 + 动态代理（Spring AOP） | 装饰器本体 | Spring 要靠容器在运行时织入代理；Python 直接换个函数对象，零反射 |
+| `@Transactional`（Spring） | `@retry` / `@timing`（本课 Step 1/3） | **Java 里最像 Python 装饰器的东西**：方法还是那个签名，行为被包了一层 |
+| 多个注解：无顺序语义、可重复 | `@a @b` 有严格顺序：`a(b(f))` | Java 注解是平铺的标签集合；Python 是嵌套的函数调用 |
+| 注解不改变被注解元素本身 | 装饰后原名绑定的是**新对象** | 这也是 §5「丢元数据坑」的根源 |
 
 ### 2.1 热身：函数是对象（60 秒）
 
@@ -49,18 +65,9 @@ f = deco(f)  # 注意：是「用返回值替换原名」，deco 立即执行，
 2. `f` 这个名字从那以后**绑定的是 `deco` 的返回值**，不一定是原来的函数；
 3. 既然是普通调用，自然可以带参数（`@deco(x=1)`，见 2.5）、可以叠放（见 2.6）。
 
-### 2.3 Java↔Python 对照表
+### 2.3 `@Transactional` 之桥：从容器代理到函数变换
 
-| 你熟悉的 Java 物 | 今天的 Python 物 | 一句话差异 |
-|---|---|---|
-| `@Override` / `@SuppressWarnings` | （无参装饰器） | Java 注解是**贴在元素上的数据**；Python 装饰器是**立即执行的函数变换** |
-| 注解处理器（APT / 编译期） | 不存在 | Python 装饰器不需要处理器兑现——`def` 时刻自己就兑现了 |
-| 反射 + 动态代理（Spring AOP） | 装饰器本体 | Spring 要靠容器在运行时织入代理；Python 直接换个函数对象，零反射 |
-| `@Transactional`（Spring） | `@retry` / `@timing`（本课 Step 1/3） | **Java 里最像 Python 装饰器的东西**：方法还是那个签名，行为被包了一层 |
-| 多个注解：无顺序语义、可重复 | `@a @b` 有严格顺序：`a(b(f))` | Java 注解是平铺的标签集合；Python 是嵌套的函数调用 |
-| 注解不改变被注解元素本身 | 装饰后原名绑定的是**新对象** | 这也是 §5「丢元数据坑」的根源 |
-
-**用 `@Transactional` 当桥**：你写 `@Transactional def transfer()` 时，Spring 在运行时给 `transfer` 生成动态代理，调用前后织入 begin/commit/rollback——`transfer` 这个名字最终指向代理对象。
+对照表见本节开头。下面这把桥值得单独走一遍：你写 `@Transactional def transfer()` 时，Spring 在运行时给 `transfer` 生成动态代理，调用前后织入 begin/commit/rollback——`transfer` 这个名字最终指向代理对象。
 把「容器替你生成代理」换成「装饰器函数自己返回包装」，你就得到了 Python 装饰器：**同一件事，Python 把它做成了语言机制而不是框架魔法**。
 本课 Step 3 的 `@retry` 与 L1.7 的 `with` 会把这个桥走完。
 
@@ -162,7 +169,8 @@ def timing(func: Callable[P, R]) -> Callable[P, R]: ...
 ```
 
 3.12 也支持把类型参数直接写在 def 上（`def timing[P, R](...)`，PEP 695，长得像 Java 的 `<T>`）——但它在 3.12 与 `collections.abc.Callable` 组合时有运行时 bug（3.13 才修），
-而框架源码（如 §6 的 crewAI `@tool`）清一色老式写法，所以我们跟框架走。本课只要求**看懂**，不要求默写。
+而框架源码（如 §6 的 crewAI `@tool`）清一色老式写法，所以我们跟框架走——夜校全程
+只用 `Callable[P, R]` 老式写法，不会踩到这个 bug。本课只要求**看懂**，不要求默写。
 
 ## 3. 动手代码
 
@@ -217,11 +225,11 @@ cd exercises
 uv run python -c "from hints import hint; print(hint('ex1', 1))"
 ```
 
-| 题 | 文件 | 考察 | 验收要点 |
-|---|---|---|---|
-| ex1 | `exercises/ex1_timing.py` | 无参装饰器（两层） | 返回值透传 + 每次调用耗时记进 `TIMINGS` + `__name__`/`__doc__` 保留 |
-| ex2 | `exercises/ex2_retry.py` | 带参装饰器（三层） | 三次中两次失败仍成功 / 耗尽抛**最后一次**异常 / 成功后绝不重试 / 名单外异常不重试 |
-| ex3 | `exercises/ex3_registry.py` | 注册型装饰器 + 按名调用 | import 后 TOOLS 内容断言 + 调用结果断言 + 未知名抛 `KeyError` |
+| 题 | 文件 | 考察 |
+|---|---|---|
+| ex1 | `exercises/ex1_timing.py` | 无参装饰器（两层）；验收：返回值透传、每次调用耗时记进 `TIMINGS`、`__name__`/`__doc__` 保留 |
+| ex2 | `exercises/ex2_retry.py` | 带参装饰器（三层）；验收：三次中两次失败仍成功 / 耗尽抛**最后一次**异常 / 成功后绝不重试 / 名单外异常不重试 |
+| ex3 | `exercises/ex3_registry.py` | 注册型装饰器 + 按名调用；验收：import 后 TOOLS 内容断言 + 调用结果断言 + 未知名抛 `KeyError` |
 
 验收（三条同时全绿 = 本课毕业）：
 

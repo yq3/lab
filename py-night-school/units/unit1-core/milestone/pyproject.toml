@@ -21,6 +21,7 @@ addopts = "-q"
 [tool.ruff]
 line-length = 120
 target-version = "py312"
+extend-exclude = ["*.md"]  # 讲义代码块是手工对齐的教学代码，不参与 format
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B"]
