@@ -45,6 +45,6 @@ def handle_tool_calls(assistant_message: dict) -> list[dict]:
         name = tool_call["function"]["name"]
         if name != "preapprove":
             continue
-        arguments = json.loads(tool_call["function"]["arguments"])  # 字符串套娃坑：先拆封
+        arguments = json.loads(tool_call["function"]["arguments"])  # 字符串套娃：先拆封
         results.append({"role": "tool", "tool_call_id": tool_call["id"], "content": preapprove(**arguments)})
     return results

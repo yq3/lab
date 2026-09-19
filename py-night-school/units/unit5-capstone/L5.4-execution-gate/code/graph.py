@@ -66,7 +66,7 @@ ESCALATE_APPROVAL_REASON = "REJECT:APPROVAL_LOOPS_EXCEEDED"  # 审批回环烧�
 ESCALATE_GATE_REASON = "REJECT:GATE_DENIED"  # L5.4：门结构性拒绝（DENY）——不可解析/审批缺位/指纹不符/黑名单
 ESCALATE_REAUTH_REASON = "REJECT:GATE_REAUTH_REQUIRED"  # L5.4：门定量暂停（PAUSE）——升额后重开新 run
 DEFAULT_REJECT_FEEDBACK = "审批人驳回且未留留言：请复核建议单后重新起草。"  # L5.2 原样
-# 「今天」的注入缺省（ISO 日期）——门与账本的日历窗口都从装配参数来，不取系统时钟（§5 坑位）。
+# 「今天」的注入缺省（ISO 日期）——门与账本的日历窗口都从装配参数来，不取系统时钟（§5 陷阱）。
 DEFAULT_TODAY = "2026-09-16"
 # superstep 预算：最坏链 intake + 3×(planner+gate) + executor + 3×(drafter+submit) + execute + escalate
 # = 16 步；L5.2 的 20 在加门后只剩 4 步余量，顺手放大到 24（留 8 步——docstring 声明的放大理由）。

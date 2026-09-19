@@ -6,7 +6,7 @@ from oneshot import read_amounts
 def test_second_pass_is_silently_empty() -> None:
     gen = read_amounts()
     assert list(gen) == [1200, 3500, 2400]
-    assert list(gen) == []  # 坑位现场：没有异常，就是空
+    assert list(gen) == []  # 陷阱现场：没有异常，就是空
 
 
 def test_fix_materialize() -> None:

@@ -40,7 +40,7 @@ class ChainVerificationResult:
 
 
 def canonical_json(obj: Any) -> str:
-    """已给：确定性序列化（排序键 + 紧凑分隔）——同 dict 同字节串（L4.1 坑的正解）。"""
+    """已给：确定性序列化（排序键 + 紧凑分隔）——同 dict 同字节串（L4.1 陷阱的正解）。"""
     return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=True, default=str)
 
 

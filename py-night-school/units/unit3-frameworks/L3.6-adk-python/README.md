@@ -230,7 +230,7 @@ uv run ruff check .
 uv run pyright
 ```
 
-## 5. Java 人坑位：全家桶默认件坑（内存会话上了生产）
+## 5. Java 直觉陷阱：全家桶默认件（内存会话上了生产）
 
 - **现象**：demo 跑得很好，部署后「用户上一句还在，服务一重启全忘了」；或者更隐蔽——
   起两个副本做负载均衡，同一个用户的会话在 A 副本建、请求轮到 B 副本就 404。
@@ -260,7 +260,7 @@ uv run pyright
   declaration 如何由 docstring + 签名生成（`_get_declaration`）、ToolContext 参数
   如何被注入与剔除（`_ignore_params`）——Step 2 与 ex1 的全部机制。
 - google/adk-python@7b246e01#src/google/adk/runners.py —— Runner 与 InMemoryRunner：
-  `run_async` 的事件驱动循环、会话的取用与创建（§5 坑位的现场）。
+  `run_async` 的事件驱动循环、会话的取用与创建（§5 陷阱的现场）。
 - google/adk-python@7b246e01#src/google/adk/models/lite_llm.py —— LiteLlm：
   构造 kwargs 如何转交 litellm 的 acompletion、`openai/` 前缀的路由语义
   （§2.4 的两条源码事实都在这里核验）。

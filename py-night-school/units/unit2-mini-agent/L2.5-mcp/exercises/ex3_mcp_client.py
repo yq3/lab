@@ -1,7 +1,7 @@
 # 练习 3（单变量编辑约束：只改本文件 TODO 标注的函数体与所需的顶部 import，其余不要动）
 """client 侧执行：经 MCP 协议调用工具（run_mcp_tool）。
 
-考察点：arguments_json 是模型给的 JSON 字符串（字符串套娃坑第三次出场）——先拆成 dict
+考察点：arguments_json 是模型给的 JSON 字符串（字符串套娃第三次出场）——先拆成 dict
 再走协议；结果 content 列表里取文本；is_error=True 时抛 McpToolError（server 的错误
 信息在 content 里，要带给上层）。
 

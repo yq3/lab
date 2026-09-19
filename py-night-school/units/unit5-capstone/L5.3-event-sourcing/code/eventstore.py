@@ -80,7 +80,7 @@ class EventStore:
 
     连接管理：open(path) 建表并返回实例（上下文管理器用完即关）；
     事务语义：append 内部 `with conn:`——成功 commit、任何失败 rollback
-    （讲义 §5「自动提交错觉」坑位的正面教材：写路径永远不裸 execute 后忘提交）。
+    （讲义 §5「自动提交错觉」陷阱的正面教材：写路径永远不裸 execute 后忘提交）。
     """
 
     def __init__(self, conn: sqlite3.Connection, clock: Callable[[], str] | None = None) -> None:
@@ -166,7 +166,7 @@ class EventStore:
 def connect(path: str | Path, clock: Callable[[], str] | None = None):
     """上下文管理器版打开：`with connect(path) as store:`——连接生命周期收拢一处。
 
-    注意与 `with conn:` 的分工（讲义 §5 坑位）：本 with 管「开/关连接」，
+    注意与 `with conn:` 的分工（讲义 §5 陷阱）：本 with 管「开/关连接」，
     append 内部的 `with self._conn:` 才管「提交/回滚事务」——两个 with，两件事。
     """
     store = EventStore.open(path, clock=clock)

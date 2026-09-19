@@ -46,7 +46,7 @@ uv run pyright
 
 夜校到这里才第一次完整展示类定义语法——不跳步，一块块搭。
 
-**class 语句**：冒号 + 缩进代替花括号（缩进即语法，L0.1 坑位讲过）；类名没有 `public/private`
+**class 语句**：冒号 + 缩进代替花括号（缩进即语法，L0.1 陷阱讲过）；类名没有 `public/private`
 前缀——可见性约定靠下划线前缀（`_x` 表示「内部用」，纯约定），本课全用公有。
 
 **`__init__` 与 self**——并排看：
@@ -85,7 +85,7 @@ public class ExpenseClaimManual {
    对照 Java「字段在类体、构造器只赋值」的心智——Python 的属性是逐个「挂」上去的。
 4. `list[int] | None` 读作「int 列表或 None」——`None` 是 Python 的空值（≈ `null`，但它是
    一个真实存在的对象），`X | None` 等价 Java 的 `Optional<X>` 直觉，且是运行时真实类型。
-   None 哨兵 + 体内替换是可变默认值的纪律写法（§5 坑位的主角）。
+   None 哨兵 + 体内替换是可变默认值的纪律写法（§5 陷阱的主角）。
 5. 不写 `__repr__` / `__eq__` 的代价：`print(claim)` 打出 `<...object at 0x1024...>`，
    两个内容相同的实例 `==` 判不相等（默认按身份比较，≈ 没重写 equals 的 Java 对象）。
    手写它们有多痛，§3 Step 1 亲测。
@@ -329,9 +329,9 @@ uv run ruff check .
 uv run pyright
 ```
 
-## 5. Java 人坑位：dataclass 可变默认坑
+## 5. Java 直觉陷阱：dataclass 可变默认
 
-这是本课的命名化失败模式，以后说「可变默认坑」我们秒懂。
+这是本课的命名化失败模式，以后说「可变默认」我们秒懂。
 
 - **现象**：`ValueError: mutable default <class 'list'> for field items is not allowed:
   use default_factory`——注意，是**类定义时**抛，不是运行时踩雷。

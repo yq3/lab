@@ -1,7 +1,7 @@
 # 练习 3（单变量编辑约束：只改本文件 TODO 标注的函数体与所需的顶部 import，其余不要动）
 """工具调用协议：解析 tool_calls、执行、组装 role=tool 回喂消息。
 
-考察点：arguments 是「JSON 字符串」不是 dict（§5 坑位的主角，这里亲手拆一次雷）；
+考察点：arguments 是「JSON 字符串」不是 dict（§5 陷阱的主角，这里亲手拆一次雷）；
 一条 assistant 消息可以并行携带多个 tool_calls（每个都要回喂，id 一一对应）；
 role=tool 消息的三要素：role / tool_call_id / content。
 

@@ -1,7 +1,7 @@
 # 练习 3（单变量编辑约束：只改本文件 TODO 标注的函数体与所需的顶部 import，其余不要动）
 """分发执行 run_tool：注册表查表 → 解析校验 → 解包调用 → 字符串化。
 
-考察点：model_validate_json 一步完成「解析 + 校验」（字符串套娃坑的工程级拆法）；
+考察点：model_validate_json 一步完成「解析 + 校验」（字符串套娃的工程级拆法）；
 三种失败（unknown_tool / invalid_arguments / tool_error）一律「回喂不抛」；
 str 结果原样返回、非 str 结果 JSON 序列化。
 

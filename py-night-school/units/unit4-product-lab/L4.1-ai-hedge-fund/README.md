@@ -37,7 +37,7 @@ uv run pyright
 | 抽象类（abstract class，`AlphaModel` 这种 IS-A 层级） | `Reviewer` / 产品的 `AlphaModel`（ABC） | LLM 人格与量化模型**同一个抽象基类**混编——像 `AbstractPricingEngine` 下挂本地规则引擎与远程 AI 引擎 |
 | 接口（interface，只关心能不能调用） | 产品的 `LLMClient`（Protocol，L1.2 学过） | Java 里 abstract class 与 interface 的取舍，在 Python 里对应 **ABC vs Protocol**——这里也有 |
 | Jackson 的 `FAIL_ON_UNKNOWN_PROPERTIES` | pydantic `ConfigDict(extra="forbid")` | YAML/spec 拼错字段名**加载期炸响**，不是静默吞掉后在交易期暴雷——异常要炸在越早的边界越好 |
-| `Object.equals/hashCode` 契约 | `hashlib.sha256` 内容寻址 key | Python 的 dict 相等**不保证序列化字节相等**——缓存 key 想稳，要么规范化序列化、要么根本不序列化（§5 坑位主角） |
+| `Object.equals/hashCode` 契约 | `hashlib.sha256` 内容寻址 key | Python 的 dict 相等**不保证序列化字节相等**——缓存 key 想稳，要么规范化序列化、要么根本不序列化（§5 陷阱主角） |
 | 规则引擎（Drools）硬规则 | `apply_limits` 纯函数 clamp | 没有 DSL、没有引擎——两个 for 循环 + 一个比例除法，「不可协商」由**纯函数 + 顺序**保证 |
 | 审计日志表（append-only AOP 切面） | PromptCache + CycleRecord | 审计不是另建子系统：**缓存文件就是审计记录**，回执就是全量真相——省了一整套存储与一致性成本 |
 | `CompletableFuture.allOf` 并发聚合 | 顺序 for 循环「并行独立」 | 独立性是**语义属性**（互不依赖、互不可见），不是执行属性——顺序跑也一样对，想并发随时能并发 |
@@ -397,7 +397,7 @@ uv run python -c "from hints import hint; print(hint('ex1', 1))"
 
 验收命令同 §1 的完成判据（三条同时全绿 = 本课毕业）。
 
-## 5. Java 人坑位：相等不等哈希坑（缓存永不命中）
+## 5. Java 直觉陷阱：相等不等哈希（缓存永不命中）
 
 这是本课的命名化失败模式——Java 人的直觉是「相等的对象哈希必然相同」（equals/hashCode
 契约），在 Python 的内容寻址缓存里这层保证**不存在**。

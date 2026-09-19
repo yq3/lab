@@ -37,7 +37,7 @@ uv run pyright
 | JDBC `DriverManager.getConnection(url)` | `sqlite3.connect(path)` | 零安装零服务：文件不存在则创建，一个文件就是一个库 |
 | `PreparedStatement` + `setString(1, …)` | `cursor.execute(sql, params)` 的 `?` 占位 | 同款防注入：`?` 永远把实参当**值**；f-string 拼接把它当 SQL 的一部分（Step1 实测全表泄露） |
 | `ResultSet` `rs.getString("dept")` | `sqlite3.Row` 的 `row["dept"]` | `conn.row_factory = sqlite3.Row` 之后按名取列——不赌下标 |
-| `conn.setAutoCommit(true)`（JDBC 默认） | Python sqlite3 默认**不自动提交** | 忘 `commit()` 数据就「消失」且不报错——§5 坑位主角 |
+| `conn.setAutoCommit(true)`（JDBC 默认） | Python sqlite3 默认**不自动提交** | 忘 `commit()` 数据就「消失」且不报错——§5 陷阱主角 |
 | Spring `@Transactional` | `with conn:` 块 | 正常退出 commit、异常 rollback；但它是**语句级纪律**不是声明式代理，忘了写没人兜底 |
 | Axon `EventStore`（aggregateId + sequenceNumber + replay，Java 人熟的 CQRS/ES 词汇） | `eventstore.py` 的 `EventStore` | 词汇直接平移：聚合、seq、唯一索引、重放——本课是最小实现（单文件标准库，不引框架） |
 | 审计日志表 + AOP 切面 `@Auditable` | 节点旁挂事件发射（`_with_events`） | 切面是注解魔法（看得见注解看不见发射点），旁挂是显式装饰（装配代码上看得见审计点）——§2.3 讲取舍 |
@@ -172,7 +172,7 @@ uv run python code/step1_sqlite.py
   <- eventstore.append 捕获的就是它：翻译成语义化的 EventSeqConflict（讲义 §3）
 ```
 
-五段对应 §2 表的前五行。[4] 是 §5 坑位的现场版——不 commit 就 close，数据消失且不报错；
+五段对应 §2 表的前五行。[4] 是 §5 陷阱的现场版——不 commit 就 close，数据消失且不报错；
 [5] 的 `IntegrityError` 就是 `EventStore.append` 翻译成 `EventSeqConflict` 的那个原始异常。
 
 ### Step 2：读三个核心模块（15 分钟）
@@ -345,7 +345,7 @@ uv run python -c "from hints import hint; print(hint('ex1', 1))"
 三题都是「同构骨架补核心函数」（讲义 `code/` 的 eventstore / audit_cache / versioning 是
 能跑的完整参照），零真实网络（ex2 的端点是 L2.3 服役至今的 MockLLMEndpoint）。验收命令同 §1 的完成判据（三条同时全绿 = 本课毕业；发货态 18 个练习测试里 17 个 TODO 红、1 个 meta 绿）。
 
-## 5. Java 人坑位：自动提交错觉
+## 5. Java 直觉陷阱：自动提交错觉
 
 这是本课的命名化失败模式——写了一晚上 SQLite 的人最容易在收工前踩的一脚空。
 

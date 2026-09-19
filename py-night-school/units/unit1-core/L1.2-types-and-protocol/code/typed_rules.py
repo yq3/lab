@@ -1,7 +1,7 @@
 """报销预审函数族——现代类型标注全景（L0.1 budget.py 的类型化扩编版）。
 
 本文件的每个签名都是一课：list[int] 内置泛型、str | None 联合类型、
-dict.get 的默认值、以及「联合类型入口先收窄」的正确姿势（对照 §5 坑位）。
+dict.get 的默认值、以及「联合类型入口先收窄」的正确姿势（对照 §5 陷阱）。
 
 重要认知：这些标注**运行时不强制**——它们是写给 pyright / IDE / 读者看的。
 """
@@ -50,7 +50,7 @@ def reject_tally(results: list[tuple[str, str]]) -> dict[str, int]:
 def late_fee_cents(days_late: int | None) -> int:
     """逾期滞纳金：每天 100 分；days_late 为 None 表示日期缺失。
 
-    §5 坑位的正确示范：联合类型入口**先收窄**（if x is None: raise ...），
+    §5 陷阱的正确示范：联合类型入口**先收窄**（if x is None: raise ...），
     收窄之后 pyright 才允许把 x 当 int 用（类型收窄，讲义 §2.7）。
     """
     if days_late is None:

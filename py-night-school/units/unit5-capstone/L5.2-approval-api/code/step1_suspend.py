@@ -7,7 +7,7 @@
 四段实验：
 [1] asyncio.Event：两个等待者并发挂起、一次 set 全醒——耗时 ≈ 单个等待时长（并发证据）；
 [2] 挂起不占线程：等待者挂住的同时，同一个事件循环还在跑别的任务（heartbeat）；
-[3] 反例：threading.Event.wait() 冒充挂起——阻塞调用冻结整个循环（§5 坑位的内核预告）；
+[3] 反例：threading.Event.wait() 冒充挂起——阻塞调用冻结整个循环（§5 陷阱的内核预告）；
 [4] 对照表：内存门闩 vs interrupt+checkpoint（L3.3 的抛-捕-落盘，本课的产品化内核）。
 """
 
@@ -96,7 +96,7 @@ async def main() -> None:
     elapsed3 = time.perf_counter() - start3
     print(f"  总耗时 {elapsed3:.3f}s（正确写法应 ≈ {max(BLOCK_SECONDS, 3 * 0.05):.2f}s）")
     print(f"  轨迹: {traces3}")
-    print("  <- 阻塞 wait 期间一个心跳点都没有：循环被冻住了——§5 坑位的内核")
+    print("  <- 阻塞 wait 期间一个心跳点都没有：循环被冻住了——§5 陷阱的内核")
 
     _print_contrast()
 

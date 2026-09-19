@@ -154,7 +154,7 @@ uv run python code/step1_suspend.py
 [3] 反例：threading.Event.wait() 在 async 里冒充挂起——冻结整个循环
   总耗时 0.310s（正确写法应 ≈ 0.15s）
   轨迹: ['waiter-D 阻塞 wait(0.15)', 'waiter-D 返回', 'loop alive: tick 1', 'loop alive: tick 2', 'loop alive: tick 3']
-  <- 阻塞 wait 期间一个心跳点都没有：循环被冻住了——§5 坑位的内核
+  <- 阻塞 wait 期间一个心跳点都没有：循环被冻住了——§5 陷阱的内核
 [4] 对照表：内存门闩 vs interrupt+checkpoint（本课审批的内核）
   挂起时占什么     | 内存门闩：一个等待点（await）
              | 落盘暂停：一个 checkpoint 行（db 落盘）
@@ -167,7 +167,7 @@ uv run python code/step1_suspend.py
   <- L3.3 的结论今晚产品化：审批等待的不是线程，是 db 里那行 checkpoint
 ```
 
-[1][2] 是 §2.1 的内存挂起（并发证据 + 循环活性证据）；[3] 是 §5 坑位的预告；[4] 的对照
+[1][2] 是 §2.1 的内存挂起（并发证据 + 循环活性证据）；[3] 是 §5 陷阱的预告；[4] 的对照
 表就是本课架构决策：审批的「等」选了右边那列。
 
 ### Step 2：读三个模块——换芯的图、审批服务、HTTP 皮（20 分钟）
@@ -327,7 +327,7 @@ uv run python -c "from hints import hint; print(hint('ex1', 1))"
 三题都是同构填空（ex1 在讲义 ApprovalService 的迷你版上补 reply；ex2/ex3 补事件表与
 规则簿的核心函数），零真实网络。验收命令同 §1 的完成判据（三条同时全绿 = 本课毕业）。
 
-## 5. Java 人坑位：事件循环里睡死
+## 5. Java 直觉陷阱：事件循环里睡死
 
 这是本课的命名化失败模式——Java 人把「挂起」的直觉带进 asyncio，一不留神把整个服务
 冻住。

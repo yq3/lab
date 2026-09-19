@@ -80,7 +80,7 @@ async def run_offline() -> None:
             print("== 本地执行工具并回喂（role=tool） ==")
             for tool_call in assistant_message["tool_calls"]:
                 raw_arguments = tool_call["function"]["arguments"]
-                arguments = json.loads(raw_arguments)  # 坑位主角：它是 JSON 字符串，不是 dict
+                arguments = json.loads(raw_arguments)  # 陷阱主角：它是 JSON 字符串，不是 dict
                 result = preapprove(**arguments)  # ** 解包：{'items_cents': [...]} → 关键字实参（L1.4 复习）
                 print(f"  {tool_call['function']['name']}({arguments}) -> {result}")
                 messages.append({"role": "tool", "tool_call_id": tool_call["id"], "content": result})

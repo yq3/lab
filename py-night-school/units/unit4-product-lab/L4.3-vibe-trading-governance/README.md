@@ -122,7 +122,7 @@ Java 人最该带走的一句：**给 agent 读的合同对象不要留可利用
 带过。）三条配套纪律：
 
 1. **canonical JSON**：`sort_keys=True + separators=(",", ":")` 把同一个 dict 永远序列化
-   成同一串字节——这是 L4.1「相等不等哈希」坑（dict 顺序不定导致哈希漂移）的正解：
+   成同一串字节——这是 L4.1「相等不等哈希」（dict 顺序不定导致哈希漂移）的正解：
    **先规范化，再哈希**；
 2. **append 前整链先验，断链拒写**（`LedgerCorruptionError`）：绝不往被篡改的历史上
    续建合法后缀——O(n) 换最强保证，合规账本低频写，付得起；
@@ -395,7 +395,7 @@ uv run python -c "from hints import hint; print(hint('ex1', 1))"
 TODO 只挖关键环节；讲义 `code/` 里有同构完整版可对照读（ex1 对照 enforcement.py、
 ex2 对照 ledger.py、ex3 对照 pending.py），先自己写再看。验收命令同 §1 的完成判据（三条同时全绿 = 本课毕业）。
 
-## 5. Java 人坑位：fail-open 兜底坑（`except Exception: return None`）
+## 5. Java 直觉陷阱：fail-open 兜底（`except Exception: return None`）
 
 这是本课的命名化失败模式，也是所有治理件的头号杀手——**检查链任何一处兜底返回 None，
 整个门形同虚设**。

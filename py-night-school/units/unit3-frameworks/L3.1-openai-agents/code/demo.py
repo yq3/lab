@@ -73,7 +73,7 @@ def _build_model(ep: MockLLMEndpoint) -> OpenAIChatCompletionsModel:
 
 
 def _build_agent(model: Model | str) -> Agent[None]:
-    """极简原语：一个 dataclass 实例，全是运行时普通值（§5 坑位的根源）。"""
+    """极简原语：一个 dataclass 实例，全是运行时普通值（§5 陷阱的根源）。"""
     return Agent(
         name="Reviewer",
         instructions=INSTRUCTIONS,

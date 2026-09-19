@@ -41,7 +41,7 @@ def merge_results(old: dict, new: dict) -> dict:
     """results 键的合并 reducer：dict 版的 Annotated[list, operator.add]。
 
     本课 executor 是唯一写者、一次写全；显式声明合并是为 L5.2/L5.3 预留契约——
-    审批节点回写、事件溯源回放都会成为第二个写者，「覆盖」语义会静默吞数据（§5 坑位）。
+    审批节点回写、事件溯源回放都会成为第二个写者，「覆盖」语义会静默吞数据（§5 陷阱）。
     """
 
     return {**old, **new}

@@ -30,7 +30,7 @@ hide:
 <div class="ns-feats">
 <div class="ns-feat">
 <h4>Java 心智桥</h4>
-<p>概念先给「Java 对应物 + 关键差异」对照表再动手；每个坑按「现象 / 最小复现 / Java 直觉为何失效 / 修复」四段命名化拆解。</p>
+<p>概念先给「Java 对应物 + 关键差异」对照表再动手；每个陷阱按「现象 / 最小复现 / Java 直觉为何失效 / 修复」四段命名化拆解。</p>
 </div>
 <div class="ns-feat">
 <h4>练习即测试</h4>

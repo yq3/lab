@@ -23,7 +23,7 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 from pydantic_core import ErrorDetails
 
 # 工具白名单：校验门（本模块）与执行器（executor.TOOL_REGISTRY）共用同一份名单——
-# Literal tag 在类型层枚举了合法工具，白名单在运行时再显式声明一层（纵深防御，§5 坑位）。
+# Literal tag 在类型层枚举了合法工具，白名单在运行时再显式声明一层（纵深防御，§5 陷阱）。
 TOOL_ALLOWLIST: frozenset[str] = frozenset({"fetch_claim", "check_budget", "verify_invoice"})
 
 # 拒绝原因枚举（枚举风格纪律：结构化拒绝原因，对版 A29「失败原因显式状态键」）

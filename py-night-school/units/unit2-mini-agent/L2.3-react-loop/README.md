@@ -34,7 +34,7 @@ uv run pyright
 
 | 你熟悉的 Java 物 | 今天的 Python 物 | 一句话差异 |
 |---|---|---|
-| `while (true) + switch` 状态机 | ReAct while 循环 | 下一跳由模型输出决定——循环何时停、走哪个出口，代码不再完全说了算（§5 坑位） |
+| `while (true) + switch` 状态机 | ReAct while 循环 | 下一跳由模型输出决定——循环何时停、走哪个出口，代码不再完全说了算（§5 陷阱） |
 | 面向接口编程 + Mockito 造替身 | `ModelClient` Protocol + `ScriptedModel` | 结构化类型不要求 implements，普通类长成形状就算数 |
 | 线程池拒绝策略 / 超时兜底 | `max_turns` 轮数预算 | 确定性护栏对冲概率性软终止 |
 | 有状态会话（WebSocket session） | messages 全量重发 | 无状态协议：对话状态全在客户端的 list 里 |
@@ -66,7 +66,7 @@ LangGraph 的 `create_react_agent`、openai-agents 的 `Runner.run`、cookbook �
 
 对照 Java：这是一个 `while (true) + switch` 的状态机，只不过「分支判断」由模型输出
 驱动。Java 人熟悉的状态机审计法在这里要换一个问题：不是「状态转移全吗」，而是
-**「循环的出口有几个、每个出口谁说了算」**（§5 坑位的入口）。
+**「循环的出口有几个、每个出口谁说了算」**（§5 陷阱的入口）。
 
 ### 2.2 `ModelClient` 协议：可测试性的支点
 
@@ -221,7 +221,7 @@ uv run ruff check .
 uv run pyright
 ```
 
-## 5. Java 人坑位：终止条件外包坑（把 while 的出口交给模型）
+## 5. Java 直觉陷阱：终止条件外包（把 while 的出口交给模型）
 
 这是本课的命名化失败模式——Java 人写循环的第一课是「审计出口」，agent 循环会让
 你把这一课全部还回去。

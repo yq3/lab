@@ -39,7 +39,7 @@ uv run pyright
 |---|---|---|
 | 固定流程引擎 + 工单驱动（DataAgent 的 `PlanExecutorNode`，**Java 原生先例**，spring-ai-alibaba graph） | StateGraph 静态图 + Plan JSON 驱动路由 | 拓扑写死在装配代码里（可 diff/签名），LLM 的自由度全部关进「产计划」一步 |
 | 工单 DTO：sealed interface + record 继承 + Jackson `@JsonTypeInfo(use=NAME)` | Pydantic **discriminated union** + `Literal` tag | 一个 tag 字段精确分派到具体步型——`Field(discriminator="tool")` 对照 Jackson 多态反序列化 |
-| Java enum（编译期 + 运行时双重安全） | `Literal["fetch_claim", ...]` | **假枚举**：只是静态检查器层的约定，运行时就是 str——防线要建在 Pydantic 校验门（§5 坑位主角） |
+| Java enum（编译期 + 运行时双重安全） | `Literal["fetch_claim", ...]` | **假枚举**：只是静态检查器层的约定，运行时就是 str——防线要建在 Pydantic 校验门（§5 陷阱主角） |
 | 服务注册表只对消费方暴露授权端点 | `TOOL_ALLOWLIST` 工具白名单 | 校验门与执行器共用同一份名单；deny 的工具根本不进计划 schema（看不见即不可被选） |
 | 错误码进工单状态字段，而非异常文本打日志 | `PlanRejection{reason_code, detail}` 入 state | 拒绝原因是**任务数据**：回喂 planner、进审计流水，不是打断图的异常（A29） |
 | BPMN 流程定义打版本号/做 diff | `topology_signature(graph) -> sha256` | 图形状（节点+边）序列化后哈希——同装配必同签名，改图自动露馅（A15） |
@@ -123,7 +123,7 @@ StepUnion = Annotated[
   指在 tag 上，不是「随便某个字段上」）；
 - **Literal 类型** ≈ 「只有编译器认识的 enum」：pyright 拿它做穷尽检查与拼写检查，但
   运行时它就是 str，塞什么都拦不住——Java enum 的运行时安全它没有，防线要建在 Pydantic
-  校验门（这是 §5 坑位的主角）；
+  校验门（这是 §5 陷阱的主角）；
 - **自定义 reducer 合并 dict**：L3.2 用过的 `Annotated[list[str], operator.add]` 的 dict 版——
   `results: Annotated[dict[str, dict], merge_results]`。声明在类型注解里，框架运行时读
   `__metadata__` 执行 `merge_results(旧, 新)`。本课 executor 是唯一写者，但合并语义先立
@@ -315,7 +315,7 @@ uv run python -c "from hints import hint; print(hint('ex1', 1))"
 两个分支），零真实网络（ex3 的 planner 是离线替身 FakePlanner）。验收命令同 §1 的完成判据（三条同时全绿
 = 本课毕业）。
 
-## 5. Java 人坑位：假枚举 Literal 坑
+## 5. Java 直觉陷阱：假枚举 Literal
 
 这是本课的命名化失败模式——Java 人看到 `Literal["fetch_claim", ...]` 会以为是 enum，
 把运行时安全也一并脑补进去。它没有。

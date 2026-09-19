@@ -12,7 +12,7 @@ def test_ex3_both_passes_return_same_correct_total() -> None:
 
 
 def test_ex3_evidence_of_the_bug_mechanism() -> None:
-    # 对照组：生成器第二次消费就是静默空——坑位机制本身（与本练习的修复互为印证）
+    # 对照组：生成器第二次消费就是静默空——陷阱机制本身（与本练习的修复互为印证）
     gen = read_amounts(["CLM-9001,meal,100", "CLM-9002,meal,200"])
     assert list(gen) == [100, 200]
     assert list(gen) == []  # 静默排空，无异常

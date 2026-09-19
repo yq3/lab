@@ -34,7 +34,7 @@ uv run pyright
 | 你熟悉的 Java 物 | 今天的 Python 物 | 一句话差异 |
 |---|---|---|
 | `record Config(...`（不可变配置 bean） | `@dataclass(frozen=True) AppealConfig` | 都是「一次定型、运行期不可改」；差别在产品的轮次还有 env 第二层覆盖（`TRADINGAGENTS_MAX_DEBATE_ROUNDS`），本课教学版收敛成一层 |
-| 内部静态类嵌套的 DTO | 嵌套 TypedDict 字段（`debate: DebateState`） | 长得像内部静态类，语义是**整体替换**不是引用共享——§5 坑位的主角 |
+| 内部静态类嵌套的 DTO | 嵌套 TypedDict 字段（`debate: DebateState`） | 长得像内部静态类，语义是**整体替换**不是引用共享——§5 陷阱的主角 |
 | BPMN 多实例/循环子流程 + 边界事件 | 条件边循环 + `count >= 2*N` 计数终止 | 循环的退出从流程图语义变成**路由函数里一个 if**；「轮次」是配置不是画布属性 |
 | Flowable 网关的 default 流向 | `DEBATE_PATH_MAP` 全量映射 | 排他网关漏分支是建模期报错；条件边漏映射是**运行中崩**——全量映射是补丁（#1088） |
 | `RejectedExecutionException`（线程池拒绝策略） | `BudgetExceeded`（模型调用预算） | 提交前查容量、满了响亮拒绝、绝不默默超卖——同一条纪律挪到了 LLM 调用层 |
@@ -381,7 +381,7 @@ ex1 三个（rounds=1/2 两态 + path_map 覆盖）、ex2 三个（恰好够 / �
 ex3 三个测试函数共 13 例参数化（脏归一 8 + 哨兵 4 + 合法存活 1）——与各题 docstring 的
 完成判据逐字对齐。验收命令同 §1 的完成判据（三条同时全绿 = 本课毕业）。
 
-## 5. Java 人坑位：嵌套状态静默丢键坑
+## 5. Java 直觉陷阱：嵌套状态静默丢键
 
 这是本课的命名化失败模式——它就是产品选择嵌套辩论 state + 手工回填的代价面。
 
@@ -423,7 +423,7 @@ ex3 三个测试函数共 13 例参数化（脏归一 8 + 哨兵 4 + 合法存�
   装配处：`DEBATE_PATH_MAP` / `RISK_ANALYSIS_PATH_MAP` 全量映射（#1088 注释原文就在
   常量上方）、辩论双方共享 path_map 的写法；
 - `TauricResearch/TradingAgents@be952b8#tradingagents/agents/researchers/bull_researcher.py` ——
-  §5 坑位的正面教材：手工回填 5 键的节点模板（history 拼接、current_response 前缀、
+  §5 陷阱的正面教材：手工回填 5 键的节点模板（history 拼接、current_response 前缀、
   count+1）；
 - `TauricResearch/TradingAgents@be952b8#tradingagents/agents/utils/agent_utils.py` ——
   `create_msg_delete`（RemoveMessage 清空 + 锚定占位，#888 教训写在 docstring）与

@@ -4,7 +4,7 @@
 - agents/researchers/bull_researcher.py#bull_node——每节点恰好 1 次模型调用，然后**手工
   回填嵌套 state 的全部键**（history 拼接、专属 history 拼接、current_response 换成
   「Bull Analyst: <论点>」、count+1）。嵌套 dict 无 reducer、整体替换——漏一个键就是
-  静默丢数据（§5 坑位）。本课申辩人/合规官/风险三方原样保留这条纪律。
+  静默丢数据（§5 陷阱）。本课申辩人/合规官/风险三方原样保留这条纪律。
 - agents/utils/agent_utils.py#opponent_argument_or_opening（#1176）：先手辩手拿到的对手
   论点是空串——直接插进「请驳斥对方论点」的提示词会让模型**虚构对方立场**；换成显式的
   「对方尚未发言」标记，让它亮出自己的开场论点。

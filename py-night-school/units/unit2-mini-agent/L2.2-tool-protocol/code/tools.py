@@ -3,7 +3,7 @@
 L2.1 我们手写了工具契约（dict）并手工回喂；本课把它升级为「单一事实源」的注册表：
     参数的形状用 Pydantic 模型声明一次 →
     对外：model_json_schema() 生成 tools 载荷（给模型看的契约）
-    对内：model_validate_json() 解析模型给的 arguments（字符串套娃坑一步拆封 + 校验）
+    对内：model_validate_json() 解析模型给的 arguments（字符串套娃一步拆封 + 校验）
 错误三态（unknown / invalid / tool_error）一律「回喂不抛」——错误信息是给模型的修复指令。
 """
 

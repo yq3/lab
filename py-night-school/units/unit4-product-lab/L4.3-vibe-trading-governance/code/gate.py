@@ -13,7 +13,7 @@
   5 今日已付快照：向 Broker 读；读失败 → DENY「fail-closed」
   6 check_payment：None → ALLOW；structural → DENY；quantitative → PAUSE_FOR_REAUTH
 
-注意第 5 步的 ``except Exception → DENY``：这不是 §5 坑位里的 fail-open 兜底——方向
+注意第 5 步的 ``except Exception → DENY``：这不是 §5 陷阱里的 fail-open 兜底——方向
 相反，异常被翻译成**拒绝**并带 reason 落账。fail-closed 的语义责任在「异常路径的
 出口是 DENY 而不是继续」。
 

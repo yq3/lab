@@ -6,7 +6,7 @@
 注意顶部的相对导入 `from .rules import ...`：
   - 以 `python -m expense.cli` 启动：cli 是包成员，`.rules` 解析为 expense.rules，正常；
   - 以 `python expense/cli.py` 直接启动：文件失去包身份，相对导入当场炸——
-    这正是讲义 §5「直跑包内脚本坑」，别修 import，修启动方式。
+    这正是讲义 §5「直跑包内脚本」，别修 import，修启动方式。
 """
 
 import sys

@@ -1,4 +1,4 @@
-"""两个坑的可运行复现（讲义 §5）：可变默认参数坑 + late binding 闭包坑。
+"""两个坑的可运行复现（讲义 §5）：可变默认参数 + late binding 闭包。
 
 运行：uv run python code/pitfall_demos.py
 每段输出的「意外结果」都在讲义里拆解；修复版紧跟其后输出对照组。
@@ -7,7 +7,7 @@
 from collections.abc import Callable
 
 
-def add_item_buggy(item: str, items: list[str] = []) -> list[str]:  # noqa: B006 —— 坑位样本：B006 就是这个坑的机器名
+def add_item_buggy(item: str, items: list[str] = []) -> list[str]:  # noqa: B006 —— 陷阱样本：B006 就是这个坑的机器名
     """坑：默认值只在 def 执行时求值一次——所有调用共享同一个列表对象。"""
     items.append(item)
     return items
@@ -22,7 +22,7 @@ def add_item_fixed(item: str, items: list[str] | None = None) -> list[str]:
 
 def late_binding_lambdas() -> list[Callable[[], int]]:
     """坑：循环里建的 lambda 捕获的是变量 i 本身（引用），不是当时的值。"""
-    return [lambda: i for i in range(3)]  # noqa: B023 —— 坑位样本：B023 就是这个坑的机器名
+    return [lambda: i for i in range(3)]  # noqa: B023 —— 陷阱样本：B023 就是这个坑的机器名
 
 
 def pinned_lambdas() -> list[Callable[[], int]]:
@@ -30,14 +30,14 @@ def pinned_lambdas() -> list[Callable[[], int]]:
     return [lambda i=i: i for i in range(3)]
 
 
-print("── 可变默认参数坑 ──")
+print("── 可变默认参数 ──")
 first = add_item_buggy("打车")
 second = add_item_buggy("工作餐")
 print(f"两次调用各传一个元素，第二次结果：{second}")
 print(f"第一次的结果也被改了：{first}")
 print(f"两次拿到的是同一个 list 对象：{first is second}")
 
-print("── late binding 闭包坑 ──")
+print("── late binding 闭包 ──")
 late = [f() for f in late_binding_lambdas()]
 pinned = [f() for f in pinned_lambdas()]
 print(f"循环里建的三个 lambda，调用结果：{late}")

@@ -209,7 +209,7 @@ uv run pytest code/
 六路取证：in-process 注册与四态、桥接 payload 形状、stdio 往返的 get_claim、
 `run_mcp_tool` 的错误分流。其中 stdio 用例各拉起一个真实 server 子进程。
 
-### Step 5：stdout 串台坑实测（§5 的预备铃，5 分钟）
+### Step 5：stdout 串台实测（§5 的预备铃，5 分钟）
 
 ```bash
 uv run python code/demo_stdio_pollution.py
@@ -242,7 +242,7 @@ uv run ruff check .
 uv run pyright
 ```
 
-## 5. Java 人坑位：stdout 串台坑（把日志打进协议通道）
+## 5. Java 直觉陷阱：stdout 串台（把日志打进协议通道）
 
 这是本课的命名化失败模式——MCP stdio server 的第一坑，几乎人人踩。
 

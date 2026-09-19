@@ -19,7 +19,7 @@
 - 前置阅读（每件 10 分钟）：`agent/src/live/mandate/model.py`（四件套 frozen
   dataclass，148 行）→ `enforcement.py` 精读 → `test_mandate_enforcement.py`；
 - 锚定 commit：`HKUDS/Vibe-Trading@f84b2977`（克隆后 `git checkout f84b2977`）；
-- 红线继承：检查链任何一处 `except` 的出口必须是 breach/DENY（§5 fail-open 兜底坑），
+- 红线继承：检查链任何一处 `except` 的出口必须是 breach/DENY（§5 fail-open 兜底），
   你域里的测试要有一条脏输入用例钉死它。
 
 ## 改什么

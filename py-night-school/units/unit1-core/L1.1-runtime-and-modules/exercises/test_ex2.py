@@ -31,7 +31,7 @@ def test_module_mode_rejects_bad_claim() -> None:
 
 
 def test_direct_run_still_fails_with_known_error() -> None:
-    """直接当脚本跑必须仍然炸出坑位原句——证明你修的是启动方式，不是 import。"""
+    """直接当脚本跑必须仍然炸出 §5 陷阱的原句——证明你修的是启动方式，不是 import。"""
     proc = _run(["claimfix/runner.py"])
     assert proc.returncode != 0
     assert proc.stderr is not None

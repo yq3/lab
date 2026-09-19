@@ -339,7 +339,7 @@ def test_ledger_refuses_to_extend_broken_chain(tmp_path: Path) -> None:
 
 
 def test_canonical_json_makes_key_order_irrelevant() -> None:
-    # L4.1「相等不等哈希」坑的正解：先规范化再哈希——键序不同不影响结果。
+    # L4.1「相等不等哈希」的正解：先规范化再哈希——键序不同不影响结果。
     assert canonical_json({"b": 1, "a": 2}) == canonical_json({"a": 2, "b": 1})
     assert compute_record_hash(1, GENESIS_PREV_HASH, {"b": 1, "a": 2}) == compute_record_hash(
         1, GENESIS_PREV_HASH, {"a": 2, "b": 1}

@@ -294,11 +294,11 @@ uv run python code/pitfall_demos.py
 输出（§5 逐行拆解）：
 
 ```text
-── 可变默认参数坑 ──
+── 可变默认参数 ──
 两次调用各传一个元素，第二次结果：['打车', '工作餐']
 第一次的结果也被改了：['打车', '工作餐']
 两次拿到的是同一个 list 对象：True
-── late binding 闭包坑 ──
+── late binding 闭包 ──
 循环里建的三个 lambda，调用结果：[2, 2, 2]
 默认参数钉值修复后：[0, 1, 2]
 ```
@@ -337,9 +337,9 @@ uv run ruff check .
 uv run pyright
 ```
 
-## 5. Java 人坑位（本课两个）
+## 5. Java 直觉陷阱（本课两个）
 
-### 坑位一：可变默认参数坑
+### 陷阱一：可变默认参数
 
 - **现象**：`def add_item(item, items=[])` 多次调用，历史数据越积越多——上一次调用的
   追加还在列表里（Step 5 已眼见为实）。
@@ -363,7 +363,7 @@ uv run pyright
 - **修复与纪律**：默认 `None` + 体内现做——`items = items if items is not None else []`。
   一辈子照此办理，坑就与你无关。
 
-### 坑位二：late binding 闭包坑
+### 陷阱二：late binding 闭包
 
 - **现象**：循环里建的 lambda，调用时全部返回**循环结束时的**变量值——`[2, 2, 2]`
   （range(3) 最后一个 i 是 2），不是各自那轮的 0、1、2。

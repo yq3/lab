@@ -1,4 +1,4 @@
-"""一次性消费实验——生成器的「静默排空」现场（§5 坑位的先行演示）。
+"""一次性消费实验——生成器的「静默排空」现场（§5 陷阱的先行演示）。
 
 运行本文件：
     uv run python code/oneshot.py
@@ -20,7 +20,7 @@ if __name__ == "__main__":
     first_pass = list(gen)
     second_pass = list(gen)  # 生成器已耗尽：不报错，只是空
     print(f"第一次: {first_pass}")  # [1200, 3500, 2400]
-    print(f"第二次: {second_pass}")  # []  <- 静默空，这就是「一次性坑」
+    print(f"第二次: {second_pass}")  # []  <- 静默空，这就是生成器的一次性
 
     # 修复一：物化成 list（要复用就 list()）
     materialized = list(read_amounts())

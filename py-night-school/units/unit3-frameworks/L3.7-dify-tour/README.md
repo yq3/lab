@@ -41,7 +41,7 @@ uv run pyright
 | 你熟悉的 Java 物 | 今天的 dify 物 | 一句话差异 |
 |---|---|---|
 | Flowable / Camunda 这类 BPM 平台 vs 自研状态机库 | dify 平台 vs langgraph / mini-agent 库 | 库进你的进程，平台让你进它的运行时；Java 人把业务写进 BPMN XML 还是写 Java 代码的老争论，原样搬到了画布 DSL vs Python 代码上 |
-| BPMN 2.0 XML（流程定义文件） | App DSL（YAML，`version` + `kind: app` + `graph.nodes/edges`） | 都是「图即数据」的带版本序列化格式；标准看着开放，版本语义是平台私有的（§5 坑位） |
+| BPMN 2.0 XML（流程定义文件） | App DSL（YAML，`version` + `kind: app` + `graph.nodes/edges`） | 都是「图即数据」的带版本序列化格式；标准看着开放，版本语义是平台私有的（§5 陷阱） |
 | Jenkins（平台）vs 一条自己写的 CI 脚本（库） | dify vs agent 库 | 平台把 UI / 权限 / 审计 / 生态都配好，代价是你的一切长在它的约定与数据库里 |
 | war 包丢进 Tomcat / Spring Boot 单进程 | docker compose 十几个服务的 N-tier 部署 | 部署形态从「一个进程」变回「一张部署视图」——api/worker 分离 ≈ Java 的 web/worker 拆分 |
 | `application.yml`（Spring 配置） | compose YAML 与 DSL YAML | Java 人其实早就熟 YAML：缩进即层级；区别是这两份 YAML 不是配置，是**部署定义与程序本体** |
@@ -121,7 +121,7 @@ nginx :80（唯一入口，depends_on: [api, web]）
 ```yaml
 app:            # 应用元信息：name / mode(workflow|advanced-chat|chat|agent…) / icon…
 kind: app       # 固定值（导入时缺失会被强制补上）
-version: 0.7.0  # DSL 格式版本（CURRENT_APP_DSL_VERSION，管兼容策略——§5 坑位主角）
+version: 0.7.0  # DSL 格式版本（CURRENT_APP_DSL_VERSION，管兼容策略——§5 陷阱主角）
 workflow:       # workflow / advanced-chat 模式的正文
   graph:
     nodes: [...]   # 节点：id / position / data.type（start/llm/if-else/tool/…）
@@ -341,7 +341,7 @@ uv run ruff check .
 uv run pyright
 ```
 
-## 5. Java 人坑位：DSL 版本漂移坑（导入「成功」，行为已变）
+## 5. Java 直觉陷阱：DSL 版本漂移（导入「成功」，行为已变）
 
 - **现象**：团队把半年前导出的审查流 DSL 导进升级后的 dify。导入界面绿色通过，工作流
   照常能跑——但某类节点的行为悄悄变了（比如表单默认值的新来源、某分支节点的比较语义）。
@@ -387,7 +387,7 @@ uv run pyright
   （`import_app` / `export_dsl`）：顶层四件怎么写、workflow 模式怎么落库、
   版本缺失时强制补 `0.1.0` 与 `kind: app` 的宽容逻辑，都在这里。
 - langgenius/dify@79effdd498#api/constants/dsl_version.py 与
-  langgenius/dify@79effdd498#api/services/dsl_version.py —— §5 坑位的全部源码证据
+  langgenius/dify@79effdd498#api/services/dsl_version.py —— §5 陷阱的全部源码证据
   （`CURRENT_APP_DSL_VERSION = "0.7.0"` 与四级兼容判定），两个文件加起来不到 40 行。
 - langgenius/dify@79effdd498#api/core/workflow/nodes/human_input/entities.py ——
   HITL 表单的真实 schema：`HumanInputNodeData` 的 inputs（paragraph/select/file/file-list）、

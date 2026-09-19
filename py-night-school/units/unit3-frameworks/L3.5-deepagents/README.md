@@ -38,7 +38,7 @@ uv run pyright
 
 | 你熟悉的 Java 物 | 今天的 Python 物 | 一句话差异 |
 |---|---|---|
-| Spring Boot starter 自动装配（引入即全开） | `create_deep_agent` 默认全家桶 | Java 人至少知道「约定优于配置」有开关清单；harness 的默认值**直接改模型的工具视野**（§5 坑位） |
+| Spring Boot starter 自动装配（引入即全开） | `create_deep_agent` 默认全家桶 | Java 人至少知道「约定优于配置」有开关清单；harness 的默认值**直接改模型的工具视野**（§5 陷阱） |
 | Filter 链 / HandlerInterceptor | `AgentMiddleware` 的 hook 族 | 洋葱包裹同构：`before_agent`（进图前）、`wrap_model_call`（改请求）、`wrap_tool_call`（包工具） |
 | `ServletRequestWrapper` 包装请求再放行 | `ModelRequest.override(system_message=...)` | 不改原对象，返回改写后的请求副本——不可变风格的拦截 |
 | Maven 依赖传递（只增不减） | `tools` 参数 additive | 传工具只会**追加**，删不掉内置件——要收窄得换件（`FilesystemMiddleware(tools=[...])` 原位替换） |
@@ -121,7 +121,7 @@ Advice                                                      ← response_format=
 - 0.7.0 起**不再有默认 system 提示**（`BASE_AGENT_PROMPT` 已废弃，`graph.py:124`
   的 `__getattr__` 只留告警）——`system_prompt=None` 时模型收到空 system。
 
-这份清单就是 §5 坑位的全部素材。
+这份清单就是 §5 陷阱的全部素材。
 
 ## 3. 动手代码
 
@@ -310,7 +310,7 @@ uv run ruff check .
 uv run pyright
 ```
 
-## 5. Java 人坑位：harness 默认值坑（「我没配置就没有」的反直觉）
+## 5. Java 直觉陷阱：harness 默认值（「我没配置就没有」的反直觉）
 
 这是本课的命名化失败模式——Spring 自动装配的直觉在这里会反着咬你一口。
 

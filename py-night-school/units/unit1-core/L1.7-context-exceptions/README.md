@@ -44,7 +44,7 @@ BaseException                 <- 万物之根
     └── 你的领域异常（ExpenseError -> LimitExceededError ...）
 ```
 
-**为什么 `except Exception` 拦不住 Ctrl+C**：`KeyboardInterrupt` 是 `BaseException` 的**直接子类**，绕过了 `Exception` 子树——语言故意留的逃生门，否则一个手滑的 try 就能让你的进程杀不死（§5 坑位整段讲这个）。
+**为什么 `except Exception` 拦不住 Ctrl+C**：`KeyboardInterrupt` 是 `BaseException` 的**直接子类**，绕过了 `Exception` 子树——语言故意留的逃生门，否则一个手滑的 try 就能让你的进程杀不死（§5 陷阱整段讲这个）。
 
 **所有异常都是对象，可携带属性**：`e.claim_id`、`e.__cause__` 都只是普通属性访问——这给了「异常即领域事件」的玩法（本课动手 ③）。
 
@@ -285,7 +285,7 @@ uv run ruff check .
 uv run pyright
 ```
 
-## 5. Java 人坑位：裸 except 吞天坑
+## 5. Java 直觉陷阱：裸 except 吞天
 
 - **现象**：一个顺手写的 `except:` 把 `KeyboardInterrupt` / `SystemExit` 一起吞了。症状：Ctrl+C 杀不死程序（终端只重复打印或干脆无反应）、`sys.exit()` 退不出去、调试器断点失灵、CI 里挂死的 job。**没有任何报错**——一切「正常」运行，只是失控。
 - **最小复现**（§3 Step 5 的短版，读代码即可）：

@@ -157,7 +157,7 @@ function calling 不是「端点执行你的函数」——端点**只会做一�
 第 1 回合请求:  messages + tools（工具契约：名字 + 描述 + 参数 JSON Schema）
 第 1 回合响应:  choices[0].message.tool_calls = [
                   {"id": "call_001", "function": {"name": "preapprove",
-                   "arguments": "{\"items_cents\": [8800]}"   ← 注意：字符串！§5 坑位
+                   "arguments": "{\"items_cents\": [8800]}"   ← 注意：字符串！§5 陷阱
                   }}]
                 finish_reason = "tool_calls"，content = None
 你的代码:      执行 preapprove(**json.loads(arguments))，把 assistant 消息原样追加进历史，
@@ -328,7 +328,7 @@ uv run ruff check .
 uv run pyright
 ```
 
-## 5. Java 人坑位：字符串套娃坑（arguments 是 JSON 字符串）
+## 5. Java 直觉陷阱：字符串套娃（arguments 是 JSON 字符串）
 
 这是本课的命名化失败模式——以后说「字符串套娃」我们秒懂。它是 function calling 的
 头号事故源，ex3 亲手拆的就是它。

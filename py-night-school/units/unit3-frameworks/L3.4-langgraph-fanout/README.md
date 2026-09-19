@@ -61,7 +61,7 @@ def fan_out(state: BatchState) -> list[Send]:
 完全不同——批量审查里每个 worker 只带自己那单的 `claim_id` 和**专属 mock 端点 URL**（§3 Step4
 会看到这个设计如何救了剧本策略）。
 
-与线程池的本质差异（§5 坑位的入口）：`submit` 把闭包丢进队列，执行器对「业务拓扑」一无所知；
+与线程池的本质差异（§5 陷阱的入口）：`submit` 把闭包丢进队列，执行器对「业务拓扑」一无所知；
 `Send` 改写的是**图在这一步的形状**——每个分支是一个有 path、可排序、可 checkpoint 的任务。
 这就是为什么 Send 分支能被 L3.3 的检查点机制暂停/恢复，而线程池任务不能。
 
@@ -272,7 +272,7 @@ uv run python code/demo_batch.py
   归并顺序由 `apply_writes` 排序决定，与执行次序无关（§2.2 第 3 条）；
 - **每单一个专属 mock 端点**：剧本队列是分支共享的 FIFO，执行次序又不保证——若四单共享
   一个端点，B 单可能吃掉 A 单的剧本。Send 的 arg 是分支专属状态，端点 URL 放进去，
-  剧本互不干扰（这就是「ep.requests 取证后定的剧本策略」，也是 §5 坑位的正面教材）。
+  剧本互不干扰（这就是「ep.requests 取证后定的剧本策略」，也是 §5 陷阱的正面教材）。
 
 `review` worker（13 loc）内部跑的是一个完整的 `create_react_agent` 装配——扇出的每个分支
 都是一个标准 ReAct 循环；`reduce` 节点在屏障后收割（decision 计数 + 总额）。对照 Java：
@@ -333,7 +333,7 @@ uv run ruff check .
 uv run pyright
 ```
 
-## 5. Java 人坑位：Send≠线程池坑（把动态边当任务队列）
+## 5. Java 直觉陷阱：Send≠线程池（把动态边当任务队列）
 
 这是本课的命名化失败模式——Java 人看到「并行分支」，`ExecutorService.submit` 的心智模型
 自动上线，然后被两个方向各打一拳。

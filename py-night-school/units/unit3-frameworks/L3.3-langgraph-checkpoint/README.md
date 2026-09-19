@@ -373,7 +373,7 @@ uv run ruff check .
 uv run pyright
 ```
 
-## 5. Java 人坑位：interrupt 找 catch 坑（把暂停当异常处理）
+## 5. Java 直觉陷阱：interrupt 找 catch（把暂停当异常处理）
 
 这是本课的命名化失败模式——Java 人看到 `interrupt()` 这个名字，直觉会全部指错方向。
 
@@ -418,7 +418,7 @@ uv run pyright
     `StateSnapshot`（next/tasks/interrupts 字段）也在这里；
   - `langchain-ai/langgraph@e539ac122#libs/langgraph/langgraph/errors.py` ——
     `GraphInterrupt(GraphBubbleUp)`：docstring「抑制于根图、不直接抛给用户」——
-    §5 坑位的源码证据；
+    §5 陷阱的源码证据；
   - `langchain-ai/langgraph@e539ac122#libs/langgraph/langgraph/pregel/_runner.py` ——
     任务执行器的 `commit()`：捕获 GraphInterrupt 后写入 `(INTERRUPT, interrupts)`
     挂起写入——「暂停点落盘」的现场；

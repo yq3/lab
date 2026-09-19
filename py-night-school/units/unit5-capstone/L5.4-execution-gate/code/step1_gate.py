@@ -14,7 +14,7 @@ from gate import (
     check_intent,
 )
 
-TODAY = "2026-09-16"  # 注入的「今天」（ISO 日期）——门不取系统时钟（§5 坑位）
+TODAY = "2026-09-16"  # 注入的「今天」（ISO 日期）——门不取系统时钟（§5 陷阱）
 
 POLICY = Policy(
     max_single_cents=200_000,  # 单笔 ≤ 2000.00 元

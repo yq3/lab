@@ -365,7 +365,7 @@ uv run ruff check .
 uv run pyright
 ```
 
-## 5. Java 人坑位：Optional 不设防坑
+## 5. Java 直觉陷阱：Optional 不设防
 
 - **现象**：`TypeError: unsupported operand type(s) for *: 'NoneType' and 'int'`——签名明明写了 `int | None`，运行时传 `None` 照样炸，标注一个字都没拦。
 - **最小复现**：

@@ -103,5 +103,5 @@ per-limit 用例表摘录（lab_domain/test_mandate_check.py 的参数化名单�
 ```
 
 指认：黑名单用例断言命中顺序在第 3 查之前（结构性先于定量）；脏输入用例钉死
-fail-closed（§5 fail-open 兜底坑的机器证明——谁把兜底改成 `return None`，这条立刻红）。
+fail-closed（§5 fail-open 兜底的机器证明——谁把兜底改成 `return None`，这条立刻红）。
 交作业时贴你自己 `uv run pytest lab_domain/ -v` 的输出摘录 + 至少一条脏输入断言原文。

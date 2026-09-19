@@ -37,7 +37,7 @@ def mcp_tools_payload(tools: Sequence[Tool]) -> list[dict]:
 async def run_mcp_tool(session: ClientSession, name: str, arguments_json: str) -> str:
     """经 MCP 协议执行一个工具调用，返回文本结果（形状与 L2.2 的 run_tool 对齐）。
 
-    arguments_json 是模型给的 JSON 字符串（字符串套娃坑第三次出场）——先拆成 dict
+    arguments_json 是模型给的 JSON 字符串（字符串套娃第三次出场）——先拆成 dict
     再走协议；is_error=True 时抛 McpToolError（server 端的业务错误信息在 content 里）。
     """
     try:

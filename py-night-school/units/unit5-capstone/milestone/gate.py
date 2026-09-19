@@ -28,7 +28,7 @@ GateVerdict.clamp_cents 带裁剪后金额）；频次是唯一不可 clamp 的�
 时钟纪律（对版 L4.3 TodaySnapshot / L5.3 事件钟）：本模块零 IO、绝不取系统时钟——
 「今天几号、今天已付了什么」装进 LedgerView 由调用方注入（today 是注入的 ISO 日期
 字符串；已付清单是 payment.executed 事件的投影）。同一个 (policy, intent, approval,
-ledger) 永远同一个裁决，测试不随墙钟漂移——门才 fail-closed 得起来（讲义 §5 坑位）。
+ledger) 永远同一个裁决，测试不随墙钟漂移——门才 fail-closed 得起来（讲义 §5 陷阱）。
 """
 
 from __future__ import annotations

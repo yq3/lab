@@ -28,7 +28,7 @@ def main() -> None:
             )
             """
         )
-        conn.commit()  # DDL 也是写操作：忘了这行，建表在关库时一并消失（§5 坑位预告）
+        conn.commit()  # DDL 也是写操作：忘了这行，建表在关库时一并消失（§5 陷阱预告）
         print("  建表 + 提交完成（CREATE TABLE IF NOT EXISTS——可重复执行的迁移脚本风格）")
 
         print("[2] 参数化 ?：execute(sql, params) ≈ PreparedStatement.setString(1, ...)")
@@ -48,7 +48,7 @@ def main() -> None:
 
         print("[4] with conn: 事务——Python 默认**不自动提交**（JDBC 默认 autocommit=true）")
         conn.execute("INSERT INTO departments (dept, budget_cents) VALUES ('HR', 50_00)")
-        conn.close()  # 忘了 commit 就关：不报错，行「消失」——§5 坑位的最小复现
+        conn.close()  # 忘了 commit 就关：不报错，行「消失」——§5 陷阱的最小复现
         reopened = sqlite3.connect(db)
         missing = reopened.execute("SELECT COUNT(*) FROM departments WHERE dept = 'HR'").fetchone()[0]
         print(f"  插入 HR 后不 commit 直接 close，重开查询: {missing} 行（数据没了，且没报错）")

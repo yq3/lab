@@ -26,7 +26,7 @@
 | 反射 + 动态代理（Spring AOP） | 装饰器本体 | Spring 要靠容器在运行时织入代理；Python 直接换个函数对象，零反射 |
 | `@Transactional`（Spring） | `@retry` / `@timing`（本课 Step 1/3） | **Java 里最像 Python 装饰器的东西**：方法还是那个签名，行为被包了一层 |
 | 多个注解：无顺序语义、可重复 | `@a @b` 有严格顺序：`a(b(f))` | Java 注解是平铺的标签集合；Python 是嵌套的函数调用 |
-| 注解不改变被注解元素本身 | 装饰后原名绑定的是**新对象** | 这也是 §5「丢元数据坑」的根源 |
+| 注解不改变被注解元素本身 | 装饰后原名绑定的是**新对象** | 这也是 §5「丢元数据」的根源 |
 
 ### 2.1 热身：函数是对象（60 秒）
 
@@ -107,7 +107,7 @@ def preapprove():
 print(preapprove.__name__)  # 'wrapper'  <- 不是 'preapprove'！
 ```
 
-`@wraps(func)` 做的事就是把 `func` 的 `__name__` / `__doc__` / `__module__` 等复制到 wrapper 上。**纪律：写装饰器永远加 wraps**，理由见 §5 坑位。
+`@wraps(func)` 做的事就是把 `func` 的 `__name__` / `__doc__` / `__module__` 等复制到 wrapper 上。**纪律：写装饰器永远加 wraps**，理由见 §5 陷阱。
 
 **形态二：带参装饰器（三层函数）**——外收参数、中收函数、内做包装：
 
@@ -239,9 +239,9 @@ uv run ruff check .
 uv run pyright
 ```
 
-## 5. Java 人坑位：丢元数据坑
+## 5. Java 直觉陷阱：丢元数据
 
-这是装饰器课的必摔跤，命名化之后我们叫它「丢元数据坑」。
+这是装饰器课的必摔跤，命名化之后我们叫它「丢元数据」。
 
 - **现象**：被装饰后 `f.__name__` 变成 `'wrapper'`、`f.__doc__` 变 `None`。平时无感，一旦有别的东西**按名字或文档找函数**，当场爆炸：pytest 的参数化 id、序列化工具按 `__name__` 导出、日志格式化 `%(__name__)s`、以及框架的 `@tool`——它靠 docstring 生成给模型看的工具描述。
 - **最小复现**：
@@ -273,7 +273,7 @@ uv run pyright
 - 《Fluent Python》第 2 版「装饰器与闭包」章（第 9 章）：三层结构与注册型装饰器的深水区；
 - 框架真实 `@tool` 源码（两版对照，都是带参装饰器工业版）：
   - crewAI@894898f84#lib/crewai/src/crewai/tools/base_tool.py —— 搜 `def tool(`：三种用法（`@tool` / `@tool("名字")` / `@tool(result_as_answer=True)`）共用一个带参装饰器；
-    开头就检查 `f.__doc__ is None` 抛 `ValueError`（§5 坑位的生产级受害者现场）；用 `signature` + 类型标注自动生成 Pydantic 参数 schema——那是 L1.3 的知识；
+    开头就检查 `f.__doc__ is None` 抛 `ValueError`（§5 陷阱的生产级受害者现场）；用 `signature` + 类型标注自动生成 Pydantic 参数 schema——那是 L1.3 的知识；
   - langchain@348c9dc572#libs/core/langchain_core/tools/convert.py —— 搜 `def tool(`：同一思路的另一实现，`@overload` 一列就是「无参/带参」双形态的类型签名。
 - 用法层面的直观感受：GenAI_Agents@cd2ee86#all_agents_tutorials/memory-agent-tutorial.ipynb 里 `@tool` 定义工具的 notebook 用法。
 

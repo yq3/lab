@@ -42,6 +42,6 @@ def test_wraps_metadata_preserved() -> None:
         """预审 v2。"""
         return "PASS"
 
-    # wraps 的作用：元数据没被 wrapper 顶掉（§5 坑位的正面示例）
+    # wraps 的作用：元数据没被 wrapper 顶掉（§5 陷阱的正面示例）
     assert preapprove_v2.__name__ == "preapprove_v2"
     assert preapprove_v2.__doc__ == "预审 v2。"

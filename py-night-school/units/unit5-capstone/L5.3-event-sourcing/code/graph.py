@@ -50,7 +50,7 @@ def merge_results(old: dict, new: dict) -> dict:
     """results 键的合并 reducer：dict 版的 Annotated[list, operator.add]。
 
     本课 executor 仍是唯一写者、一次写全；合并语义的契约留给事件回放/审批回写
-    ——「覆盖」语义会静默吞数据（§5 坑位）。
+    ——「覆盖」语义会静默吞数据（§5 陷阱）。
     """
 
     return {**old, **new}

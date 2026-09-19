@@ -9,7 +9,7 @@ audit.jsonl + audit_chain.jsonl），轮转绝不删历史。
 
 canonical JSON 是哈希链的地基：``sort_keys=True + separators=(",", ":") +
 ensure_ascii=True`` 把同一个 dict 永远序列化成同一个字节串——这是 L4.1「相等不等哈希」
-坑（dict 顺序不定导致哈希漂移）的正解：**先规范化，再哈希**。
+（dict 顺序不定导致哈希漂移）的正解：**先规范化，再哈希**。
 
 与产品的合理差异（就地声明）：产品 append 在 POSIX ``flock``（Windows 用 ``msvcrt``
 字节锁）下持锁做「读尾 + 追加」，且每写 fsync、建文件先 fsync 目录；教学版是**单进程

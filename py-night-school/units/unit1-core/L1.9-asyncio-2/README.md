@@ -34,7 +34,7 @@ uv run pyright
 | `task = asyncio.create_task(fetch(region))` | 提交调度：协程**立刻进入事件循环排期**，返回 Task；稍后再 `await task` 取结果 | 「已在跑」 |
 
 对照 Java：`create_task` ≈ `executor.submit(callable)` 返回 `Future`——先提交、后 join。但有一个 Java 没有
-的陷阱：**Task 对象必须由你持有引用**（事件循环只持弱引用，官方文档明文警告）——细节见坑位，此处先立规矩。
+的陷阱：**Task 对象必须由你持有引用**（事件循环只持弱引用，官方文档明文警告）——细节见陷阱，此处先立规矩。
 
 ### 2.2 `gather`：等待一个集合
 
@@ -245,7 +245,7 @@ uv run ruff check .
 uv run pyright
 ```
 
-## 5. Java 人坑位：create_task 无引用坑（fire-and-forget 静默丢任务）
+## 5. Java 直觉陷阱：create_task 无引用（fire-and-forget 静默丢任务）
 
 - **现象**：后台任务写成 fire-and-forget——`asyncio.create_task(save_audit_log(...))` 不存变量。任务可能在
   完成前被垃圾回收，**静默消失**：没有异常、没有日志、没有尸体。CPython 官方文档（`asyncio.create_task` 条目）

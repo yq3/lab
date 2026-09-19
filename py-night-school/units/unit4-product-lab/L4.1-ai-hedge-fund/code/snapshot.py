@@ -6,7 +6,7 @@
 content_hash 是缓存的地基（对版 FundamentalsSnapshot.content_hash）：
 同一张单子无论构建多少次，hash 必然一致——「同数据不二次付费」靠它成立。
 产品用 pydantic 的 model_dump_json 做确定性序列化（字段按声明序、不走 json.dumps
-的插入序），本课照抄；§5 的「相等不等哈希」坑位讲的就是这件事的另一半。
+的插入序），本课照抄；§5 的「相等不等哈希」陷阱讲的就是这件事的另一半。
 
 数据来源：data/expense/review_mock.json（明线素材唯一来源 data/，Unit 3 同一份四单）。
 """

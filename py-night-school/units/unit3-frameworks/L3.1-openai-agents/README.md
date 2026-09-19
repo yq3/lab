@@ -37,7 +37,7 @@ uv run pyright
 
 | 你熟悉的 Java 物 | 今天的 openai-agents 物 | 一句话差异 |
 |---|---|---|
-| Spring 的 `@Service` + 注解装配 | `Agent(...)` dataclass 实例 | 没有容器、没有注解处理器——全是运行时普通值（§5 坑位） |
+| Spring 的 `@Service` + 注解装配 | `Agent(...)` dataclass 实例 | 没有容器、没有注解处理器——全是运行时普通值（§5 陷阱） |
 | 手写 `while` 循环（L2.3 的 run） | `Runner.run(agent, input)` | 循环进了框架：软终止（模型收敛）+ `max_turns` 硬预算 |
 | 手写工具注册表（L2.2 的 `@tool`） | `@function_tool` 装饰器 | schema 从签名 + docstring **装饰时**生成，不用手写 JSON |
 | Jackson `ObjectMapper` + DTO | `output_type=Advice`（Pydantic） | 请求侧 response_format 约束 + 响应侧 Pydantic 校验 |
@@ -68,7 +68,7 @@ class Agent(AgentBase, Generic[TContext]):
 `Agent(name=..., tools=[...])` 就是 new 一个普通对象，字段全是运行时值——
 `instructions` 甚至可以是函数（每次 run 动态生成 system 提示）。**没有魔法可依赖，
 也没有魔法会背着你做事**——这是极简原语层的设计哲学（官方 README 的原话是
-"no new abstractions, just plain objects"），也是 §5 坑位的根源。
+"no new abstractions, just plain objects"），也是 §5 陷阱的根源。
 
 `model` 字段是本课的关键注入点。OpenAI 官方端点有两套协议：老牌 **Chat Completions**
 （我们 L2.1 手撕的那套）与新推的 **Responses API**（有状态、内置工具）——传字符串会
@@ -352,7 +352,7 @@ uv run ruff check .
 uv run pyright
 ```
 
-## 5. Java 人坑位：注解幻觉坑（把 Agent 当 Spring 注解用）
+## 5. Java 直觉陷阱：注解幻觉（把 Agent 当 Spring 注解用）
 
 这是本课的命名化失败模式——Java 人看到 `Agent(name=..., tools=[...])` 会本能地
 把它理解成「声明」，然后按声明式的预期写代码，全部落空。

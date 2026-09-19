@@ -25,7 +25,7 @@ class ExpenseClaimManual:
         # self 是什么：方法本质是普通函数，实例只是第一个参数（讲义 §2.1 展开讲）
         self.claim_id = claim_id
         self.submitter = submitter
-        # 可变默认值的纪律写法：默认值不能写 items_cents=[]（理由见讲义 §5 坑位），
+        # 可变默认值的纪律写法：默认值不能写 items_cents=[]（理由见讲义 §5 陷阱），
         # 惯用 None 哨兵 + 函数体内替换成新列表——对照 Java 的 items = new ArrayList<>() 每次构造新建。
         self.items_cents = items_cents if items_cents is not None else []
         self.note = note

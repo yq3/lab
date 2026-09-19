@@ -47,7 +47,7 @@ def test_dataclass_validates_nothing() -> None:
 
 
 def test_bare_mutable_default_is_blocked_at_class_definition() -> None:
-    # 坑位预告（§5 详讲）：dataclass 直接把「裸可变默认值」挡在类定义时——ValueError 不是运行时才炸
+    # 陷阱预告（§5 详讲）：dataclass 直接把「裸可变默认值」挡在类定义时——ValueError 不是运行时才炸
     with pytest.raises(ValueError, match="mutable default"):
 
         @dataclass

@@ -65,7 +65,7 @@ class MockLLMEndpoint:
         """下一次请求回放：模型选择工具（finish_reason=tool_calls）。
 
         calls 形如 [{"id": "call_001", "name": "preapprove", "arguments": {"items_cents": [8800]}}]，
-        arguments 会被编码成 JSON 字符串——与真实端点一致（这是 L2.1 §5 坑位的原型）。
+        arguments 会被编码成 JSON 字符串——与真实端点一致（这是 L2.1 §5 陷阱的原型）。
         仅支持非流式：真实端点的流式 tool_calls 是分片拼装的，本课明确不做（讲义有说明）。
         """
         self._scripts.put({"kind": "tool_calls", "calls": calls})

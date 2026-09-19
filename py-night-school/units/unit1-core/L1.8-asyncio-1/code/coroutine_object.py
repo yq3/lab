@@ -20,7 +20,7 @@ async def review(claim_id: str) -> str:
 
 def fire_and_forget() -> None:
     """事故写法：调用 async 函数却不接住返回的协程对象。"""
-    # 下一行就是「协程未 await 坑」的事故写法——pyright 的 reportUnusedCoroutine
+    # 下一行就是「协程未 await」的事故写法——pyright 的 reportUnusedCoroutine
     # 能静态抓住它（这正是这个坑的便宜保险），讲义故意演示，故在此关闭该检查。
     review("CLM-C")  # pyright: ignore[reportUnusedCoroutine]
 

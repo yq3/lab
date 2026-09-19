@@ -244,7 +244,7 @@ uv run ruff check .
 uv run pyright
 ```
 
-## 5. Java 人坑位：Markdown 围栏坑（LLM 不是序列化层）
+## 5. Java 直觉陷阱：Markdown 围栏（LLM 不是序列化层）
 
 这是本课的命名化失败模式——「模型输出可以直接 `json.loads`」这个假设，第一次连
 真实端点就碎。

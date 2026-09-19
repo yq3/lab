@@ -10,7 +10,7 @@ InputGuardrailTripwireTriggered，模型一次都不用调。
      任务——本实验实测模型请求数为 0，但这是赛跑结果不是合同；要「绝不发出模型调用」
      的硬保证，构造护栏时传 run_in_parallel=False（先跑护栏再起 agent）。
   2. 护栏函数只是普通函数（同步异步都行）——它当然也可以是一次模型调用（官方文档的
-     guardrail agent 模式），成本观与 Servlet Filter 完全不同（§5 坑位的入口）。
+     guardrail agent 模式），成本观与 Servlet Filter 完全不同（§5 陷阱的入口）。
 """
 
 from __future__ import annotations

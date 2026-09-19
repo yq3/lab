@@ -33,11 +33,11 @@ uv run pyright
 
 ## 2. 概念讲解
 
-先给全课对照表（datetime 一行是今晚的新 Python 件——§5 坑位的主角），再逐个展开：
+先给全课对照表（datetime 一行是今晚的新 Python 件——§5 陷阱的主角），再逐个展开：
 
 | 你熟悉的 Java 物 | 今天的 Python 物 | 一句话差异 |
 |---|---|---|
-| `Instant`（必然带时区）/ `ZonedDateTime` / `LocalDateTime`（不敢乱比） | `datetime` 默认 **naive**（无时区标注） | naive/aware 在 Python 是**运行时属性不是类型**——两者一比较直接 `TypeError`（§5 坑位） |
+| `Instant`（必然带时区）/ `ZonedDateTime` / `LocalDateTime`（不敢乱比） | `datetime` 默认 **naive**（无时区标注） | naive/aware 在 Python 是**运行时属性不是类型**——两者一比较直接 `TypeError`（§5 陷阱） |
 | 注入 `Clock`（测试可控时间） | 时钟/日期注入参数（`clock=` / `today=`） | 同款思想：生产给系统钟、测试给固定钟；检查链**绝不自己取时钟**（对版 L4.3/L5.3） |
 | 纯静态方法 + `enum` verdict（风控规则引擎的古典形态） | `gate.check_intent` 纯函数 + `GateVerdict` 三态 | L4.3 读过的 Vibe-Trading `check_mandate` 就是这个形状的 Java 原型——门没有框架，只有纪律 |
 | sealed interface + record（不可变合同） | `@dataclass(frozen=True)`（L4.3 复引） | 合同对象零验证面：错了就崩（fail-closed 反而喜欢），不给「帮坏输入修复」的解析空间 |
@@ -133,7 +133,7 @@ L4.1 在 ai-hedge-fund 读过的总纲，今晚在自家 PoC 里长成了完整�
 （L4.3 §2.7 已讲过 naive/aware 的类型学，此处结课深化：把它用到「当日限额窗口」这个真实决策点上。）
 
 Python 的 `datetime` 默认是 **naive**（不带时区）——它和 Java 的 `Instant`（必然带时区语义）
-是两种世界观，§5 坑位专门拆。本课只需要一条纪律的结论：
+是两种世界观，§5 陷阱专门拆。本课只需要一条纪律的结论：
 
 - 门的「当日」窗口**不依赖 `datetime.now()`**，而是**注入 `today`**（ISO 日期字符串，
   `graph.DEFAULT_TODAY = "2026-09-16"`）：装配方显式给、测试随便改、两次运行可复现——
@@ -363,7 +363,7 @@ uv run python -c "from hints import hint; print(hint('ex1', 1))"
 
 验收命令同 §1 的完成判据（三条同时全绿 = 本课毕业；发货态 22 个练习测试红、3 个 given/meta 绿）。
 
-## 5. Java 人坑位：天真时间坑
+## 5. Java 直觉陷阱：天真时间
 
 这是本课的命名化失败模式——Python 默认给你的 datetime 是「天真」的，而金融代码里最不该
 天真的就是时间。

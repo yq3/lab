@@ -13,7 +13,7 @@
   并说清约束怎么映射进 JSON Schema（`gt` → `exclusiveMinimum`、`min_length` → `minItems`）；
 - 写 `@tool(ArgsModel)` 带参装饰器（L1.5 三层结构的真实落地），函数定义即注册；
 - 写 `run_tool` 分发器：`model_validate_json` 一步完成「解析 + 校验 + 类型收敛」——
-  昨晚的「字符串套娃坑」从手工拆封升级为工程级拆封；
+  昨晚的「字符串套娃」从手工拆封升级为工程级拆封；
 - 说清「回喂不抛」的错误哲学：unknown / invalid / tool_error 三态都是**给模型的修复指令**，
   以及「schema 管形状、规则管业务值」的校验分层纪律。
 
@@ -46,7 +46,7 @@ uv run pyright
 L2.1 我们手写了工具契约（那个 dict）并手工回喂——三个问题在真实项目里都会长大：
 
 1. **重复**：`PREAPPROVE_TOOL` 的 schema 手写一遍，函数签名又写一遍，同一形状写两次；
-2. **漂移**：函数改了参数名，schema 忘了改——模型按旧契约调用，运行时 `TypeError`（§5 坑位）；
+2. **漂移**：函数改了参数名，schema 忘了改——模型按旧契约调用，运行时 `TypeError`（§5 陷阱）；
 3. **裸奔**：`json.loads(arguments)` 拆封后没有任何校验，`{"items_cents": "八千八"}` 直达业务函数。
 
 本课的答案是把「参数的形状」声明成 Pydantic 模型，**声明一次，两头使用**：
@@ -149,7 +149,7 @@ def run_tool(name: str, arguments_json: str, registry = TOOL_REGISTRY) -> str:
 
 四步：查表 → 解析校验 → 解包调用 → 字符串化。`func(**args.model_dump())` 是
 「单一事实源」的另一半：**调用处的形参名被 args 模型的字段名锁定**，schema 与签名
-不可能漂移（§5 坑位从此绝迹）。
+不可能漂移（§5 陷阱从此绝迹）。
 
 最重要的是错误哲学：**三种失败都不 raise，全部返回 error JSON**。对照 Java 直觉——
 分层架构里异常往上抛给最外层兜底（全局 `@ExceptionHandler`），这是对的，因为
@@ -261,7 +261,7 @@ uv run ruff check .
 uv run pyright
 ```
 
-## 5. Java 人坑位：签名漂移坑（手写 schema 与函数签名脱钩）
+## 5. Java 直觉陷阱：签名漂移（手写 schema 与函数签名脱钩）
 
 这是本课的命名化失败模式——L2.1 手写契约时你已经埋下了它，今晚拆引信。
 

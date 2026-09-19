@@ -178,7 +178,7 @@ import 找模块的搜索路径是 `sys.path` 列表，对照：
 | `CLASSPATH` 环境变量 | `PYTHONPATH` 环境变量（**插在标准库之前**，因此能遮蔽标准库） | 同为「追加搜索路径」的逃生门，Python 这条优先级更高 |
 | 依赖 jar 全部平铺在 classpath | 每个项目一个 `.venv/`，依赖只在 `site-packages` | uv 在 L0.1 已替你管好 |
 
-注意 `sys.path[0]` 随**启动方式**变：直接跑脚本时是**脚本所在目录**；`python -m 包.模块` 时是**当前目录**；`python -c` 时也是当前目录。这个细节是 §5 坑位的直接成因。
+注意 `sys.path[0]` 随**启动方式**变：直接跑脚本时是**脚本所在目录**；`python -m 包.模块` 时是**当前目录**；`python -c` 时也是当前目录。这个细节是 §5 陷阱的直接成因。
 
 顺带一个顺序后果：脚本目录与 `PYTHONPATH` 都排在标准库**前面**——把工作目录里的文件起名叫 `email.py` 再 `import email`，标准库就被你的文件顶掉了（实测：`PYTHONPATH` 落在 `sys.path[1]`，标准库在 `[3]`）。`json.py`、`random.py` 都中过同样的枪：起名避开标准库模块名。
 
@@ -235,7 +235,7 @@ claim_id, verdict = pair     # pair 是 ("CLM-2026-0001", "PASS") 这样的二�
 for cid, v in results:       # 循环里也能直接解包（测试文件里到处是）
 ```
 
-缩进块与冒号的语法地位 L0.1 坑位已讲（缩进即语法）；`None`（Java 的 null 对应物，但它是一个真对象）在 L1.2 类型课正式登场。
+缩进块与冒号的语法地位 L0.1 陷阱已讲（缩进即语法）；`None`（Java 的 null 对应物，但它是一个真对象）在 L1.2 类型课正式登场。
 
 ## 3. 动手代码
 
@@ -369,7 +369,7 @@ uv run ruff check .
 uv run pyright
 ```
 
-## 5. Java 人坑位：直跑包内脚本坑
+## 5. Java 直觉陷阱：直跑包内脚本
 
 - **现象**：`ImportError: attempted relative import with no known parent package`——在包目录里直接 `python xxx.py`，或从项目根 `python code/expense/cli.py`，第一行相对导入就炸。
 - **最小复现**（Step 6 已跑过一次）：

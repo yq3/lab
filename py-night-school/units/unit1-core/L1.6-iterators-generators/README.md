@@ -25,7 +25,7 @@
 | `Iterable<E>`（实现它才能 for-each） | 可迭代物（支持 `iter()`） | 概念同构：`iter(可迭代物)` 产迭代器，像 `iterable.iterator()` |
 | `for (X x : list)` | `for x in list:` | 都是糖衣，都落在迭代器协议上 |
 | `NoSuchElementException`（越界 next，一般是 bug） | `StopIteration`（正常控制流的一部分） | Python 把「结束」做成协议信号，for 靠它终止 |
-| Stream 惰性、一次性 | 生成器惰性、一次性 | 像，但生成器不需要创建「流对象」，函数本身就能产流（§5 坑位细比） |
+| Stream 惰性、一次性 | 生成器惰性、一次性 | 像，但生成器不需要创建「流对象」，函数本身就能产流（§5 陷阱细比） |
 
 ### 2.1 for 循环的真实面目：一个三步协议
 
@@ -191,7 +191,7 @@ uv run python code/itertools_demo.py
 
 `counting_source` 是「测速仪」：底层每被拉一次记一笔。输出会证明 `islice` 取 3 个底层恰好被拉 3 次、`takewhile` 在 8800 处即停（后面还有两笔根本没被拉）。
 
-### Step 4 一次性消费实验（坑位先行演示）
+### Step 4 一次性消费实验（陷阱先行演示）
 
 ```bash
 uv run python code/oneshot.py
@@ -229,7 +229,7 @@ uv run ruff check .
 uv run pyright
 ```
 
-## 5. Java 人坑位：生成器一次性坑
+## 5. Java 直觉陷阱：生成器一次性
 
 - **现象**：生成器第一次 for 有数据，第二次 for **静默空**——不报错、不警告、返回零元素。下游常常表现为「统计值神秘为 0」「报表第二页全空」，离案发现场很远才炸。
 - **最小复现**：

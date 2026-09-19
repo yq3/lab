@@ -70,7 +70,7 @@ def input_with_files(message: str, files: dict[str, dict[str, str]]) -> Any:
     返回 Any 不是偷懒：预置 files 是 StateBackend 的**运行时**契约（其 docstring
     明写 invoke({"messages": ..., "files": ...})），但输入类型 InputAgentState 只
     声明了 messages 一个键——类型与运行时在这里有个缺口，Java 同学对照
-    Map<String, Object> 传给强类型入口的场景（§5 坑位的远亲）。
+    Map<String, Object> 传给强类型入口的场景（§5 陷阱的远亲）。
     """
     return {"messages": [HumanMessage(content=message)], "files": files}
 

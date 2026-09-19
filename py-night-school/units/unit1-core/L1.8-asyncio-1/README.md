@@ -45,8 +45,8 @@ Java 世界里你已经拥有三种并发写法：线程池 + `Future`、`Comple
 
 三条推论，正好对应今晚的两类事故与一类传染：
 
-1. 让出是显式的 → 漏写 `await` 时不会报错，只会「什么都没发生」（坑位一）；
-2. 阻塞不再只害自己 → `time.sleep` 冻结全场（坑位二）；
+1. 让出是显式的 → 漏写 `await` 时不会报错，只会「什么都没发生」（陷阱一）；
+2. 阻塞不再只害自己 → `time.sleep` 冻结全场（陷阱二）；
 3. 只有一个线程 → 没有「锁保护共享变量」的默认焦虑，但换来「谁不让出谁害人」的纪律。
 
 写过 WebFlux 的同学再补一层对照：Reactor 是「声明式装配流水线」（`flatMap`/`subscribeOn` 算子图），
@@ -183,8 +183,8 @@ RuntimeWarning: Enable tracemalloc to get the object allocation traceback
 ```
 
 第 1 节：`review("CLM-A")` 之后函数体一行没跑。第 3 节故意丢弃协程对象，解释器在回收瞬间报出
-`never awaited` 警告——这就是坑位一的现场。开头那行被忽略的 `# pyright: ignore` 注释说明：
-pyright 本来能静态抓住这个事故（见坑位一的修复纪律）。
+`never awaited` 警告——这就是陷阱一的现场。开头那行被忽略的 `# pyright: ignore` 注释说明：
+pyright 本来能静态抓住这个事故（见陷阱一的修复纪律）。
 
 ### Step 4：阻塞事故——一个 time.sleep 冻住全场
 
@@ -257,9 +257,9 @@ uv run ruff check .
 uv run pyright
 ```
 
-## 5. Java 人坑位
+## 5. Java 直觉陷阱
 
-### 坑一：协程未 await 坑（「假 await」）
+### 陷阱一：协程未 await（「假 await」)
 
 - **现象**：调用了 async 函数，但忘了 `await`——什么都没发生，功能静默失效；唯一的线索是解释器回收协程对象时
   的 `RuntimeWarning: coroutine ... was never awaited`。更阴的是协程对象是真值、能打印、能当参数传——
@@ -281,7 +281,7 @@ uv run pyright
   ② pyright 的 `reportUnusedCoroutine` 检查能静态抓住裸调用（本课工具链已默认开启——Step 3 里那行
   `# pyright: ignore[reportUnusedCoroutine]` 正是先关掉它才能演示事故）；③ 不打算跑的协程显式 `close()`。
 
-### 坑二：time.sleep 毒害坑（「阻塞全场」）
+### 陷阱二：time.sleep 毒害（「阻塞全场」)
 
 - **现象**：async 函数里一句 `time.sleep(0.3)`，全场所有任务被冻结 0.3 秒——并发消失、超时误报、
   心跳停止，且没有任何报错指向肇事者（Step 4：总耗时 0.406s，两个 0.1s 的任务连起步都被推迟）。
@@ -307,7 +307,7 @@ uv run pyright
 ## 6. 延伸
 
 - asyncio 官方文档 [Developing with asyncio](https://docs.python.org/3/library/asyncio-dev.html)——
-  调试模式、并发原语选择、常见陷阱的官方清单（本课坑位二提到的 debug 模式在这里有完整说明）。
+  调试模式、并发原语选择、常见陷阱的官方清单（本课陷阱二提到的 debug 模式在这里有完整说明）。
 - openai-agents-python@fbd2dbca#src/agents/run.py —— OpenAI 官方 agent SDK 的执行入口。翻到 `class Runner`
   的第一个方法：`@classmethod async def run(...)`。你之后要写的每一个 agent 入口都是这个形状——
   这就是「框架全是 async def」的实物证据。
