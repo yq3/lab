@@ -259,7 +259,7 @@ uv run ruff check .
 uv run pyright
 ```
 
-## 5. Java 直觉陷阱
+## 5. Java 直觉陷阱（本课两个）
 
 ### 陷阱一：协程未 await（「假 await」）
 

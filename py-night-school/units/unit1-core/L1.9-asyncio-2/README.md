@@ -236,7 +236,7 @@ uv run python -c "from hints import hint; print(hint('ex1', 1))"
 | 题 | 文件 | 考察 |
 |---|---|---|
 | ex1 | `exercises/ex1_gather_fetch.py` | gather 并发拉取补全（验收：保序结果 + 总时长阈值 + 5 个 start 挤最前的并发证据） |
-| ex2 | `exercises/ex2_timeout_fallback.py` | wait_for 超时降级补全（验收：快端点真值保留、慢端点降级 0、总时长被预算掐住） |
+| ex2 | `exercises/ex2_timeout_fallback.py` | wait_for 超时降级补全（验收：快端点真值保留、慢端点降级 0、2 个 start 挤最前的并发证据） |
 | ex3 | `exercises/ex3_token_stream.py` | 异步生成器模拟 token 流（验收：完整句子 + 分段数 + 逐段节奏时长下限） |
 
 验收（三条同时全绿 = 本课毕业，随后进 [milestone/](../milestone/README.md) 结业）：
