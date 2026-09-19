@@ -252,7 +252,8 @@ theme:
         icon: material/weather-sunny
         name: 切换到日间模式
   features:
-    - navigation.sections          # 单元 = 左栏分组标题（不占顶栏 tab）
+    # 不用 navigation.sections：单元走 Material 原生可折叠嵌套导航
+    # （桌面 = chevron 折叠开关，默认只展开所在单元；抽屉 = 层级钻取）
     - navigation.top
     - navigation.tracking
     - toc.follow

@@ -152,11 +152,25 @@ html {
 .md-nav__title {
   font-size: 0.68rem;
   letter-spacing: 0.14em;
-  background: transparent !important;
-  box-shadow: none;
   color: var(--ns-ink-3);
 }
-.md-nav--primary .md-nav__item--section > .md-nav__link,
+/* 抽屉（≤平板断点）：压掉 Material 的灰底厚标题条 */
+@media screen and (max-width: 76.1875em) {
+  .md-nav__title {
+    background: transparent !important;
+    box-shadow: none;
+  }
+}
+/* 桌面（≥同一断点）：Material 把主栏站名钉在目录列表顶（sticky），靠不透明
+   同色底遮住上滚的条目——遮罩一透明，条目文字就会透叠进站名 */
+@media screen and (min-width: 76.1875em) {
+  .md-nav--primary .md-nav__title {
+    background: var(--ns-bg);
+    box-shadow: 0 0 0.4rem 0.4rem var(--ns-bg);
+  }
+}
+/* 单元折叠开关行（label.md-nav__link）沿用分组标题的粗体铅灰 */
+.md-nav--primary .md-nav__item--nested > .md-nav__link,
 .md-nav--primary .md-nav__title {
   font-weight: 700;
   color: var(--ns-ink-3);
