@@ -2,7 +2,10 @@
 """三态验证法（AGENTS.md §5）的自动化：发货态 / 毕业态 / 机器校验。
 
 用法：
-    python3 scripts/three_state_check.py units/unit2-mini-agent/L2.1-raw-api
+    python3 scripts/three_state_check.py units/unit2-mini-agent/L2.1-raw-api   # 单课（可多个）
+    python3 scripts/three_state_check.py                                      # 全量：30 课时 + 5 里程碑
+
+Windows 注意：python3 常是 Store 存根（退出码 49 打不开），换 python 或 py -3 调用本脚本。
 
 对每个课时目录做三件事：
 1. 发货态：原地跑三命令（pytest / ruff check / pyright）——只允许 exercises/ 的红
@@ -33,7 +36,11 @@ def run(cmd: str, cwd: Path) -> tuple[int, str]:
 
 
 def is_designed_failure(output: str, lesson: Path) -> bool:
-    """发货态的「精确红」：FAILED/ERROR 全部落在学员作答区——课时是 exercises/，里程碑是 tests/。"""
+    """发货态的「精确红」：pytest 摘要里 FAILED 行全部落在学员作答区——课时是 exercises/，里程碑是 tests/。
+
+    只认 FAILED（用例失败）这一种设计内红；「ERROR 」开头的集合错误行不计——
+    集合错误意味着 import/骨架已损坏，不是 TODO 未填的预期形态，照常判 FAIL。
+    """
     bad_lines = [
         line
         for line in output.splitlines()
@@ -50,15 +57,8 @@ def is_designed_failure(output: str, lesson: Path) -> bool:
     return all(allowed in line for line in bad_lines)
 
 
-def main() -> int:
-    if len(sys.argv) != 2:
-        print(__doc__)
-        return 2
-    lesson = (ROOT / sys.argv[1]).resolve()
-    if not lesson.is_dir():
-        print(f"目录不存在: {lesson}")
-        return 2
-
+def check_one(lesson: Path) -> bool:
+    """对单个课时/里程碑目录跑三态，返回是否全过。"""
     failures: list[str] = []
 
     # ---- 1. 发货态 ----
@@ -126,8 +126,39 @@ def main() -> int:
         print("\n三态验证 FAIL：")
         for item in failures:
             print(f"  - {item}")
-        return 1
+        return False
     print("\n三态验证 PASS")
+    return True
+
+
+def main() -> int:
+    if sys.argv[1:]:
+        lessons = [(ROOT / arg).resolve() for arg in sys.argv[1:]]
+        missing = [str(lesson) for lesson in lessons if not lesson.is_dir()]
+        if missing:
+            print(f"目录不存在: {', '.join(missing)}")
+            return 2
+    else:
+        lessons = sorted((ROOT / "units").glob("unit*/L*")) + sorted((ROOT / "units").glob("unit*/milestone"))
+        if not lessons:
+            print("未发现课时目录")
+            return 1
+
+    failed: list[Path] = []
+    for lesson in lessons:
+        try:
+            ok = check_one(lesson)
+        except (OSError, UnicodeDecodeError, shutil.Error) as exc:
+            print(f"\n== {lesson.relative_to(ROOT)} 读取/镜像异常 ==")
+            print(f"  {exc!r}")
+            ok = False
+        if not ok:
+            failed.append(lesson)
+    if failed:
+        print(f"\n{len(failed)}/{len(lessons)} 个目录三态未过：")
+        for lesson in failed:
+            print(f"  - {lesson.relative_to(ROOT)}")
+        return 1
     return 0
 
 

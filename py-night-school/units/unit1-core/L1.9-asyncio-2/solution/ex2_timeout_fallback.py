@@ -12,9 +12,13 @@ SLOW_DELAY = 0.3
 
 AMOUNTS: dict[str, int] = {"west": 3500, "north": 8800}
 
+LOG: list[str] = []  # 并发证据用（与 ex1 同法）：start/done 事件按发生顺序入册
+
 
 async def fetch_ledger(region: str) -> int:
+    LOG.append(f"start:{region}")
     await asyncio.sleep(SLOW_DELAY if region == "north" else FAST_DELAY)
+    LOG.append(f"done:{region}")
     return AMOUNTS[region]
 
 

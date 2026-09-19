@@ -5,6 +5,8 @@
     python3 scripts/check_lesson.py                              # 扫描全部课时目录
     python3 scripts/check_lesson.py units/unit0-toolchain/L0.1-uv-toolchain
 
+Windows 注意：python3 常是 Store 存根（退出码 49 打不开），换 python 或 py -3 调用本脚本。
+
 检查项：六段章节齐全 / 承接段（h1 与 §1 间的 blockquote）/ §2 含 Java 对照表 / 结尾段命名 /
 练习带 TODO + hints.py + pytest 验收 / solution 存在 / 延伸段源码路标锚定 commit（仓库@commit#路径）/
 工程件齐备（uv.lock、.env.example 三变量、.python-version、pyproject 的 extend-exclude）。仅用标准库。
@@ -91,8 +93,8 @@ def check_lesson(lesson: Path) -> list[str]:
         problems.append(f"缺少或拼写不符结尾段「{FINAL_SECTION}」")
     if not has_bridge_blockquote(text):
         problems.append("h1 与 §1 之间缺少承接段（2–3 句 blockquote：昨晚产出 → 今晚新问题）")
-    if not COMMIT_ANCHOR.search(text):
-        problems.append("延伸段源码路标未锚定 commit（格式：仓库@commit#路径）")
+    if not COMMIT_ANCHOR.search(section_text(text, "## 6.")):
+        problems.append("§6 延伸段源码路标未锚定 commit（格式：仓库@commit#路径）")
     if not has_java_table(text):
         problems.append("§2 概念讲解缺少 Java↔Python 对照表（宪法特色 1：表格行需含 Java）")
     concat_lines = bash_block_concat_lines(text)
@@ -154,7 +156,10 @@ def main() -> int:
 
     failed = False
     for lesson in targets:
-        problems = check_lesson(lesson)
+        try:
+            problems = check_lesson(lesson)
+        except (OSError, UnicodeDecodeError) as exc:
+            problems = [f"读取异常（损坏目录/编码问题）：{exc!r}"]
         rel = lesson.relative_to(root)
         if problems:
             failed = True
