@@ -14,17 +14,6 @@ hide:
 <p class="ns-cta"><a class="ns-btn ns-btn--primary" href="unit0/">从 Unit 0 开始</a><a class="ns-btn" href="curriculum/">先看课表</a></p>
 </div>
 
-## 目次
-
-| 学段 | 主题 | 讲次 |
-|---|---|---|
-| [Unit 0](unit0/) | 起步：环境与工具链 | L0.1 |
-| [Unit 1](unit1/) | Python 语言核心 · Java 对照 | L1.1 – L1.9 + 里程碑 |
-| [Unit 2](unit2/) | 无框架手写 mini-agent | L2.1 – L2.5 + 里程碑 |
-| [Unit 3](unit3/) | 框架四重奏 | L3.1 – L3.8 + 里程碑 |
-| [Unit 4](unit4/) | 开源产品实战 | L4.1 – L4.3 + 里程碑 |
-| [Unit 5](unit5/) | 毕业设计 | L5.1 – L5.4 + 里程碑 |
-
 ## 这门课的六个不一样
 
 <div class="ns-feats">

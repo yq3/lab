@@ -701,12 +701,15 @@ html {
   letter-spacing: 0.03em;
   color: var(--ns-ink);
 }
-.ns-sub {
+/* 特异性须压过 .md-typeset p 的 margin（0-1-1），否则 margin:auto 失效、块贴左 */
+.md-typeset .ns-sub {
   margin: 1.3rem auto 0;
   max-width: 34em;
   font-size: clamp(0.98rem, 1.4vw, 1.1rem);
   line-height: 2;
   color: var(--ns-ink-2);
+  /* 扉页整体居中，但多行简介按行居中会左右参差——块居中 + 两端对齐 */
+  text-align: justify;
 }
 .ns-meta {
   margin: 1.6rem 0 0;
