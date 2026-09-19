@@ -253,7 +253,8 @@ theme:
         name: 切换到日间模式
   features:
     # 不用 navigation.sections：单元走 Material 原生可折叠嵌套导航
-    # （桌面 = chevron 折叠开关，默认只展开所在单元；抽屉 = 层级钻取）
+    # （桌面 = chevron 折叠开关，默认只展开所在单元；抽屉 = 层级钻取）。
+    # 单元开合跨页记忆 + 首帧前恢复见 overrides/partials/nav.html 的内联脚本
     - navigation.top
     - navigation.tracking
     - toc.follow

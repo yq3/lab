@@ -175,6 +175,12 @@ html {
   font-weight: 700;
   color: var(--ns-ink-3);
 }
+/* 桌面：单元开合为瞬时切换（宪法零动画；换页时记忆单元的恢复也不做展开动效） */
+@media screen and (min-width: 76.1875em) {
+  .md-nav__toggle ~ .md-nav {
+    transition: none;
+  }
+}
 .md-nav--primary .md-nav__link {
   color: var(--ns-ink-2);
   margin: 0.14em 0.4em;
