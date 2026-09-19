@@ -1,0 +1,34 @@
+[project]
+name = "l11-runtime-and-modules"
+version = "0.1.0"
+description = "L1.1 运行模型与模块系统：从 .py 到运行中的程序，import 到底发生了什么"
+requires-python = ">=3.12"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "ruff>=0.12",
+    "pyright>=1.1",
+    "nodejs-wheel-binaries>=1.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["code", "exercises"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+extend-exclude = ["*.md"]  # 讲义代码块是手工对齐的教学代码，不参与 format
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["expense", "demo_name", "ex1_guard", "ex3_predictions", "probe_a"]
+
+[tool.pyright]
+include = ["code", "exercises"]
+extraPaths = ["code", "exercises"]
+typeCheckingMode = "basic"

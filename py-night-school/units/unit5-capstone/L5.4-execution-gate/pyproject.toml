@@ -1,0 +1,68 @@
+[project]
+name = "l54-execution-gate"
+version = "0.1.0"
+description = "L5.4 毕业设计④：fail-closed 执行门与结业——四层合体（图+审批+事件+门）+ JAVA-MAPPING.md（每个模式在 Java 栈的对应物与翻译坑）"
+requires-python = ">=3.12"
+dependencies = [
+    "langgraph==1.2.11",
+    "langgraph-checkpoint-sqlite==3.1.1",
+    "langchain-openai>=0.3",
+    "pydantic>=2",
+    "fastapi>=0.115",
+    "httpx>=0.27",
+    "uvicorn>=0.30",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.12",
+    "pyright>=1.1",
+    "nodejs-wheel-binaries>=1.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["code", "exercises"]
+addopts = "-q"
+asyncio_mode = "auto"  # FastAPI 异步面：async 测试函数免装饰器（宪法「三态全绿」优先，对齐 L5.2）
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+extend-exclude = ["*.md"]  # 讲义代码块是手工对齐的教学代码，不参与 format（JAVA-MAPPING.md 同理）
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+"code/api.py" = ["B008"]  # FastAPI 的 Depends/Header 惯用「默认值里调用」形态——对照 Spring @Autowired 的显式传函数（对版 L5.2）
+
+[tool.ruff.lint.isort]
+known-first-party = [
+    "advice",
+    "api",
+    "approvals",
+    "audit_cache",
+    "demo",
+    "demo_final",
+    "eventstore",
+    "executor",
+    "gate",
+    "graph",
+    "mock_endpoint",
+    "mock_tools",
+    "plan",
+    "prompts",
+    "review_rules",
+    "step1_gate",
+    "versioning",
+    "ex1_gate",
+    "ex2_wire",
+    "ex3_mapping",
+]
+
+[tool.pyright]
+include = ["code", "exercises"]
+extraPaths = ["code", "exercises"]
+typeCheckingMode = "basic"

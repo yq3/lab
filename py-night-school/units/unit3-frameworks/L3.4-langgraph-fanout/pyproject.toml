@@ -1,0 +1,49 @@
+[project]
+name = "l34-langgraph-fanout"
+version = "0.1.0"
+description = "L3.4 langgraph ③：Send 动态扇出 + create_react_agent 源码导读——报销单审查 agent 的 prebuilt 装配"
+requires-python = ">=3.12"
+dependencies = [
+    "langgraph==1.2.11",
+    "langgraph-prebuilt==1.1.0",
+    "langchain-openai>=0.3",
+    "pydantic>=2",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "ruff>=0.12",
+    "pyright>=1.1",
+    "nodejs-wheel-binaries>=1.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["code", "exercises"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+extend-exclude = ["*.md"]  # 讲义代码块是手工对齐的教学代码，不参与 format
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+
+[tool.ruff.lint.isort]
+known-first-party = [
+    "advice",
+    "demo",
+    "demo_batch",
+    "mock_endpoint",
+    "mock_tools",
+    "review_rules",
+    "ex1_fanout",
+    "ex2_prebuilt",
+    "ex3_facts",
+]
+
+[tool.pyright]
+include = ["code", "exercises"]
+extraPaths = ["code", "exercises"]
+typeCheckingMode = "basic"

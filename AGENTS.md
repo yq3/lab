@@ -7,6 +7,8 @@
 - 每个实验 App 在仓库根目录下各占一个独立目录，彼此无依赖，各自是完整的单体项目（自带技术栈、依赖和配置）。
 - 不同 App 的技术栈和业务可能完全不同：动手前先看该目录自身的配置文件，不要假设全仓有统一技术栈或框架。
 - 每个 App 本质是一个 POC：效果验证通过后，可能拆出去单独建仓继续演进，所以目录应保持自包含、独立可运行。
+- `research/`：调研专区（过程+结果，每次任务一个子目录），工作模式见 [research/AGENTS.md](research/AGENTS.md)；被调研的开源仓库克隆在 `~/develop/opensource/`（克隆规范见该目录自己的 AGENTS.md）。
+- `py-night-school/`：Python 夜校教程（写给 Java 工程师的 Python Agent 开发晚课）；中心思想、课程设计理念、硬性纪律与写课流程见 [py-night-school/AGENTS.md](py-night-school/AGENTS.md)，写课/改课/审课前必读。
 
 ## 工作约定
 

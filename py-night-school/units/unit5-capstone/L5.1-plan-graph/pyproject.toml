@@ -1,0 +1,52 @@
+[project]
+name = "l51-plan-graph"
+version = "0.1.0"
+description = "L5.1 毕业设计①：静态图 + 计划驱动——固定拓扑可审计，Plan JSON（Pydantic 强约束 + 工具白名单）驱动确定性执行"
+requires-python = ">=3.12"
+dependencies = [
+    "langgraph==1.2.11",
+    "langchain-openai>=0.3",
+    "pydantic>=2",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "ruff>=0.12",
+    "pyright>=1.1",
+    "nodejs-wheel-binaries>=1.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["code", "exercises"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+extend-exclude = ["*.md"]  # 讲义代码块是手工对齐的教学代码，不参与 format
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+
+[tool.ruff.lint.isort]
+known-first-party = [
+    "advice",
+    "demo",
+    "executor",
+    "graph",
+    "mock_endpoint",
+    "mock_tools",
+    "plan",
+    "prompts",
+    "review_rules",
+    "step2_signature",
+    "ex1_plan",
+    "ex2_executor",
+    "ex3_replan",
+]
+
+[tool.pyright]
+include = ["code", "exercises"]
+extraPaths = ["code", "exercises"]
+typeCheckingMode = "basic"

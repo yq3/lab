@@ -1,0 +1,50 @@
+[project]
+name = "u2-milestone-mini-agent"
+version = "0.1.0"
+description = "Unit 2 里程碑：无框架 mini-agent（多工具 + 流式 + 结构化输出 + MCP）——Unit 3 全程对照组"
+requires-python = ">=3.12"
+dependencies = [
+    "httpx>=0.27",
+    "pydantic>=2",
+    "mcp>=2.2,<3",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "ruff>=0.12",
+    "pyright>=1.1",
+    "nodejs-wheel-binaries>=1.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+extend-exclude = ["*.md"]  # 讲义代码块是手工对齐的教学代码，不参与 format
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+
+[tool.ruff.lint.isort]
+known-first-party = [
+    "agent",
+    "client",
+    "env_loader",
+    "finance",
+    "main",
+    "mcp_bridge",
+    "mcp_server",
+    "model",
+    "structured",
+    "tools",
+]
+
+[tool.pyright]
+include = ["*.py", "tests"]
+extraPaths = ["."]
+typeCheckingMode = "basic"

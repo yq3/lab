@@ -1,0 +1,8 @@
+[project]
+name = "handbook"
+version = "0.1.0"
+description = "py-night-school 在线阅读站（units/ 的 Markdown 是唯一事实源，此处只做构建）"
+requires-python = ">=3.12"
+dependencies = [
+    "mkdocs-material>=9.5",
+]

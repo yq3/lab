@@ -1,0 +1,7 @@
+# 每课独立 uv 项目
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+# 模型端点配置（只有 .env.example 进仓）
+.env

@@ -1,0 +1,53 @@
+[project]
+name = "l42-tradingagents-debate"
+version = "0.1.0"
+description = "L4.2 TradingAgents：辩论-裁决——条件边循环与预算封顶（报销争议上诉明线）"
+requires-python = ">=3.12"
+dependencies = [
+    "langgraph==1.2.11",
+    "langchain-openai>=0.3",
+    "pydantic>=2",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "ruff>=0.12",
+    "pyright>=1.1",
+    "nodejs-wheel-binaries>=1.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["code", "exercises"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+extend-exclude = ["*.md"]  # 讲义代码块是手工对齐的教学代码，不参与 format
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+
+[tool.ruff.lint.isort]
+known-first-party = [
+    "budget",
+    "conditional",
+    "config",
+    "debaters",
+    "demo",
+    "graph",
+    "mock_endpoint",
+    "msg_clear",
+    "policy_tools",
+    "schemas",
+    "states",
+    "ex1_rounds",
+    "ex2_budget",
+    "ex3_sentinel",
+]
+
+[tool.pyright]
+include = ["code", "exercises"]
+extraPaths = ["code", "exercises"]
+typeCheckingMode = "basic"

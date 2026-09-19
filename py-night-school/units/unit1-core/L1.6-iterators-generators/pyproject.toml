@@ -1,0 +1,42 @@
+[project]
+name = "l16-iterators-generators"
+version = "0.1.0"
+description = "L1.6 迭代器与生成器：for 的真实面目、yield 暂停语义与惰性管线"
+requires-python = ">=3.12"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "ruff>=0.12",
+    "pyright>=1.1",
+    "nodejs-wheel-binaries>=1.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["code", "exercises"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+extend-exclude = ["*.md"]  # 讲义代码块是手工对齐的教学代码，不参与 format
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+
+[tool.ruff.lint.isort]
+known-first-party = [
+    "iter_basics",
+    "pipeline",
+    "itertools_demo",
+    "oneshot",
+    "ex1_paginate",
+    "ex2_pipeline",
+    "ex3_oneshot",
+]
+
+[tool.pyright]
+include = ["code", "exercises"]
+extraPaths = ["code", "exercises"]
+typeCheckingMode = "basic"

@@ -1,0 +1,81 @@
+{#-
+  Override of material 9.7.7 partials/nav.html（升级 material 时需重新 diff 本文件）：
+  原样保留主侧栏标记，仅在 </nav> 后追加一段内联脚本——单元开合状态跨页记忆
+  （localStorage 记住用户展开的单元，换页恢复；所在单元始终展开）。
+  放在这里而不是 body 末尾的外挂 JS，是为了在首帧绘制前就把 checkbox 置好，
+  侧栏一次渲染到位，不出现「先只开所在单元、再动画补开记忆单元」的二次渲染。
+-#}
+{% import "partials/nav-item.html" as item with context %}
+{% set class = "md-nav md-nav--primary" %}
+{% if "navigation.tabs" in features %}
+  {% set class = class ~ " md-nav--lifted" %}
+{% endif %}
+{% if "toc.integrate" in features %}
+  {% set class = class ~ " md-nav--integrated" %}
+{% endif %}
+<nav class="{{ class }}" aria-label="{{ lang.t('nav') }}" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="{{ config.extra.homepage | d(nav.homepage.url, true) | url }}" title="{{ config.site_name | e }}" class="md-nav__button md-logo" aria-label="{{ config.site_name }}" data-md-component="logo">
+      {% include "partials/logo.html" %}
+    </a>
+    {{ config.site_name }}
+  </label>
+  {% if config.repo_url %}
+    <div class="md-nav__source">
+      {% include "partials/source.html" %}
+    </div>
+  {% endif %}
+  <ul class="md-nav__list" data-md-scrollfix>
+    {% for nav_item in nav.items %}
+      {% set path = "__nav_" ~ loop.index %}
+      {{ item.render(nav_item, path, 1) }}
+    {% endfor %}
+  </ul>
+</nav>
+<script>
+  (function () {
+    var nav = document.currentScript.previousElementSibling;
+    if (!nav || !nav.classList.contains("md-nav--primary")) return;
+    var KEY = "ns:nav-open";
+    function units() {
+      return Array.prototype.slice
+        .call(nav.querySelectorAll(".md-nav__item--nested"))
+        .map(function (li) {
+          var label = li.querySelector(":scope > label.md-nav__link");
+          return {
+            li: li,
+            name: label ? label.textContent.replace(/\s+/g, " ").trim() : "",
+            toggle: li.querySelector(":scope > input.md-nav__toggle"),
+          };
+        });
+    }
+    var open;
+    try {
+      open = JSON.parse(localStorage.getItem(KEY) || "[]");
+    } catch (e) {
+      open = [];
+    }
+    units().forEach(function (u) {
+      if (!u.toggle || !u.name) return;
+      u.toggle.checked = u.li.classList.contains("md-nav__item--active")
+        ? true
+        : open.indexOf(u.name) !== -1;
+    });
+    nav.addEventListener("change", function (e) {
+      var t = e.target;
+      if (!(t instanceof HTMLInputElement) || !t.classList.contains("md-nav__toggle")) return;
+      var names = units()
+        .filter(function (u) {
+          return u.toggle && u.toggle.checked;
+        })
+        .map(function (u) {
+          return u.name;
+        });
+      try {
+        localStorage.setItem(KEY, JSON.stringify(names));
+      } catch (e) {
+        /* 隐私模式等存储不可用时静默放弃记忆 */
+      }
+    });
+  })();
+</script>

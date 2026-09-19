@@ -1,0 +1,46 @@
+[project]
+name = "l22-tool-protocol"
+version = "0.1.0"
+description = "L2.2 工具协议：Pydantic 模型 → JSON Schema → 工具注册表 → 分发执行"
+requires-python = ">=3.12"
+dependencies = [
+    "httpx>=0.27",
+    "pydantic>=2",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "ruff>=0.12",
+    "pyright>=1.1",
+    "nodejs-wheel-binaries>=1.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["code", "exercises"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+extend-exclude = ["*.md"]  # 讲义代码块是手工对齐的教学代码，不参与 format
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+
+[tool.ruff.lint.isort]
+known-first-party = [
+    "client",
+    "env_loader",
+    "mock_endpoint",
+    "tools",
+    "finance",
+    "ex1_tool_schema",
+    "ex2_registry",
+    "ex3_dispatch",
+]
+
+[tool.pyright]
+include = ["code", "exercises"]
+extraPaths = ["code", "exercises"]
+typeCheckingMode = "basic"

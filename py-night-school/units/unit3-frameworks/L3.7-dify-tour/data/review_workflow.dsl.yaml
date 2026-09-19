@@ -1,0 +1,287 @@
+# 教学版 DSL 样例——按 dify App DSL 格式手工构造，非平台导出。
+# 格式依据：langgenius/dify@79effdd498#api/services/app_dsl_service.py 的 export_dsl()
+# （顶层 version/kind/app/workflow 四件与 workflow.graph 的形状），节点类型表见同仓
+# api/core/workflow/generator/prompts/planner_prompts.py（start/end/llm/knowledge-retrieval/
+# human-input/…均为平台真实类型名），human-input 节点字段见
+# api/core/workflow/nodes/human_input/entities.py 的 HumanInputNodeData。
+# 教学裁剪：保留 7 节点 / 5 边的最小报销审查流真实形状；prompt 全文、viewport、
+# 插件依赖等细节有删减；code 节点 format_note 是刻意保留的教学场景——画布上拉了
+# 节点没接线（孤立节点，静态审查可发现）。
+app:
+  description: 报销单审查最小流（教学样例：检索政策 -> LLM 预审 -> 人工复核表单）
+  icon: 🧾
+  icon_background: '#FFEAD5'
+  icon_type: emoji
+  mode: workflow
+  name: 报销单审查（教学样例）
+  use_icon_as_answer_icon: false
+kind: app
+version: 0.7.0
+workflow:
+  conversation_variables: []
+  environment_variables: []
+  features: {}
+  graph:
+    edges:
+      - data:
+          isInIteration: false
+          isInLoop: false
+          sourceType: start
+          targetType: knowledge-retrieval
+        id: edge-start-kb
+        source: start
+        sourceHandle: source
+        target: policy_kb
+        targetHandle: target
+        type: custom
+      - data:
+          isInIteration: false
+          isInLoop: false
+          sourceType: knowledge-retrieval
+          targetType: llm
+        id: edge-kb-llm
+        source: policy_kb
+        sourceHandle: source
+        target: precheck
+        targetHandle: target
+        type: custom
+      - data:
+          isInIteration: false
+          isInLoop: false
+          sourceType: llm
+          targetType: human-input
+        id: edge-llm-review
+        source: precheck
+        sourceHandle: source
+        target: review
+        targetHandle: target
+        type: custom
+      - data:
+          isInIteration: false
+          isInLoop: false
+          sourceType: human-input
+          targetType: end
+        id: edge-review-approve
+        source: review
+        sourceHandle: approve
+        target: end_ok
+        targetHandle: target
+        type: custom
+      - data:
+          isInIteration: false
+          isInLoop: false
+          sourceType: human-input
+          targetType: end
+        id: edge-review-reject
+        source: review
+        sourceHandle: reject
+        target: end_reject
+        targetHandle: target
+        type: custom
+    nodes:
+      - data:
+          desc: ''
+          selected: false
+          title: 开始
+          type: start
+          variables:
+            - label: 报销单号
+              max_length: 48
+              options: []
+              required: true
+              type: text-input
+              variable: claim_id
+        draggable: true
+        height: 90
+        id: start
+        position:
+          x: 50
+          y: 300
+        positionAbsolute:
+          x: 50
+          y: 300
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        type: custom
+        width: 244
+      - data:
+          dataset_ids:
+            - 6f1e2b7a-sample-dataset-policy
+          desc: ''
+          multiple_retrieval_config:
+            reranking_enable: false
+            score_threshold: null
+            top_k: 3
+          retrieval_mode: multiple
+          selected: false
+          title: 查政策知识库
+          type: knowledge-retrieval
+        draggable: true
+        height: 92
+        id: policy_kb
+        position:
+          x: 350
+          y: 300
+        positionAbsolute:
+          x: 350
+          y: 300
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        type: custom
+        width: 244
+      - data:
+          context:
+            enabled: true
+            variable_selector:
+              - policy_kb
+              - result
+          desc: ''
+          model:
+            completion_params:
+              temperature: 0.2
+            mode: chat
+            name: mock-model
+            provider: langgenius/openai_compatible/openai_compatible
+          prompt_template:
+            - role: system
+              text: '你是财务预审助手：结合检索到的报销政策，对 {{#start.claim_id#}} 给出
+                预审意见（含建议 decision 与理由），供人工复核参考。'
+          selected: false
+          title: LLM 预审
+          type: llm
+          variables: []
+        draggable: true
+        height: 98
+        id: precheck
+        position:
+          x: 650
+          y: 300
+        positionAbsolute:
+          x: 650
+          y: 300
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        type: custom
+        width: 244
+      - data:
+          desc: ''
+          form_content: '预审意见已生成，请复核报销单 {{#start.claim_id#}}：
+            {{#precheck.text#}}'
+          inputs:
+            - output_variable_name: comment
+              type: paragraph
+          selected: false
+          timeout: 36
+          timeout_unit: hour
+          title: 人工复核
+          type: human-input
+          user_actions:
+            - button_style: primary
+              id: approve
+              title: 同意
+            - button_style: default
+              id: reject
+              title: 驳回
+        draggable: true
+        height: 120
+        id: review
+        position:
+          x: 950
+          y: 300
+        positionAbsolute:
+          x: 950
+          y: 300
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        type: custom
+        width: 244
+      - data:
+          desc: ''
+          outputs:
+            - value_selector:
+                - review
+                - action
+              variable: decision
+            - value_selector:
+                - review
+                - comment
+              variable: reviewer_comment
+          selected: false
+          title: 审查通过
+          type: end
+        draggable: true
+        height: 90
+        id: end_ok
+        position:
+          x: 1250
+          y: 220
+        positionAbsolute:
+          x: 1250
+          y: 220
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        type: custom
+        width: 244
+      - data:
+          desc: ''
+          outputs:
+            - value_selector:
+                - review
+                - action
+              variable: decision
+            - value_selector:
+                - review
+                - comment
+              variable: reviewer_comment
+          selected: false
+          title: 审查驳回
+          type: end
+        draggable: true
+        height: 90
+        id: end_reject
+        position:
+          x: 1250
+          y: 400
+        positionAbsolute:
+          x: 1250
+          y: 400
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        type: custom
+        width: 244
+      - data:
+          code: "def main(claim_id: str) -> dict:\n    return {\"note\": f\"claim {claim_id} archived\"}\n"
+          code_language: python3
+          desc: 教学场景：拉出来还没接线的孤立节点
+          outputs:
+            - children: null
+              type: string
+              variable: note
+          selected: false
+          title: 生成归档备注（未接线）
+          type: code
+          variables:
+            - value_selector:
+                - start
+                - claim_id
+              variable: claim_id
+        draggable: true
+        height: 54
+        id: format_note
+        position:
+          x: 650
+          y: 520
+        positionAbsolute:
+          x: 650
+          y: 520
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        type: custom
+        width: 244

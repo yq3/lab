@@ -1,0 +1,57 @@
+[project]
+name = "l36-adk-python"
+version = "0.1.0"
+description = "L3.6 adk-python：全家桶形态——LlmAgent/FunctionTool/Runner/session.state/callback，外加 adk web 调试器与 eval 工具链导读"
+requires-python = ">=3.12"
+dependencies = [
+    "google-adk==2.9.0",
+    "litellm>=1.84",  # LiteLlm 模型适配层需要（google-adk[extensions] 全家太重，按需直装）
+    "pydantic>=2",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "ruff>=0.12",
+    "pyright>=1.1",
+    "nodejs-wheel-binaries>=1.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["code", "exercises"]
+addopts = "-q"
+filterwarnings = [  # adk 2.9.0 自身的两条无害公告：实验特性提示 + 内部 config 类弃用
+    "ignore:.*JSON_SCHEMA_FOR_FUNC_DECL.*:UserWarning",
+    "ignore:BaseAgentConfig is deprecated:DeprecationWarning",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+extend-exclude = ["*.md"]  # 讲义代码块是手工对齐的教学代码，不参与 format
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+
+[tool.ruff.lint.isort]
+known-first-party = [
+    "adk_review",
+    "advice",
+    "demo",
+    "demo_callback",
+    "demo_events",
+    "demo_eval",
+    "demo_schema",
+    "demo_state",
+    "mock_endpoint",
+    "mock_tools",
+    "review_rules",
+    "ex1_tool",
+    "ex2_state",
+    "ex3_guardrail",
+]
+
+[tool.pyright]
+include = ["code", "exercises"]
+extraPaths = ["code", "exercises"]
+typeCheckingMode = "basic"

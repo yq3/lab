@@ -1,0 +1,38 @@
+{
+  "note": "夜校明线「报销单审查」的 mock 单据。items_cents 为整数分（分是本教程的金额单位约定）；expect 字段是按 L0.1 规则算出的预期预审结果，L2 起由 agent 调用 preapprove() 复核，L5 毕业设计升级为审批流。",
+  "limits": {
+    "item_over_cents": 5000,
+    "total_over_cents": 500000
+  },
+  "expense_claims": [
+    {
+      "id": "CLM-2026-0001",
+      "submitter": "王工",
+      "purpose": "客户拜访：交通 + 工作餐",
+      "items_cents": [
+        1200,
+        3500,
+        2400
+      ],
+      "expect": "PASS"
+    },
+    {
+      "id": "CLM-2026-0002",
+      "submitter": "李工",
+      "purpose": "项目验收宴请（单餐超标）",
+      "items_cents": [
+        8800
+      ],
+      "expect": "REJECT:ITEM_OVER_LIMIT"
+    },
+    {
+      "id": "CLM-2026-0003",
+      "submitter": "赵工",
+      "purpose": "打车费冲账（录入了负数）",
+      "items_cents": [
+        -500
+      ],
+      "expect": "REJECT:INVALID_AMOUNT"
+    }
+  ]
+}

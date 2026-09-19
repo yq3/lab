@@ -1,0 +1,853 @@
+/* ==========================================================================
+   Python 夜校 · 在线讲义设计系统 v4 「素纸双主题」
+   --------------------------------------------------------------------------
+   一册素纸书：单一表面、零装饰零动效。浅色 = 素纸（默认，跟随系统），
+   深色 = 夜色，由读者在顶栏自选并记忆。Java 橙 / Python 蓝只承担信息
+   （对照表列、代码语言顶边、链接），琥珀只给灯卡与读数，宋体标题。
+   引擎 mkdocs-material 9.x；零图片零外链零动画（宪法）。
+   ========================================================================== */
+
+/* ---------- 令牌：浅色（素纸） ---------- */
+
+:root,
+[data-md-color-scheme="default"] {
+  --ns-bg: #ffffff;
+  --ns-bg-alt: #f6f5f0;
+  --ns-line: #e4e2d8;
+  --ns-line-soft: rgba(228, 226, 216, 0.6);
+  --ns-ink: #232936;
+  --ns-ink-2: #5a6072;
+  --ns-ink-3: #6d7280;
+  --ns-numeral: #dcd7c8;
+
+  --ns-code-bg: #f6f5ef;
+  --ns-code-fg: #333a49;
+
+  --ns-java: #a63e0b;
+  --ns-python: #1f6fb2;
+  --ns-java-wash: rgba(166, 62, 11, 0.05);
+  --ns-python-wash: rgba(31, 111, 178, 0.05);
+  --ns-lamp-ink: #8a5e0c;
+  --ns-lamp-wash: rgba(242, 193, 78, 0.16);
+  --ns-seal: #c14f3c;
+  --ns-grow: #3f7d4e;
+
+  --ns-serif: "Songti SC", "STSong", "Source Han Serif SC", "Noto Serif CJK SC", "SimSun", serif;
+  --md-text-font: "PingFang SC", "Hiragino Sans GB", "Source Han Sans SC", "Noto Sans CJK SC",
+    "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+  --md-code-font: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, "Liberation Mono",
+    monospace;
+
+  --md-default-bg-color: var(--ns-bg);
+  --md-primary-fg-color: var(--ns-bg);
+  --md-primary-bg-color: var(--ns-ink);
+  --md-accent-fg-color: var(--ns-python);
+  --md-typeset-color: var(--ns-ink);
+  --md-typeset-a-color: var(--ns-python);
+  --md-code-bg-color: var(--ns-code-bg);
+  --md-code-fg-color: var(--ns-code-fg);
+  --md-typeset-table-color: var(--ns-line);
+  --md-footer-bg-color: var(--ns-bg);
+  --md-footer-fg-color: var(--ns-ink-2);
+}
+
+/* ---------- 令牌：深色（夜） ---------- */
+
+[data-md-color-scheme="slate"] {
+  --ns-bg: #0d1322;
+  --ns-bg-alt: #131b2e;
+  --ns-line: #232f4e;
+  --ns-line-soft: rgba(35, 47, 78, 0.6);
+  --ns-ink: #dde4f2;
+  --ns-ink-2: #97a2ba;
+  --ns-ink-3: #838eab;
+  --ns-numeral: #2c3a5e;
+
+  --ns-code-bg: #0e1524;
+  --ns-code-fg: #ccd6ea;
+
+  --ns-java: #e8935a;
+  --ns-python: #8ec2f2;
+  --ns-java-wash: rgba(232, 147, 90, 0.07);
+  --ns-python-wash: rgba(142, 194, 242, 0.07);
+  --ns-lamp-ink: #f2c14e;
+  --ns-lamp-wash: rgba(242, 193, 78, 0.12);
+  --ns-seal: #d9776a;
+  --ns-grow: #7db88d;
+}
+
+/* ---------- 基底 ---------- */
+
+html,
+body {
+  overflow-x: clip;
+}
+body {
+  background: var(--ns-bg);
+}
+::selection {
+  background: var(--ns-lamp-wash);
+}
+:focus-visible {
+  outline: 2px solid var(--ns-lamp-ink);
+  outline-offset: 2px;
+}
+html {
+  scrollbar-width: thin;
+  scrollbar-color: var(--ns-line) var(--ns-bg);
+}
+
+/* ---------- 顶栏 / 侧栏 / 目录：安静的铅线骨架 ---------- */
+
+.md-header {
+  background: var(--ns-bg);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border-bottom: 1px solid var(--ns-line);
+  box-shadow: none;
+}
+.md-header__title {
+  font-family: var(--ns-serif);
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  font-size: 0.82rem;
+  color: var(--ns-ink);
+}
+/* 站名即回首页链接（header.html override）：不吃链接色、不下划线 */
+.md-header .md-header__topic a {
+  color: inherit;
+  text-decoration: none;
+}
+.md-header .md-header__topic a:hover {
+  color: var(--ns-python);
+}
+.md-search-button,
+.md-header__button .md-icon,
+.md-header__option .md-icon {
+  color: var(--ns-ink-2);
+}
+/* 顶栏搜索框：Material 桌面端是 26% 黑的灰胶囊，素纸下扎眼——静置与背景同色，
+   悬停用站点统一的 hover 浅纸色提供一点反馈 */
+.md-header .md-search__form {
+  background-color: var(--ns-bg);
+}
+.md-header .md-search__form:hover {
+  background-color: var(--ns-bg-alt);
+}
+/* 占位「搜索」二字（input 的 ::placeholder）：Material 配的是给深色主栏用的
+   浅色，衬素纸底不可见；搜索面板展开时的隐藏规则不受影响 */
+.md-header .md-search__input::placeholder {
+  color: var(--ns-ink-3);
+}
+.md-container {
+  background: transparent;
+}
+
+.md-main__inner,
+.md-header__inner {
+  max-width: 76rem;
+}
+
+.md-sidebar {
+  padding-top: 1.7rem;
+}
+.md-sidebar__scrollwrap {
+  max-height: calc(100vh - 5.4rem); /* 视口 − 顶栏(2.4rem) − 侧栏上边距(1.7rem) − 余量 */
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.md-sidebar--primary {
+  width: 11.8rem;
+}
+.md-nav {
+  font-size: 0.62rem;
+}
+.md-nav__title {
+  font-size: 0.68rem;
+  letter-spacing: 0.14em;
+  color: var(--ns-ink-3);
+}
+/* 抽屉（≤平板断点）：压掉 Material 的灰底厚标题条 */
+@media screen and (max-width: 76.1875em) {
+  .md-nav__title {
+    background: transparent !important;
+    box-shadow: none;
+  }
+}
+/* 桌面（≥同一断点）：两栏目录标题都是 sticky（主栏站名 / 右栏「目录」），
+   保留 Material 的实底 + 模糊光晕遮罩（条目上滚渐隐）——但光晕向四周
+   外扩 0.4rem，静置时会把紧贴标题的首条目虚化掉，故留出间距隔开 */
+@media screen and (min-width: 76.1875em) {
+  .md-nav--primary .md-nav__title,
+  .md-nav--secondary .md-nav__title {
+    background: var(--ns-bg);
+    box-shadow: 0 0 0.4rem 0.4rem var(--ns-bg);
+    margin-bottom: 0.7rem;
+  }
+}
+/* 单元折叠开关行（label.md-nav__link）沿用分组标题的粗体铅灰 */
+.md-nav--primary .md-nav__item--nested > .md-nav__link,
+.md-nav--primary .md-nav__title {
+  font-weight: 700;
+  color: var(--ns-ink-3);
+}
+/* 桌面：单元开合为瞬时切换（宪法零动画；换页时记忆单元的恢复也不做展开动效） */
+@media screen and (min-width: 76.1875em) {
+  .md-nav__toggle ~ .md-nav {
+    transition: none;
+  }
+}
+.md-nav--primary .md-nav__link {
+  color: var(--ns-ink-2);
+  margin: 0.14em 0.4em;
+  padding: 0.26em 0.6em;
+  border-radius: 7px;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+.md-nav--primary .md-nav__link:hover,
+.md-nav--primary .md-nav__link:focus {
+  color: var(--ns-ink);
+  background: var(--ns-bg-alt);
+}
+.md-nav--primary .md-nav__link--active,
+.md-nav--primary .md-nav__link--active:hover {
+  color: var(--ns-python);
+  background: var(--ns-python-wash);
+}
+.md-nav__link > .md-ellipsis {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 右侧本页目录：单行省略，不折行 */
+.md-sidebar--secondary {
+  width: 11.8rem;
+}
+.md-nav--secondary .md-nav__link {
+  display: flex;
+  align-items: center;
+  gap: 0.45em;
+  color: var(--ns-ink-2);
+  font-size: 0.6rem;
+  line-height: 1.5;
+  padding: 0.22em 0.5em;
+  margin: 0.05em 0;
+  border-radius: 6px;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+.md-nav--secondary .md-nav__link::before {
+  content: "";
+  flex: none;
+  width: 3px;
+  height: 1.1em;
+  border-radius: 2px;
+  background: transparent;
+  transition: background 0.15s ease;
+}
+.md-nav--secondary .md-nav__link:hover,
+.md-nav--secondary .md-nav__link:focus {
+  color: var(--ns-ink);
+}
+.md-nav--secondary .md-nav__link--active {
+  color: var(--ns-ink);
+  background: var(--ns-bg-alt);
+}
+.md-nav--secondary .md-nav__link--active::before {
+  background: var(--ns-python);
+}
+.md-nav--secondary .md-nav__item .md-nav__link .md-ellipsis {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---------- 正文排版 ---------- */
+
+.md-content__inner {
+  max-width: 40rem;
+  margin: 0 auto;
+  padding: 1.7rem 1.2rem 3rem;
+}
+/* Material 用 [dir=ltr] + 侧栏邻接选择器（0-5-1）强制 1.2rem 边距——同形后发压制，
+   让正文在左右等宽栏之间真正居中 */
+[dir] .md-sidebar--primary:not([hidden]) ~ .md-content > .md-content__inner,
+[dir] .md-sidebar--secondary:not([hidden]) ~ .md-content > .md-content__inner {
+  margin-left: auto;
+  margin-right: auto;
+}
+/* 侧栏标题里的回退 logo 图标同样去掉（站名文字即身份） */
+.md-nav .md-logo {
+  display: none;
+}
+.md-typeset {
+  font-size: 0.75rem;
+  line-height: 1.92;
+  letter-spacing: 0.012em;
+  color: var(--ns-ink);
+}
+.md-typeset p {
+  margin: 1.05em 0;
+}
+.md-typeset h1 {
+  margin: 0.4rem 0 1.6rem;
+  font-family: var(--ns-serif);
+  font-weight: 900;
+  font-size: 1.9rem;
+  line-height: 1.4;
+  letter-spacing: 0.015em;
+  color: var(--ns-ink);
+}
+.md-typeset h2 {
+  margin: 2.6rem 0 1rem;
+  font-family: var(--ns-serif);
+  font-weight: 900;
+  font-size: 1.42rem;
+  letter-spacing: 0.02em;
+  color: var(--ns-ink);
+}
+.md-typeset h3 {
+  margin: 1.9rem 0 0.7rem;
+  font-weight: 700;
+  font-size: 1.08rem;
+  color: var(--ns-ink);
+}
+.md-typeset h4 {
+  font-weight: 700;
+  color: var(--ns-ink);
+}
+.md-typeset strong {
+  color: var(--ns-ink);
+  font-weight: 700;
+}
+.md-typeset ul,
+.md-typeset ol {
+  margin: 0.9em 0;
+}
+.md-typeset li {
+  margin: 0.3em 0;
+}
+.md-typeset li::marker {
+  color: var(--ns-ink-2);
+}
+.md-typeset blockquote {
+  border-left: 1px solid var(--ns-line);
+  color: var(--ns-ink-2);
+  background: var(--ns-bg-alt);
+  border-radius: 0 8px 8px 0;
+  padding: 0.55em 1.1em;
+}
+.md-typeset hr {
+  margin: 2.4rem 0;
+  border-bottom: 1px solid var(--ns-line);
+}
+
+/* 行内代码 */
+.md-typeset code {
+  border: 1px solid var(--ns-line);
+  border-radius: 5px;
+  padding: 0.08em 0.36em;
+  font-size: 0.87em;
+  background: var(--ns-bg-alt);
+  color: var(--ns-ink);
+}
+
+/* 链接 */
+.md-typeset a:not(.ns-btn) {
+  color: var(--ns-python);
+  text-underline-offset: 0.26em;
+  text-decoration-thickness: 1px;
+}
+[data-md-color-scheme="default"] .md-typeset a:not(.ns-btn):hover {
+  color: #175a92;
+}
+[data-md-color-scheme="slate"] .md-typeset a:not(.ns-btn):hover {
+  color: #b3d5f8;
+}
+.md-typeset .headerlink {
+  color: var(--ns-ink-3);
+}
+.md-typeset .headerlink:hover {
+  color: var(--ns-lamp-ink);
+}
+
+/* ---------- 六段式：衬线幽灵数字 + 铅线 ---------- */
+
+.md-typeset h2.seg {
+  display: flex;
+  align-items: baseline;
+  gap: 0.55em;
+  margin: 3.1rem 0 1.1rem;
+  padding-bottom: 0.55rem;
+  border-bottom: 1px solid var(--ns-line);
+}
+.md-typeset h2.seg .segno {
+  flex: none;
+  font-family: var(--ns-serif);
+  font-size: 1.6em;
+  font-weight: 900;
+  line-height: 1;
+  color: var(--ns-numeral);
+  letter-spacing: 0.02em;
+}
+.md-typeset h2.seg .segno::before {
+  content: attr(data-n);
+}
+.md-typeset h2.seg .segtitle {
+  font-size: 0.95em;
+}
+.md-typeset h2.seg .headerlink {
+  order: 9;
+  margin-left: auto;
+}
+
+/* ---------- 表格：铅线 + 双语义列 ---------- */
+/* :not([class]) 与 Material 9.7 的表格底色规则（--md-default-bg-color）同形，
+   后加载即胜出——少了它表格底会脱离主题 */
+
+.md-typeset table:not([class]),
+.md-typeset table {
+  font-variant-numeric: tabular-nums;
+  display: table;
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  border: 1px solid var(--ns-line);
+  border-radius: 8px;
+  overflow: hidden;
+  font-size: 0.92em;
+  margin: 1.5em 0;
+  background: var(--ns-bg);
+}
+.md-typeset table th {
+  font-weight: 650;
+  color: var(--ns-ink-2);
+  background: var(--ns-bg-alt);
+  border: 0;
+  border-bottom: 1px solid var(--ns-line);
+  padding: 0.62em 0.9em;
+}
+.md-typeset table td {
+  border: 0;
+  border-bottom: 1px solid var(--ns-line-soft);
+  padding: 0.6em 0.9em;
+  color: var(--ns-ink);
+}
+.md-typeset table tr:last-child td {
+  border-bottom: 0;
+}
+.md-typeset table th + th,
+.md-typeset table td + td {
+  border-left: 1px solid var(--ns-line-soft);
+}
+.md-typeset table tbody tr:hover td {
+  background: var(--ns-bg-alt);
+}
+[data-md-color-scheme="slate"] .md-typeset table tbody tr:hover td {
+  background: #1a2540;
+}
+
+.jp-table {
+  margin: 1.6em 0;
+}
+.jp-table table {
+  margin: 0;
+}
+.jp-table[data-java-col="1"] th:nth-child(1),
+.jp-table[data-java-col="2"] th:nth-child(2) {
+  color: var(--ns-java);
+  background: var(--ns-java-wash);
+  box-shadow: inset 0 2px 0 var(--ns-java);
+}
+.jp-table[data-java-col="1"] td:nth-child(1),
+.jp-table[data-java-col="2"] td:nth-child(2) {
+  background: var(--ns-java-wash);
+}
+.jp-table[data-python-col="1"] th:nth-child(1),
+.jp-table[data-python-col="2"] th:nth-child(2) {
+  color: var(--ns-python);
+  background: var(--ns-python-wash);
+  box-shadow: inset 0 2px 0 var(--ns-python);
+}
+.jp-table[data-python-col="1"] td:nth-child(1),
+.jp-table[data-python-col="2"] td:nth-child(2) {
+  background: var(--ns-python-wash);
+}
+
+/* ---------- 代码块：随主题的原生底色 + 语言顶边 ---------- */
+
+.md-typeset .highlight {
+  border: 0;
+  border-radius: 8px;
+  margin: 1.4em 0;
+  background: var(--ns-code-bg);
+}
+[data-md-color-scheme="slate"] .md-typeset .highlight {
+  border: 1px solid var(--ns-line);
+}
+.md-typeset .highlight > pre {
+  margin: 0;
+  padding: 0.95em 1.2em;
+  border-radius: 8px;
+  background: transparent;
+}
+.md-typeset .highlight pre > code {
+  font-size: 0.7rem;
+  background: transparent;
+  border: 0;
+  color: var(--ns-code-fg);
+}
+/* 深色下 pygments 注释提亮（slate token 偏暗） */
+[data-md-color-scheme="slate"] .md-typeset .highlight .c,
+[data-md-color-scheme="slate"] .md-typeset .highlight .c1,
+[data-md-color-scheme="slate"] .md-typeset .highlight .cm,
+[data-md-color-scheme="slate"] .md-typeset .highlight .cs,
+[data-md-color-scheme="slate"] .md-typeset .highlight .ch,
+[data-md-color-scheme="slate"] .md-typeset .highlight .cd {
+  color: #7d8aac !important;
+  font-style: normal;
+}
+.md-typeset .language-java.highlight,
+.md-typeset .language-xml.highlight {
+  box-shadow: inset 0 2px 0 rgba(200, 100, 40, 0.55);
+}
+.md-typeset .language-python.highlight {
+  box-shadow: inset 0 2px 0 rgba(31, 111, 178, 0.55);
+}
+.md-typeset .language-bash.highlight,
+.md-typeset .language-sh.highlight,
+.md-typeset .language-shell.highlight,
+.md-typeset .language-powershell.highlight,
+.md-typeset .language-console.highlight {
+  box-shadow: inset 0 2px 0 var(--ns-line);
+}
+.md-typeset .highlight .md-clipboard {
+  color: var(--ns-ink-2);
+}
+
+/* ---------- 灯卡：「离毕业又近的一块」 ---------- */
+
+.final-note {
+  position: relative;
+  margin: 3.1rem 0 1.4rem;
+  padding: 1.4rem 1.6rem 1.5rem;
+  border: 1px solid var(--ns-line);
+  border-top: 2px solid var(--ns-lamp-ink);
+  border-radius: 8px;
+  background: var(--ns-lamp-wash);
+}
+.final-note h2 {
+  margin: 0 0 0.6rem;
+  font-family: var(--ns-serif);
+  font-size: 1.32rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  color: var(--ns-lamp-ink);
+  border: 0;
+}
+.final-note p:last-child {
+  margin-bottom: 0;
+}
+.final-note code {
+  background: var(--ns-bg);
+}
+
+/* 进度拼图 */
+.ns-cells {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0.5rem 0 1rem;
+}
+.ns-cells i {
+  width: 13px;
+  height: 13px;
+  border-radius: 3px;
+  background: var(--ns-bg-alt);
+  border: 1px solid var(--ns-line);
+}
+.ns-cells i.on {
+  background: var(--ns-lamp-ink);
+  border-color: var(--ns-lamp-ink);
+}
+.ns-cells-label {
+  font-variant-numeric: tabular-nums;
+  margin: 0 0 0.2rem;
+  font-family: var(--md-code-font);
+  font-size: 0.74rem;
+  letter-spacing: 0.14em;
+  color: var(--ns-ink-2);
+}
+
+/* ---------- 折叠 / 提示 / Tab：铅线卡片，语义色只给图标与标题 ---------- */
+/* Material 的 per-type 标题底色是 .md-typeset .note > summary（0-3-1），
+   统一以 scheme 前缀同特异性后发压制；类型类是 note/tip/success（无 admonition- 前缀） */
+
+.md-typeset .admonition,
+.md-typeset details {
+  border-radius: 8px;
+  border: 1px solid var(--ns-line);
+  background: var(--ns-bg-alt);
+  box-shadow: none;
+  font-size: 0.94em;
+}
+[data-md-color-scheme="default"] .md-typeset .admonition > .admonition-title,
+[data-md-color-scheme="default"] .md-typeset details > summary,
+[data-md-color-scheme="slate"] .md-typeset .admonition > .admonition-title,
+[data-md-color-scheme="slate"] .md-typeset details > summary {
+  border-radius: 7px 7px 0 0;
+  font-size: 0.86rem;
+  background: transparent;
+  border-bottom: 1px solid var(--ns-line-soft);
+  border-top: 0;
+  color: var(--ns-ink-2);
+}
+.md-typeset details[open] > summary {
+  border-radius: 7px 7px 0 0;
+}
+.md-typeset .admonition-title code,
+.md-typeset summary code {
+  background: var(--ns-bg);
+}
+.md-typeset .note.admonition,
+.md-typeset details.note {
+  border-color: rgba(31, 111, 178, 0.4);
+}
+[data-md-color-scheme="default"] .md-typeset .note > .admonition-title,
+[data-md-color-scheme="default"] .md-typeset .note > summary,
+[data-md-color-scheme="slate"] .md-typeset .note > .admonition-title,
+[data-md-color-scheme="slate"] .md-typeset .note > summary {
+  color: var(--ns-python);
+}
+.md-typeset .tip.admonition,
+.md-typeset details.tip {
+  border-color: rgba(154, 106, 16, 0.45);
+}
+[data-md-color-scheme="default"] .md-typeset .tip > .admonition-title,
+[data-md-color-scheme="default"] .md-typeset .tip > summary,
+[data-md-color-scheme="slate"] .md-typeset .tip > .admonition-title,
+[data-md-color-scheme="slate"] .md-typeset .tip > summary {
+  color: var(--ns-lamp-ink);
+}
+.md-typeset .success.admonition,
+.md-typeset details.success {
+  border-color: rgba(63, 125, 78, 0.45);
+}
+[data-md-color-scheme="default"] .md-typeset .success > .admonition-title,
+[data-md-color-scheme="default"] .md-typeset .success > summary,
+[data-md-color-scheme="slate"] .md-typeset .success > .admonition-title,
+[data-md-color-scheme="slate"] .md-typeset .success > summary {
+  color: var(--ns-grow);
+}
+.md-typeset .warning.admonition,
+.md-typeset .danger.admonition,
+.md-typeset details.warning,
+.md-typeset details.danger {
+  border-color: rgba(193, 79, 60, 0.45);
+}
+[data-md-color-scheme="default"] .md-typeset .warning > .admonition-title,
+[data-md-color-scheme="default"] .md-typeset .warning > summary,
+[data-md-color-scheme="default"] .md-typeset .danger > .admonition-title,
+[data-md-color-scheme="default"] .md-typeset .danger > summary,
+[data-md-color-scheme="slate"] .md-typeset .warning > .admonition-title,
+[data-md-color-scheme="slate"] .md-typeset .warning > summary,
+[data-md-color-scheme="slate"] .md-typeset .danger > .admonition-title,
+[data-md-color-scheme="slate"] .md-typeset .danger > summary {
+  color: var(--ns-seal);
+}
+
+.md-typeset .tabbed-set {
+  border: 1px solid var(--ns-line);
+  border-radius: 8px;
+  background: var(--ns-bg-alt);
+  padding: 0.2rem 0.9rem 0.9rem;
+  margin: 1.4em 0;
+}
+.md-typeset .tabbed-set > .tabbed-labels {
+  border-bottom: 1px solid var(--ns-line);
+  box-shadow: none;
+  background: transparent;
+}
+.md-typeset .tabbed-set > .tabbed-labels > .tabbed-label {
+  font-size: 0.78rem;
+  padding: 0.7em 1.1em;
+  color: var(--ns-ink-2);
+}
+.md-typeset .tabbed-set > .tabbed-labels > .tabbed-label.tabbed--active {
+  color: var(--ns-python);
+  font-weight: 650;
+}
+
+/* ---------- 页脚 ---------- */
+
+.md-footer {
+  background: var(--ns-bg);
+  border-top: 1px solid var(--ns-line);
+}
+.md-footer-meta {
+  background: transparent;
+}
+.md-copyright {
+  color: var(--ns-ink-3);
+}
+.md-copyright a {
+  color: var(--ns-ink-2);
+}
+
+/* ==========================================================================
+   扉页（落地页，hide: navigation + toc）——书的前封面
+   ========================================================================== */
+
+.md-content__inner:has(> .ns-cover) {
+  max-width: 44rem;
+  padding-top: 2.6rem;
+}
+.ns-cover {
+  text-align: center;
+  padding: 2.2rem 0 2.8rem;
+}
+.md-typeset .ns-title {
+  margin: 0;
+  font-size: clamp(2.5rem, 6vw, 3.6rem);
+  font-weight: 900;
+  line-height: 1.2;
+  letter-spacing: 0.03em;
+  color: var(--ns-ink);
+}
+/* 特异性须压过 .md-typeset p 的 margin（0-1-1），否则 margin:auto 失效、块贴左 */
+.md-typeset .ns-sub {
+  margin: 1.3rem auto 0;
+  max-width: 34em;
+  font-size: clamp(0.98rem, 1.4vw, 1.1rem);
+  line-height: 2;
+  color: var(--ns-ink-2);
+  /* 扉页整体居中，但多行简介按行居中会左右参差——块居中 + 两端对齐 */
+  text-align: justify;
+}
+.ns-meta {
+  margin: 1.6rem 0 0;
+  font-family: var(--md-code-font);
+  font-size: 0.76rem;
+  letter-spacing: 0.14em;
+  color: var(--ns-ink-3);
+}
+.ns-cta {
+  margin: 2rem 0 0;
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 0.9rem;
+}
+/* 安静的按钮：铅线描边 / 墨色实底，无光无影 */
+.md-typeset a.ns-btn {
+  display: inline-block;
+  padding: 0.62em 1.7em;
+  border-radius: 8px;
+  border: 1px solid var(--ns-line);
+  color: var(--ns-ink);
+  font-size: 0.95rem;
+  font-weight: 600;
+  background: transparent;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+.md-typeset a.ns-btn:hover,
+.md-typeset a.ns-btn:focus-visible {
+  color: var(--ns-python);
+  border-color: var(--ns-python);
+}
+.md-typeset a.ns-btn--primary {
+  background: var(--ns-ink);
+  border-color: var(--ns-ink);
+  color: var(--ns-bg);
+}
+.md-typeset a.ns-btn--primary:hover,
+.md-typeset a.ns-btn--primary:focus-visible {
+  background: var(--ns-ink-2);
+  border-color: var(--ns-ink-2);
+  color: var(--ns-bg);
+}
+.ns-btn:focus-visible,
+.ns-btn--primary:focus-visible {
+  outline: 2px solid var(--ns-python);
+  outline-offset: 3px;
+}
+
+/* ---------- 六特色：凡例式目次 ---------- */
+
+.ns-feats {
+  margin: 1.4rem 0 0;
+  border-top: 1px solid var(--ns-line);
+}
+.ns-feat {
+  display: grid;
+  grid-template-columns: minmax(8.5em, 12em) 1fr;
+  gap: 1.4rem;
+  align-items: baseline;
+  padding: 1.05rem 0.2rem;
+  border-bottom: 1px solid var(--ns-line-soft);
+}
+.ns-feat h4 {
+  margin: 0;
+  font-family: var(--ns-serif);
+  font-size: 1.08rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  color: var(--ns-ink);
+}
+.ns-feat p {
+  margin: 0;
+  color: var(--ns-ink-2);
+  font-size: 0.88rem;
+  line-height: 1.95;
+  text-align: justify;
+}
+
+/* ---------- 移动端 ---------- */
+
+@media screen and (max-width: 76.1875em) {
+  .md-sidebar--secondary {
+    display: none;
+  }
+}
+@media screen and (max-width: 59.9375em) {
+  .md-typeset {
+    font-size: 0.84rem;
+  }
+  .md-typeset h1 {
+    font-size: 1.5rem;
+  }
+  .ns-feat {
+    grid-template-columns: 1fr;
+    gap: 0.35rem;
+    padding: 0.95rem 0.1rem;
+  }
+  .md-typeset h2.seg {
+    flex-wrap: wrap;
+  }
+  .md-typeset h2.seg .segno {
+    font-size: 1.25em;
+  }
+}
+
+/* ---------- 打印：纸的书稿形态 ---------- */
+
+@media print {
+  .md-header,
+  .md-sidebar,
+  .md-footer,
+  .md-content__inner .md-clipboard,
+  .md-top-nav {
+    display: none !important;
+  }
+  body,
+  .md-content__inner {
+    background: #fff;
+    color: #000;
+    max-width: none;
+    box-shadow: none;
+  }
+  .md-typeset table,
+  .md-typeset .highlight {
+    box-shadow: none;
+  }
+}
