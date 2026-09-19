@@ -786,6 +786,7 @@ html {
   color: var(--ns-ink-2);
   font-size: 0.88rem;
   line-height: 1.95;
+  text-align: justify;
 }
 
 /* ---------- 移动端 ---------- */
