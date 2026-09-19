@@ -126,6 +126,19 @@ html {
 .md-header__option .md-icon {
   color: var(--ns-ink-2);
 }
+/* 顶栏搜索框：Material 桌面端是 26% 黑的灰胶囊，素纸下扎眼——静置与背景同色，
+   悬停用站点统一的 hover 浅纸色提供一点反馈 */
+.md-header .md-search__form {
+  background-color: var(--ns-bg);
+}
+.md-header .md-search__form:hover {
+  background-color: var(--ns-bg-alt);
+}
+/* 占位「搜索」二字（input 的 ::placeholder）：Material 配的是给深色主栏用的
+   浅色，衬素纸底不可见；搜索面板展开时的隐藏规则不受影响 */
+.md-header .md-search__input::placeholder {
+  color: var(--ns-ink-3);
+}
 .md-container {
   background: transparent;
 }
