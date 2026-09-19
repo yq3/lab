@@ -48,7 +48,7 @@
   plan_gate（校验+白名单）→ executor（确定性步进）→ drafter（LLM 叙述建议单）→
   submit（送审，interrupt 暂停）→ 审批 API（once/always/reject）→ 执行门（fail-closed）→
   终态」。LLM 的动态性只出现在两个节点（规划与叙述），数字全部代码算，审批与执行全部代码门。
-- **零 key 底线不变**：mock 端点继续服役；FastAPI 的验收走 httpx 内存态直连（ASGI transport，不起真端口、不开防火墙），SSE 在内存里照样逐事件断言；真实端点与 `uvicorn` 起服务都是 `--real` 可选加餐。
+- **零 key 底线不变**：mock 端点继续服役。本学段新增 Web 层：FastAPI（Python 的异步 Web 框架，≈ Spring Boot + WebMVC）的验收走 httpx（Unit 2 用过的 HTTP 客户端）进程内直连——不经网络、不起端口，SSE 逐事件断言照做。真实端点（L5.1 的 `--real`）与起真服务（L5.2 Step 5 的 uvicorn）是各自独立的两项可选加餐。
 - **Java 桥在这里换挡**：前四个学段用 Java 概念解释 Python，本学段开始反向——每课的
   Java↔Python 对照表把模式的 Java 对应物给全（spring-ai-alibaba graph / langgraph4j 的
   真实 API 名），这些对照在 L5.4 汇总成你亲手填写的 **JAVA-MAPPING.md**：毕业后把 PoC

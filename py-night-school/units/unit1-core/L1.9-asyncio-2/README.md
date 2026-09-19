@@ -3,7 +3,7 @@
 > 昨晚你建立了事件循环 / 协程 / 让出点三个模型，写出第一个 async 主流程，诊断了「假 await」与
 > 「阻塞全场」两类事故——`gather` 还只是实验里的对照组。今晚给它配上工程化的全套护栏：`gather`
 > 保序、`wait_for` 预算、`Semaphore` 限流、取消这场「协作式异常」怎么接；最后写异步生成器把 token
-> 一段段吐出来——L2.1 手撕 SSE 流时你会认出它。
+> 一段段吐出来——L2.1 手撕 SSE（Server-Sent Events，HTTP 服务器推送流——Spring 的 SseEmitter）流时你会认出它。
 
 ## 1. 本课目标
 
@@ -70,7 +70,7 @@ async with asyncio.timeout(0.1):  # 3.11+ 上下文管理器版：块内统一�
     result = await fetch(region)
 ```
 
-超时的内部机制就是**取消**：`wait_for` 到点后对内部任务 `cancel()`。而取消的语义是本课最要紧的新心智：
+超时的内部机制就是**取消**：`wait_for` 到点后对内部任务 `cancel()`（你没 `create_task` 也有任务可取消——`wait_for` 会先把协程包成 Task；`await` 裸协程时事件循环在幕后也这么干）。而取消的语义是本课最要紧的新心智：
 **`CancelledError` 在任务的下一个让出点被注入**。由此两条推论：
 
 - 协作式：循环里没有 `await` 就没有落点——纯 CPU 循环杀不死（Step 6B 实测）；
@@ -205,6 +205,8 @@ mock 模型按词吐出审批意见，消费端一段段拼——把 `CHUNK_DELA
 ```bash
 uv run python code/cancel_demo.py
 ```
+
+> **IDE 侧**：Step 1 的 gather 实验同样可 Debug——两个任务函数首行各打断点，Frames 同屏出现两个任务帧，「同时在飞」具象化；本步则在 `except asyncio.CancelledError` 行打断点，亲眼看取消异常落在哪个 await 点、清理后 re-raise 的走向。
 
 ```text
 == A：有 await 的任务，取消干净落地 ==

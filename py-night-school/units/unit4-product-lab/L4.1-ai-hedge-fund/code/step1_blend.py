@@ -49,7 +49,7 @@ def main() -> None:
 
     print("[四] 权重即话语权：同一组票，把 budget 的权重 0.5 抬到 3.0")
     heavy = weighted_vote(votes, {**weights, "budget": 3.0})
-    print(f"  conviction = (0.8 + 3.0*(-0.6) + 0.9) / 5.5 = {heavy.conviction:.4f}  <- 反对票拿到了话语权")
+    print(f"  conviction = (0.8 + 3.0*(-0.6) + 0.9) / 5.0 = {heavy.conviction:.4f}  <- 反对票拿到了话语权")
     print("  产品对应物：mandate YAML 里的 model_weights（deep-value.yaml 给 graham 2.0 同款操作）")
 
 

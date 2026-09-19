@@ -42,7 +42,7 @@ uv run pyright
 | `Future.get` / `CompletableFuture.allOf` 收集结果 | 超步边界上的 reducer 归并 | Java 没有这一步：合并策略不在回调里，**声明在字段的 Annotated 第二参上** |
 | `Stream.flatMap` + `collect(groupingBy)` | Send 扇出 + 自定义 dict reducer | 形状同构，但归并发生在**超步边界**（BSP），不是流的水槽 |
 | `CyclicBarrier` / `Phaser` 屏障 | superstep（超步） | 引擎替你await所有人；屏障上做的是 reducer 合并，Java 屏障不带语义 |
-| Spring Boot 自动装配（约定优于配置） | `prebuilt.create_react_agent` | 一个调用换掉整张手装图；代价是节点名/v2 语义藏在默认参数里（§5） |
+| Spring Boot 自动装配（约定优于配置） | `prebuilt.create_react_agent` | 一个调用换掉整张手装图；代价是节点名/v2 语义藏在默认参数里（v2＝version 参数的默认取值，路由语义与 v1 不同，§5 讲） |
 | 模板方法模式里的钩子 | `pre_model_hook` / `post_model_hook` | 扩展点参数化——但主流程（循环十行）不再归你 |
 
 ### 2.1 Send：运行时才确定的并行边
@@ -56,7 +56,7 @@ def fan_out(state: BatchState) -> list[Send]:
     return [Send("review", {"claim_id": cid, "ep_url": ...}) for cid in state["claim_ids"]]
 ```
 
-`Send(node, arg)` 只有两个关键参（源码 `types.py:704-792`，ast 口径 29 行——一个小类而已）：
+`Send(node, arg)` 只有两个关键参（源码 `types.py:704-792`，按 Step 3 的 ast 口径数得 29 行——一个小类而已）：
 目标节点名 + **该分支的专属状态**。第二参是核心自由度：分支的输入状态可以和主图状态
 完全不同——批量审查里每个 worker 只带自己那单的 `claim_id` 和**专属 mock 端点 URL**（§3 Step4
 会看到这个设计如何救了剧本策略）。
@@ -106,13 +106,13 @@ agent = create_react_agent(model, tools=[check_budget, verify_invoice], prompt=S
 ```
 
 一行换掉 L3.2 的整张图。框架替你做的四个约定：模型**不需要手动 `bind_tools`**（内部绑）；
-工具传**裸函数**（ToolNode 自动包成 StructuredTool，参数校验白送）；`prompt` 传 str 自动包
+工具传**裸函数**（ToolNode 自动包成 StructuredTool（langchain 的工具对象：函数+schema 打包，与 L3.1 `@function_tool` 的产物同位），参数校验白送）；`prompt` 传 str 自动包
 `SystemMessage` 垫在消息史最前；状态 schema 用内置 `AgentState`（messages + remaining_steps）。
 代价：节点叫什么、条件边怎么路由、每个 tool_call 是不是独立 Send 任务——这些**藏在默认参数里**，
 不读源码不知道（所以有 §3 Step3 的源码导读与 ex3 的事实题）。
 
 诚实边界：prebuilt 1.1.0 里 `create_react_agent` 已挂弃用告警（官方迁名
-`langchain.agents.create_agent`，骨架相同，V2.0 才移除）——本课读的正是这个经典装配的
+`langchain.agents.create_agent`，骨架相同，prebuilt 2.0 才移除）——本课读的正是这个经典装配的
 源码，demo 里用 warnings 过滤它的改名单（行为不受影响）。读懂数十行核心之后，
 你换任何一个「一行装配」的框架都不再是黑盒。
 
@@ -191,12 +191,17 @@ uv run python code/demo_trace.py CLM-2026-0003
 
 ### Step 3：源码导读 chat_agent_executor.py（30 分钟）
 
-本地克隆 `~/develop/opensource/langgraph`（HEAD `e539ac122`，prebuilt 是独立包
-`langgraph-prebuilt 1.1.0`，本课钉 `==1.1.0`）。行数结论全部用 `code/count_loc.py` 复现
+本地克隆 `~/develop/opensource/langgraph` 并锚定 `e539ac122`（prebuilt 是独立包
+`langgraph-prebuilt 1.1.0`，本课钉 `==1.1.0`；克隆约定见 unit3 README 学法说明——
+Windows 学员放到 `%USERPROFILE%\develop\opensource`，`count_loc.py` 已支持 `~` 路径）。
+行数结论全部用 `code/count_loc.py` 复现
 （ast 口径：解析模块 → 取目标函数/类行区间 → 剔 docstring 行区间 → 数非空非注释行；
 本目录已带这个工具，禁止 grep 管道口径）：
 
 ```bash
+mkdir -p ~/develop/opensource   # Windows: New-Item -ItemType Directory -Force
+git clone https://github.com/langchain-ai/langgraph.git ~/develop/opensource/langgraph
+git -C ~/develop/opensource/langgraph checkout e539ac122
 uv run python code/count_loc.py def ~/develop/opensource/langgraph/libs/prebuilt/langgraph/prebuilt/chat_agent_executor.py create_react_agent
 uv run python code/count_loc.py def ~/develop/opensource/langgraph/libs/prebuilt/langgraph/prebuilt/chat_agent_executor.py create_react_agent.call_model
 uv run python code/count_loc.py def ~/develop/opensource/langgraph/libs/prebuilt/langgraph/prebuilt/chat_agent_executor.py create_react_agent.acall_model
@@ -211,6 +216,8 @@ uv run python code/count_loc.py range ~/develop/opensource/langgraph/libs/prebui
 #create_react_agent.should_continue: lines=831-859 loc=27 (docstring 已剔除)
 #861-1002: loc=111
 ```
+
+> **IDE 侧（PyCharm / IDEA + Python 插件）**：用 PyCharm 直接打开（或 Attach 为附加内容根）克隆的 langgraph 仓：Structure 面板定位 `create_react_agent`，⌘B / ⌥F7（Windows：Ctrl+B / Alt+F7；IDEA 同款键）在 `should_continue`、`Send`、`ToolNode` 之间跳转，比 grep 舒适一个量级。**反提醒**：别用断点看扇出并发——断点会把并行的 Send 分支串行化，时序证据当场消失；本课的并发体感靠输出取证。
 
 **它比想象短**：414 loc 里，真正的 ReAct 心脏只有三件事（模型节点计 sync 版：27 + 27 +
 111，合计 165 loc）——

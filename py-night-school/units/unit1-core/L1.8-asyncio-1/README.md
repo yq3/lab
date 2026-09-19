@@ -20,7 +20,7 @@ openai-agents 的 `Runner.run()`、MCP client 的工具调用全是协程。不�
 **完成判据**：本目录下三条命令同时全绿——
 
 ```bash
-uv run pytest          # 练习验收全绿（发货态：讲义示例绿 + 练习按 TODO 设计内红）
+uv run pytest          # 做完后练习全绿（发货态＝刚 clone 时：讲义示例绿、练习 TODO 未填是设计内的红）
 uv run ruff check .    # 无 lint 违规
 uv run pyright         # 无类型错误
 ```
@@ -30,8 +30,8 @@ uv run pyright         # 无类型错误
 ### 2.1 两种并发世界观：本课最重要的一张表
 
 Java 世界里你已经拥有三种并发写法：线程池 + `Future`、`CompletableFuture` 装配、虚拟线程。asyncio 与它们
-目标相同（IO 密集任务的高并发），机制相反。**与虚拟线程的对照是全课的锚点**——两者都让你「用同步的写法
-拿到高并发」，但「让出」的位置完全不同：虚拟线程把让出藏在 JVM 里，asyncio 把让出写进语法里。
+目标相同（IO 密集任务的高并发），机制相反。**与虚拟线程的对照是全课的锚点**——两者都让你写**顺序命令式代码**
+拿到高并发（不写回调、不装配算子链），但「让出」的位置完全不同：虚拟线程把让出藏在 JVM 里，asyncio 把让出写进语法里。
 
 | 维度 | Java 平台线程/线程池 | Java 虚拟线程（Loom） | asyncio 协程 |
 |---|---|---|---|
@@ -81,7 +81,7 @@ Netty 跑的是回调（`channelRead`），asyncio 跑的是协程（`await` 处
 `async def` 定义的是**协程函数**；**调用它不执行任何函数体，只是返回一个协程对象**——一张「待办单」。
 这是 Java 里不存在的东西：Java 方法调用即执行，最接近的形态是拿到一个没调 `run()` 的 `Runnable`。
 
-实测（本课 Step 3的真实输出）：
+实测（本课 Step 3 的真实输出）：
 
 ```python
 async def review(claim_id: str) -> str: ...
@@ -221,6 +221,8 @@ uv run python code/blocking_disaster.py
 uv run python code/yield_point.py
 ```
 
+> **IDE 侧**：在 `await asyncio.sleep(0)` 行打断点、Debug 跑——Frames 面板里两个协程帧轮流成为当前帧，这就是「让出点」的肉眼版（PyCharm 对 asyncio 默认启用 Async 调试模式，协程按颜色分组）。
+
 ```text
 窗口A 处理第 1 单
 窗口B 处理第 1 单
@@ -259,7 +261,7 @@ uv run pyright
 
 ## 5. Java 直觉陷阱
 
-### 陷阱一：协程未 await（「假 await」)
+### 陷阱一：协程未 await（「假 await」）
 
 - **现象**：调用了 async 函数，但忘了 `await`——什么都没发生，功能静默失效；唯一的线索是解释器回收协程对象时
   的 `RuntimeWarning: coroutine ... was never awaited`。更阴的是协程对象是真值、能打印、能当参数传——
@@ -281,7 +283,7 @@ uv run pyright
   ② pyright 的 `reportUnusedCoroutine` 检查能静态抓住裸调用（本课工具链已默认开启——Step 3 里那行
   `# pyright: ignore[reportUnusedCoroutine]` 正是先关掉它才能演示事故）；③ 不打算跑的协程显式 `close()`。
 
-### 陷阱二：time.sleep 毒害（「阻塞全场」)
+### 陷阱二：time.sleep 毒害（「阻塞全场」）
 
 - **现象**：async 函数里一句 `time.sleep(0.3)`，全场所有任务被冻结 0.3 秒——并发消失、超时误报、
   心跳停止，且没有任何报错指向肇事者（Step 4：总耗时 0.406s，两个 0.1s 的任务连起步都被推迟）。

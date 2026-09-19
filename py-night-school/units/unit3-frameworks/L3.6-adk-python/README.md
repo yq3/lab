@@ -40,7 +40,7 @@ uv run pyright
 | Spring 的 `${placeholder}` 配置注入 | instruction 里的 `{var}` 占位符 | 占位符在**每次模型请求前**从 session.state 填充——提示词是模板，会话状态是变量 |
 | Servlet Filter / Interceptor 的 preHandle | `before_model_callback` | 返回 truthy 即短路（模型请求都不发）；Java 对照返回 false 不走后续链——同一件事的两种拼写 |
 | SLF4J 门面 + 各日志实现 | LiteLlm + litellm 多供应商层 | adk 不直连任何厂商，模型字符串 `openai/gpt-4o` 前缀是 litellm 的路由记号，由 litellm 翻译到各端点 |
-| JUnit + 测试夹具自己搭 | `AgentEvaluator` + eval set + 指标 | 评估是框架的一层：actual/expected Invocation 对 + 确定性指标（轨迹比对）+ LLM-as-judge 指标 |
+| JUnit + 测试夹具自己搭 | `AgentEvaluator` + eval set + 指标 | 评估是框架的一层（Step 5 详讲：轨迹比对 + 裁判模型打分） |
 
 ### 2.1 全家桶 vs 库：形态差到底差在哪
 
@@ -174,6 +174,8 @@ uv run python code/demo_callback.py
 L3.1 guardrail 的 adk 拼写。验收断言不是「回答像被拦了」，而是 `ep.requests == []`——
 拦截发生在网络调用之前，这是离线可证的。
 
+> **IDE 侧（PyCharm / IDEA + Python 插件）**：在 `before_model_callback` 函数体内打断点、Debug 跑 `demo_callback.py`——断点命中且 `ep.requests` 为空，「框架在看不见的地方调你的函数」有了证物。注意分工：`adk web` 是框架级调试器（管运行时事件流与会话），IDE 断点管你自己的装配与 callback 代码，两者互补。
+
 ### Step 5：eval 工具链与 `adk web`（导读 + 加餐，30 分钟）
 
 ```bash
@@ -286,9 +288,9 @@ uv run pyright
 
 | 能力 | mini-agent（Unit 2） | adk 给了什么 | 锁定代价 |
 |---|---|---|---|
-| agent 循环 | 有，81 行亲手写 | `LlmAgent` + flows 全内建 | 循环语义黑盒化：预算、终止、消息装配都在框架深处 |
+| agent 循环 | 有，81 行亲手写 | `LlmAgent` 全内建（flows——adk 的编排件——课程不展开） | 循环语义黑盒化：预算、终止、消息装配都在框架深处 |
 | 工具注册表 | 有，L2.2 手写 schema | FunctionTool 从签名+docstring 自动生成 | docstring 成为 API 的一部分，改一个字模型行为就变 |
-| 结构化输出 | 有，L2.4 校验回喂重试 | output_schema / set_model_response 工具路线 | 走框架的 schema 管道，出问题时得读 _output_schema_processor |
+| 结构化输出 | 有，L2.4 校验回喂重试 | 框架的 output_schema 参数 | 本课未展开，官方文档有 |
 | guardrail | 写在循环体最前面 | 四类 callback 挂点 | 回调执行顺序与短路语义绑定框架版本 |
 | 会话与状态 | 无（messages 列表，跑完即丢） | Session + state + 可插拔 SessionService | 换存储学它的服务抽象；state 前缀作用域是 adk 私有词汇 |
 | 调试器 | 无（print 大法） | `adk web` 事件流可视化 | 代码必须长在 adk 的目录约定上才被调试器认 |

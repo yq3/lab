@@ -62,7 +62,7 @@ uv run pyright
 逐课归位：L4.1 停在 ③、L4.2 停在 ②、本课到 ④⑤。光谱的结论值得抄进你的笔记本：
 **① 只是文案，任何合规声称不能建立在这**；② 是输入卫生；③④⑤ 职能不同必须齐备——
 ③管「量」、④管「权」（谁能批多少、授权有效期）、⑤管「不可逆动作的最后一道门」。
-映射到报销付款域（dimensions 官方映射原话）：「高金额不可逆（付款）无论前面用什么拓扑，
+映射到报销付款域（课程调研的领域映射结论）：「高金额不可逆（付款）无论前面用什么拓扑，
 终点必须是 proposal 无权 + 代码门裁决 + mandate 授权 + 哈希链问责」。
 
 ### 2.2 fail-closed vs fail-open：门的两种脾气
@@ -140,6 +140,8 @@ Java 人最该带走的一句：**给 agent 读的合同对象不要留可利用
   查不到                              → 标记保留，NEEDS_MANUAL_REVIEW 等人
   —— "Resolve ... by exact identity, never by resubmission"（产品 sdk_order_gate.py 恢复函数 docstring 原话）
 ```
+
+（os.replace 是原子重命名 ≈ `Files.move(..., ATOMIC_MOVE)`：要么旧文件要么新文件，没有半截。）
 
 为什么标记必须**先于**提交落盘：标记写失败时你还没碰外部世界（安全地拒）；反过来就存在
 「款已付出、本地毫无记录」的崩溃窗口——对账连 ref_id 都不知道。`ref_id` 是幂等键（对版
@@ -222,7 +224,6 @@ today: now=2026-09-16T12:00:00+00:00, 已付 2 笔共 240000 分
 | 5 | 杠杆（资金≤0→attempted=inf） | 日次数（付款域无杠杆，裁掉杠杆/资金镜像） | quantitative |
 | 6 | 日次数 | 授权过期（产品放在门 ceremony，本课收进链尾） | quantitative→structural |
 | 7/8 | 资金防线 / universe 地板（裁掉） | — | — |
-| — | — | 授权过期（同上第 6 查） | structural |
 
 两个刻意保留的细节：`type(x) is not int` 连 bool 一起拒（bool 是 int 子类——著名的坑）；
 `today` 参数注入「现在 + 当日已付清单」，检查链**绝不自己取时钟**（对版产品 manifest
@@ -351,19 +352,15 @@ uv run pytest code/
 
 ### Step 5（可选加餐）：去读产品原文，把 check_mandate 抄进你自己的域
 
-克隆仓库（SSH），锚定本课路标的 commit：
+克隆仓库，锚定本课路标的 commit：
 
 ```bash
-git clone git@github.com:HKUDS/Vibe-Trading.git ~/develop/opensource/Vibe-Trading
+mkdir -p ~/develop/opensource
+git clone https://github.com/HKUDS/Vibe-Trading.git ~/develop/opensource/Vibe-Trading
+git -C ~/develop/opensource/Vibe-Trading checkout f84b2977
 ```
 
-```bash
-cd ~/develop/opensource/Vibe-Trading
-```
-
-```bash
-git checkout f84b2977
-```
+（Windows：按 unit3 README 的克隆约定放到 `%USERPROFILE%\develop\opensource`，`mkdir` 换 `New-Item -ItemType Directory -Force`）
 
 阅读顺序与跳读地图（行数是 wc -l 口径）：先 `agent/src/live/mandate/model.py`（148 行，
 四件套全貌，10 分钟）→ `agent/src/live/enforcement.py`（800 行，**只精读 check_mandate
@@ -374,6 +371,8 @@ append_record；跳过导出与轮转）→ `agent/src/live/pending_action.py`�
 #execute_live_order（1116 行，只看 ceremony 顺序）。本地建分支，把 check_mandate 抄改到
 你自己的域（科目/限额换掉），照 `test_mandate_enforcement.py` 的 per-limit 思想写一组
 pytest——「改造说明 + 截图/日志」留给单元里程碑，本课不强制。
+
+> **IDE 侧**：Git 菜单 → Checkout Revision… 即 `git checkout` 的按钮版；把 `enforcement.py` 抄进自己域用 Refactor → Copy File；自写的 per-limit 测试点 gutter ▶ 单跑。顺带：800 行的 enforcement.py 精读本身也靠 Structure 面板 + 代码折叠。
 
 ## 4. 练习（本课过关点）
 

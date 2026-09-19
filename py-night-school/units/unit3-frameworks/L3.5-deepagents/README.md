@@ -8,7 +8,7 @@
 
 ## 1. 本课目标
 
-抽象光谱走到第三站。L3.1 的 SDK 说「我只给你原语，循环自己搭」；L3.2–L3.4 的
+抽象光谱走到第三站。L3.1 的 SDK 说「原语给你，循环在 Runner 里——薄得能看穿」；L3.2–L3.4 的
 langgraph 说「图画出来，我按图跑」；今晚的 deepagents 说「**连图都别画了——
 一行 `create_deep_agent`，我把整个工作环境发给你**」。完成后你能：
 
@@ -109,12 +109,12 @@ Advice                                                      ← response_format=
 - 内置 8 件的工厂清单：`middleware/filesystem.py:1859`（tool_factories）+ `task`
   由 `middleware/subagents.py` 的 `_build_task_tool`（577 行起）装配——`task` 工具
   本体在 832 行 `StructuredTool.from_function(name="task", ...)` 落地；
-- `execute` 不在其中：它要求 backend 实现 SandboxBackendProtocol，默认的
+- `execute` 不在其中（backend＝虚拟文件系统的存储实现，Step 2 详讲）：它要求 backend 实现 SandboxBackendProtocol，默认的
   `StateBackend` 不满足（`graph.py:637` 默认 `StateBackend()`）；
 - **自动追加 general-purpose 子代理**：不管你声明没声明自己的子代理，都会往 `task`
   目录塞一个 general-purpose——本课 demo 声明了 invoice-specialist，目录里照样多出
-  general-purpose（讲义区测试断言的正是这个更强事实）；想收掉它得显式干预：harness
-  profile 关掉 `general_purpose_subagent.enabled`，或自己声明同名 spec 覆盖
+  general-purpose（讲义区测试断言的正是这个更强事实）；想收掉它得显式干预：自己声明
+  同名 spec 覆盖（官方 README 的 subagents 配置段有例子）
   （判断在 `graph.py:796`，默认 spec 在 `middleware/subagents.py:456`）；
 - **递归预算默认 9999**（`graph.py:971`）——对照 L2.3 的 `max_turns` 纪律：harness
   默认「不设限」，预算责任回到你手里；
@@ -128,6 +128,8 @@ Advice                                                      ← response_format=
 先 `uv sync`。共享件（advice / mock_tools / review_rules / mock_endpoint）六课对版
 （L3.1–L3.6 字节相同），`test_contract.py` 五课对版（L3.1/L3.2/L3.4/L3.5/L3.6 字节
 相同）；本课新增 `demo.py`（契约入口）与四个 Step 演示脚本，产出全部可复现。
+
+> **IDE 侧（PyCharm / IDEA + Python 插件）**：PyCharm 打开本课目录、解释器选 uv 建的 `.venv`（L0.1 Step 7 那套，之后几课沿用）；想看虚拟文件系统的内部结构，就在 `demo_fs.py` 的 invoke 返回处打断点，Variables 里 `result["files"]` 一目了然。
 
 ### Step 1：harness 跑通离线 demo（15 分钟）
 

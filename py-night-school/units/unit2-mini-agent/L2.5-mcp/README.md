@@ -60,6 +60,8 @@ MCP（Model Context Protocol）把「工具」变成**独立进程提供的服�
 └────────────────────┘                     └─────────────────────┘
 ```
 
+JSON-RPC：用 JSON 表示请求/响应的轻量 RPC 协议，一行一条消息——可以理解为『HTTP+JSON 去掉 HTTP 的样子』。
+
 协议三锚点（server 传输 / 握手协商 / 发现与 schema）的 Java 对照已收进开头的全课总表。
 
 工具的**作者体验**几乎没变：`@server.tool()` 装饰器 + docstring 描述 + 类型标注出
@@ -159,6 +161,8 @@ uv run python code/finance_server.py
 
 它看起来卡住了——`server.run("stdio")` 在等 client。Ctrl+C 退出，进 Step 2 让 client
 来敲门。
+
+> **IDE 侧（两个防困惑点）**：① 直接 Run `finance_server.py` 时 Run 窗口「卡住」是正常的（server 在等 stdin），红色 Stop 按钮就是那个 Ctrl+C；② 在 server 代码里打断点、Debug 跑 client **不会命中**——server 是 `stdio_client` 拉起的独立子进程，主调试器不附加；要单步 server 逻辑，对 `code/test_server.py`（in-process 路线）打断点跑 pytest Debug。
 
 ### Step 2：client 三步走（10 分钟）
 
@@ -282,8 +286,9 @@ uv run pyright
 - MCP 官方规范（协议原文：传输、生命周期、工具/资源/提示词原语）：
   https://modelcontextprotocol.io/specification 
 - modelcontextprotocol/python-sdk@65c614e48#src/mcp/server/mcpserver/server.py —— 官方 SDK
-  的 server 实现本体（1.x 时代叫 FastMCP，2.x 改名 MCPServer——这个路径名是改名前的
-  活化石）；`@server.tool()` 装饰器怎么从签名生成 schema，答案在这个目录里。
+  的 server 实现本体（1.x 时代叫 FastMCP、住 `src/mcp/server/fastmcp/`，2.x 整体改名搬进
+  `mcpserver/`——旧路径在本 commit 已无残留，网上 `from mcp.server.fastmcp import FastMCP`
+  的老教程全部失效）；`@server.tool()` 装饰器怎么从签名生成 schema，答案在这个目录里。
 - modelcontextprotocol/python-sdk@65c614e48#src/mcp/server/mcpserver/tools/base.py ——
   Tool 对象与 `input_schema` 的生成逻辑：L2.2「Pydantic → JSON Schema」的同族实现。
 - modelcontextprotocol/python-sdk@9972c21aa#src/mcp/client/session.py —— client 会话

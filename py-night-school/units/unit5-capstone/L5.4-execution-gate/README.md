@@ -21,7 +21,7 @@
 - 跑通**三条主链路**（demo_final，里程碑集成测试的雏形）：①审批暂停→恢复→门 ALLOW→
   payment.executed；②拒绝回环→新审批单（content_hash 变）→批准→过门；③紧合同超限→
   门不付款→gate.denied + ESCALATE 终态；
-- 收口 **JAVA-MAPPING.md**（≥10 个模式、四列表、核实过再写——克隆里没有的老实写「需自建」）。
+- 收口 **JAVA-MAPPING.md**（≥10 个模式、四列的表、核实过再写——克隆里没有的老实写「需自建」）。
 
 **完成判据**：本目录下三条命令同时全绿（`exercises/` 是设计内的 TODO 红）——
 
@@ -315,6 +315,8 @@ advice**（链路③ 是 `REJECT:GATE_REAUTH_REQUIRED`——枚举码告诉你�
 **账本**（压轴——当日已付清单是 `ledger:2026-09-16` 聚合上 payment.executed 的投影）。
 这三段就是里程碑要长成的 pytest 集成测试（断言点全在 `code/test_final.py` 里，搬过去扩）。
 
+> **IDE 侧**：Debug 跑 `demo_final.py`，断点打在 `gate.check_intent` 入口与 execute 节点——亲眼看七查的短路顺序（幕 2 的双违单停在黑名单）与 ALLOW/DENY/PAUSE 分派：先肉眼取证，再写毕业断言。
+
 ### Step 4：JAVA-MAPPING.md 带读（15 分钟）
 
 打开 `code/JAVA-MAPPING.md` 通读一遍，重点看三类行：
@@ -338,7 +340,7 @@ uv run pytest code/
 ```
 
 80 个讲义区测试 = 门 21（逐查单测七查、三态覆盖 meta「11 种 reason_code 齐 + 三态齐 +
-表 11 行」、fail-closed 参数化 None/负数/字符串金额/bool/缺字段、短路顺序双违单、clamp
+ex1 骨架内的 11 行覆盖表」、fail-closed 参数化 None/负数/字符串金额/bool/缺字段、短路顺序双违单、clamp
 两态与「裁不动」边界）+ 图接线 8（interrupt payload 形态、批准恢复过门付款、**假指纹整单
 DENY**、紧合同 PAUSE 升额码、拒绝回环新 hash、封顶双哨兵、schema 声明 meta）+ 三链路端到端
 5（链路①②③ + 图签名变化→run_key 变化 + run_audited 门事件与缓存命中）+ 四单回归 6
@@ -357,7 +359,7 @@ uv run python -c "from hints import hint; print(hint('ex1', 1))"
 
 | 题 | 文件 | 考察 |
 |---|---|---|
-| ex1 | `exercises/ex1_gate.py` | 检查链补全：统一入口（不可解析即 DENY）+ 定量三查（clamp 语义：超限裁到上限/剩余额度继续查、笔数不可裁）；验收含每查「只破这项」、覆盖型 meta（11 种 reason_code 齐、三态齐、表 11 行）、短路顺序（黑名单先于限额的双违单）、fail-closed 参数化（None/负数/字符串金额/bool 金额/缺字段/脏账本） |
+| ex1 | `exercises/ex1_gate.py` | 检查链补全：统一入口（不可解析即 DENY）+ 定量三查（clamp 语义：超限裁到上限/剩余额度继续查、笔数不可裁）；验收含每查「只破这项」、覆盖型 meta（11 种 reason_code 齐、三态齐、ex1 骨架内的 11 行覆盖表）、短路顺序（黑名单先于限额的双违单）、fail-closed 参数化（None/负数/字符串金额/bool 金额/缺字段/脏账本） |
 | ex2 | `exercises/ex2_wire.py` | 门入图（复用讲义区真件 `gate.check_intent`）：execute 三出口接线（ALLOW 记账+paid_cents+事件 / DENY/PAUSE 写 gate_reject 交哨兵分码）+ route_after_execute；验收含链路①付款在账、链路③超限未付款且终态 ESCALATE、**审批 hash 不匹配整单 DENY**、clamp 裁剪值、最坏链不炸（RECURSION_LIMIT 足够） |
 | ex3 | `exercises/ex3_mapping.py` | 开放设计题·诚实降级：JAVA-MAPPING.md 的校验器（四列齐 + Java 列非空 + TODO 报未填）与行数统计；测试只查结构与统计，不硬造内容判分。**学员任务在文档里**：把 `code/JAVA-MAPPING.md` 的 4 行 TODO 补全（对照本地克隆核实），完整对照版在 `solution/JAVA-MAPPING.md`（行尾 golden answer） |
 

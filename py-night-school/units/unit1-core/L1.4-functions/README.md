@@ -75,6 +75,7 @@ Python 每个参数都有名字，调用时可以用 `参数名=` 点名传递�
 
 ```python
 def create_claim(claim_id: str, submitter: str, items_cents: list[int] = []): ...
+# （这个 = [] 只为演示「默认值在 def 时求值」——可变默认的雷本课 §5 专讲，别学这个写法）
 
 
 create_claim("CLM-2026-0001", "王工", [1200])  # 全位置：可以
@@ -151,7 +152,7 @@ Python lambda 就是一个**只能写单个表达式**的函数对象——不�
 为什么有 `def` 还需要它：省掉「为用一次的小函数起名 + 占两行」的仪式。
 社区惯例：lambda 的身体只能是一个表达式，写到条件表达式（`x if cond else y`）就是公认的复杂度上限，
 再复杂就老老实实 `def`——有名字的函数才好测试、好在 traceback 里认人。
-（PEP 8 本身只禁止把 lambda 赋值给名字当变量用；这条上限是经验法则，不是规范条文。）
+（PEP 8＝Python 官方编码风格规范，≈ Java 的 Code Conventions；它本身只禁止把 lambda 赋值给名字当变量用；这条上限是经验法则，不是规范条文。）
 
 ### 2.5 闭包：函数记住了出生环境
 
@@ -237,7 +238,7 @@ Function<String, Integer> intBin = s -> Integer.parseInt(s, 2);   // Java 没有
 
 打开 `code/preapprove_rules.py`：L0.1 的三连 `if` 拆成 `RULES` 列表里的三个函数，
 `preapprove` 只负责「按序找第一个非 None」。注意两处细节：`Rule` 类型别名让列表签名
-可读；`describe_rules()` 用 `__name__` 拿函数自己的名字。
+可读（`Rule = Callable[...]` 是赋值式类型别名——Java 没有对应物，只能重复写全名；Python 一行缩写）；`describe_rules()` 用 `__name__` 拿函数自己的名字。
 
 ```bash
 uv run pytest code/test_preapprove_rules.py
@@ -315,11 +316,11 @@ uv run python -c "from hints import hint; print(hint('ex1', 1))"
 
 | 题 | 文件 | 考察 |
 |---|---|---|
-| ex1 | `exercises/ex1_rule_chain.py` | 规则序列版 preapprove：与 L0.1 同口径用例验收 |
+| ex1 | `exercises/ex1_rule_chain.py` | 规则序列版 preapprove：与 L0.1 同一套用例验收 |
 | ex2 | `exercises/ex2_closures.py` | `make_greeter` + `make_counter`（必须 `nonlocal`） |
 | ex3 | `exercises/ex3_report.py` | keyword-only 报表函数 + `**kwargs` 透传 |
 
-三题的验收口径：
+三题的验收标准：
 
 - ex1 的用例表含冲突优先级（脏数据 > 单笔 > 合计）与边界（恰好等于上限应 PASS），覆盖
   由 meta 断言机器判定；另有一个**注入测试**——往 `RULES` 头部插一条规则、行为必须立刻变。
@@ -327,7 +328,7 @@ uv run python -c "from hints import hint; print(hint('ex1', 1))"
 - ex2 双保险：源码检查（`make_counter` 函数体里必须出现 `nonlocal`）+ 行为检查（两个
   计数器状态隔离，全局变量写法当场穿帮）；
 - ex3 调用形态断言：`unit` / `bracket` 按位置传必须 TypeError（`*` 栏在调用时拦截），
-  签名形态由 `inspect` 判定；透传遇到不认识的键必须让 TypeError 自然炸出。
+  签名形态由 `inspect`（标准库的运行时反射模块，≈ Java reflection 读方法参数）判定；透传遇到不认识的键必须让 TypeError 自然炸出。
 
 验收（三条同时全绿 = 本课毕业）：
 
@@ -362,6 +363,8 @@ uv run pyright
   ruff 的 B006 规则就是为它存在的（`code/pitfall_demos.py` 里那行 noqa 标的就是它）。
 - **修复与纪律**：默认 `None` + 体内现做——`items = items if items is not None else []`。
   一辈子照此办理，坑就与你无关。
+
+> **IDE 侧**：Debug 跑两轮 `add_item_buggy` 调用，在 Watches 面板加表达式 `id(items)`——两次同一个 id，「默认值跨调用共享」当场可见，比读三遍文字直观。
 
 ### 陷阱二：late binding 闭包
 
@@ -399,6 +402,6 @@ uv run pyright
 ## 离毕业又近的一块
 
 今晚的 `RULES` 列表就是毕业设计 L5.4「fail-closed 执行门」的执行骨架（限额 clamp /
-黑名单 / 频次三态裁决按序装配）；`invoke_tool` 的 `func(**params)` 是 L2.2 工具协议
+黑名单 / 频次三态裁决（毕业设计执行门的门语义，L5.4 见）按序装配）；`invoke_tool` 的 `func(**params)` 是 L2.2 工具协议
 「模型选工具 → 摊开参数 → 调 Python 函数」的那一行；闭包与 nonlocal 则是 L1.5 重试装饰器
 （装饰器 = 闭包的亲儿子）的一半地基。函数当值用，是从今晚开始到毕业一路的底层通货。

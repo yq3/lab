@@ -90,6 +90,8 @@ def timing(func):  # 第 1 层：收被装饰函数
     return wrapper  # 交出替身
 ```
 
+（片段省略了 `from time import perf_counter` 等头部 import——完整版在 `code/timing.py`，抄进 Console 前先补上。）
+
 **为什么需要 `functools.wraps`**：不写它，`f.__name__` 会变成 `'wrapper'`、`__doc__` 变 `None`——元数据被替身顶掉了。演示：
 
 ```python
@@ -168,7 +170,9 @@ R = TypeVar("R")  # 返回值形状：单个类型占位符
 def timing(func: Callable[P, R]) -> Callable[P, R]: ...
 ```
 
-3.12 也支持把类型参数直接写在 def 上（`def timing[P, R](...)`，PEP 695，长得像 Java 的 `<T>`）——但它在 3.12 与 `collections.abc.Callable` 组合时有运行时 bug（3.13 才修），
+（`from typing import ...` 头部见 code 文件。）
+
+3.12 也支持把类型参数直接写在 def 上（`def timing[P, R](...)`，长得像 Java 的 `<T>`），但 3.12 有兼容坑（3.13 才修）——
 而框架源码（如 §6 的 crewAI `@tool`）清一色老式写法，所以我们跟框架走——夜校全程
 只用 `Callable[P, R]` 老式写法，不会踩到这个 bug。本课只要求**看懂**，不要求默写。
 
@@ -186,6 +190,8 @@ uv run python code/timing.py
 
 看两件事：①「路线一」不用 `@`，手工 `audited = timing(preapprove)`——这就是语法糖的展开形态；②把 `@wraps(func)` 注释掉再跑，`audited.__name__` 变成 `wrapper`。
 
+> **IDE 侧**：在 `return wrapper` 行与 `wrapper` 体内各设一个断点、Debug 跑——先停在 return wrapper（只有一次，def 时刻），之后每次调用才停进 wrapper：「装饰时刻 vs 调用时刻」两个时间点亲眼看。
+
 ### Step 2 registry：框架 `@tool` 的秘密
 
 ```bash
@@ -194,6 +200,8 @@ uv run python code/registry.py
 
 `TOOLS` 字典 + `@tool` 装饰器 + 两个报销工具。输出里「已注册工具」那两行，**我们从头到尾没手动往 TOOLS 塞过东西**——登记发生在 `def` 被执行的瞬间（2.2 的推论 1）。
 然后 `run_tool("check_item_limit", ...)` 用字符串按名调用：这就是 agent 框架「模型选了工具名 -> 注册表查表 -> 调用函数」的原型。§6 会带你去看 langchain / crewAI 里它的工业版。
+
+> **IDE 侧**：在 `TOOLS[func.__name__] = func` 一行打断点、Debug 跑 `code/registry.py`——任何工具函数被调用**之前**断点就命中两次（两个 `def` 各一次），Variables 里 TOOLS 从空长到两条。「装饰器在 def 时刻执行」从断言变成证物。
 
 ### Step 3 带参 retry 装饰器
 
@@ -241,9 +249,9 @@ uv run pyright
 
 ## 5. Java 直觉陷阱：丢元数据
 
-这是装饰器课的必摔跤，命名化之后我们叫它「丢元数据」。
+这是装饰器课的必摔跤——我们给它起名「丢元数据」，以后提到秒懂。
 
-- **现象**：被装饰后 `f.__name__` 变成 `'wrapper'`、`f.__doc__` 变 `None`。平时无感，一旦有别的东西**按名字或文档找函数**，当场爆炸：pytest 的参数化 id、序列化工具按 `__name__` 导出、日志格式化 `%(__name__)s`、以及框架的 `@tool`——它靠 docstring 生成给模型看的工具描述。
+- **现象**：被装饰后 `f.__name__` 变成 `'wrapper'`、`f.__doc__` 变 `None`。平时无感，一旦有别的东西**按名字或文档找函数**，当场爆炸：pytest 的参数化 id、以及框架的 `@tool`——它靠 docstring 生成给模型看的工具描述。
 - **最小复现**：
 
   ```python

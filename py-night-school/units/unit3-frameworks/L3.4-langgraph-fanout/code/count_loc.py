@@ -79,7 +79,7 @@ def main() -> None:
         print(__doc__)
         sys.exit(2)
     mode, path_str = sys.argv[1], sys.argv[2]
-    path = Path(path_str)
+    path = Path(path_str).expanduser()  # 支持 ~ 家目录写法：Windows 的 PowerShell 不为参数展开 ~
     if not path.is_file():
         print(f"file not found: {path}")
         sys.exit(1)

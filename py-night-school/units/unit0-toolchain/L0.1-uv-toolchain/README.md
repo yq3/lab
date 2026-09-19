@@ -44,8 +44,11 @@ uv run pyright         # 无类型错误
 | `[project.dependencies]` | `<dependencies>`（compile scope） |
 | `[dependency-groups] dev = [...]` | `<scope>test</scope>` 依赖 |
 | `uv.lock`（自动生成，提交进仓） | （Maven 无直接对应；相当于 enforcer 插件钉死的版本树） |
+| `[tool.ruff]` 等工具配置段 | `<build><plugins>` 里的插件配置（lint / 测试工具的开关住这里） |
 
 语言运行模型差异（解释执行、GIL、动态类型）属于 Unit 1 的正餐，今晚不展开——你只需要知道：**工具链层面，Python 世界已经收敛到 uv 一把梭**，这是我们今晚配它的原因。
+
+顺带说清 uv 的身世，免得你查资料时困惑：Python 官方的老牌安装器叫 **pip**（≈ 没有 lock 文件时代的 Maven，装的位置一样是 site-packages），网上教程到处是 `pip install`；**uv** 是 Astral 公司用 Rust 写的兼容替代——装包快得多、多了项目管理与锁定（pyproject + uv.lock）。外部资料里的 `pip install xxx`，在夜校等价于 `uv add xxx`。ruff 也出自 Astral 同一家——这套工具链的故事是闭环的。
 
 ## 3. 动手代码
 
@@ -80,7 +83,7 @@ $env:UV_DEFAULT_INDEX = "https://pypi.tuna.tsinghua.edu.cn/simple"      # 当前
 setx UV_DEFAULT_INDEX "https://pypi.tuna.tsinghua.edu.cn/simple"        # 持久化（新终端生效）
 ```
 
-Node 也提前说清：pyright 需要 Node 运行时，本项目已把 `nodejs-wheel-binaries` 钉进 dev 依赖——Node 随 PyPI 安装（走上面的镜像），不会去 nodejs.org 直连下载；你机器上若已有 Node，pyright 也会直接复用。
+Node 也提前说清：pyright 需要 Node 运行时，本项目已把 `nodejs-wheel-binaries` 钉进 dev 依赖——Node 随 PyPI 安装（走上面的镜像；wheel＝Python 的 jar：PyPI 分发的预编译包格式，这个包就是把 Node 打成了 wheel），不会去 nodejs.org 直连下载；你机器上若已有 Node，pyright 也会直接复用。
 
 ### Step 3 理解本课项目（5 分钟）
 
@@ -90,6 +93,7 @@ Node 也提前说清：pyright 需要 Node 运行时，本项目已把 `nodejs-w
 L0.1-uv-toolchain/
 ├── pyproject.toml     # 依赖与工具配置（对应 pom.xml）
 ├── uv.lock            # 锁定的依赖版本树（已提交，保证你和我跑的完全一致）
+├── .python-version    # 本项目用的解释器版本号（uv 据此自动装/选，≈ .sdkmanrc 的角色）
 ├── .env.example       # 模型端点三变量约定（L2 才真正用）
 ├── code/              # 讲义示例：报销预审纯函数 + 它的测试
 ├── exercises/         # 你的练习（本课过关的地方）
@@ -100,6 +104,8 @@ L0.1-uv-toolchain/
 cd units/unit0-toolchain/L0.1-uv-toolchain
 uv sync               # 创建 .venv 并按 uv.lock 安装（≈ mvn dependency:resolve + test scope）
 ```
+
+**`.venv/` 是什么（虚拟环境 101）**——Java 里每个应用自带 classpath、jar 各归各的项目，天然隔离；Python 传统上第三方包全装进**全局唯一**的一份 `site-packages`，多项目共享，A 要 pytest 8、B 要 pytest 7 就打架。虚拟环境（venv）就是解法：**每个项目一份私有的依赖目录 `.venv/`**（uv 每课自动建好）。你在别人的教程里会看到 `source .venv/bin/activate`（Windows 是 `.\.venv\Scripts\Activate.ps1`）——那是把 `.venv` 里的 python 手动提到 PATH 最前的「激活」仪式；**夜校从不需要 activate**，因为 `uv run` 每次都替你做了同一件事：先确认 `.venv` 与 uv.lock 同步，再用 **`.venv` 里那个**解释器执行命令。这也解释了为什么各课命令永远是 `uv run …` 而不是裸 `python …`（Step 7 的终端↔IDE 对照表里，「IDE 右键 Run」之所以等价，也是因为 IDE 用的正是 `.venv` 解释器）。
 
 想体验「从零建项目」的话，找个临时目录依次跑 `uv init demo`、`cd demo`、`uv add --dev pytest`——感受与 `mvn archetype:generate` 的对应关系。
 
@@ -117,7 +123,7 @@ uv run ruff check code/    # 示例代码无违规
 uv run ruff format --check code/   # 格式符合规范
 ```
 
-看一眼 `code/test_budget.py` 里的 `@pytest.mark.parametrize`——它对应 JUnit 5 的 `@ParameterizedTest`，但只需要一个装饰器 + 一个元组表。（`@` 是装饰器语法，L1.5 才主讲——今晚照抄这一行即可。）
+看一眼 `code/test_budget.py` 里的 `@pytest.mark.parametrize`——它对应 JUnit 5 的 `@ParameterizedTest`，但只需要一个装饰器 + 一个元组表（元组＝形如 `("A", 1)` 的不可变序列，Java 没有对应物）。（`@` 是装饰器语法，L1.5 才主讲——今晚照抄这一行即可。）
 
 ### Step 5 体验 ruff 当老师（5 分钟）
 
@@ -125,6 +131,8 @@ uv run ruff format --check code/   # 格式符合规范
 uv run ruff format .       # 一键格式化（≈ Spotless apply）
 uv run ruff check .        # 全仓检查——现在 exercises/ 里有练习 3 留的 3 处违规，这正是你要修的
 ```
+
+ruff 是什么：Astral 公司（uv 的同一家）用 Rust 写的**第三方** linter + formatter——Checkstyle + Spotless 合体且快两个数量级；它不是标准库，作为 dev 依赖装进本项目、由 uv 管。
 
 ### Step 6 pyright 类型检查（5 分钟）
 
@@ -161,9 +169,32 @@ uv run python code/debug_demo.py
 | 选择 | 适合谁 | 备注 |
 |---|---|---|
 | VS Code + Python 扩展（Pylance） | 想轻快、贴近 Python 社区主流 | **Pylance 就是 pyright 的微软发行版**——终端里跑的 pyright 检查和 IDE 里是同一套引擎，工具链故事闭环；再装 ruff 官方扩展，format/lint 直接进 IDE |
-| PyCharm（Community 版够用） | 重度 IDEA 用户 | 键位与操作习惯零迁移，JetBrains 全家桶体验；装 ruff 插件补齐 lint/format |
+| PyCharm（Community 版够用） | 重度 IDEA 用户 | 键位与操作习惯零迁移；pytest 集成开箱即用；装 Ruff 插件补齐 lint/format（社区维护——ruff 官方文档编辑器页指路的那款）。IDEA Ultimate 装 Python 插件是同款体验 |
 
-共同动作：用 IDE 打开本课目录（`L0.1-uv-toolchain/`），`.venv` 解释器会被自动识别；右键 `code/test_budget.py` → Run / Debug（图形化跑 pytest）；给 `code/debug_demo.py` 打一个图形化断点跑一遍——刚才 pdb 的 `n`/`s`/`c`/`p` 在这里全是按钮。
+**PyCharm 接入四步**（2025.1 起 PyCharm 原生支持 uv）：
+
+1. File → Open 打开**本课目录**（`L0.1-uv-toolchain/`，不是仓库根——每课是独立项目，一课一窗口最省心）；
+2. Settings → Project → Python Interpreter 确认解释器指向 uv 建的 `.venv`（没识别就 Add Interpreter → uv 类型；老版本手动选 Existing → `.venv/bin/python`，Windows 是 `.venv\Scripts\python.exe`）；
+3. 打开 `code/test_budget.py`——测试函数行首 gutter 有绿色三角，点它就是图形化跑 pytest（≈ IDEA 的 JUnit 面板：失败可单条重跑、断言 diff 直接展示）；
+4. 给 `code/debug_demo.py` 某行点 gutter 打断点 → Debug：刚才 pdb 的 `n`/`s`/`c`/`p` 在这里全是按钮，`p 变量名` 对应调试面板的 Variables / Evaluate Expression。
+
+**VS Code 接入三步**：打开课目录 → 右下角选择解释器 `.venv` → 装 Python 与 Ruff 两个扩展；测试用左侧 Testing 面板，断点同样点 gutter。
+
+之后 29 课的终端命令在 IDE 里都有按钮版——**验收判据永远是终端三命令**，下表只是让你日常写代码时不必来回切终端（Pro 版独有能力已标注，Community 可完成全部主线）：
+
+| 你在终端敲的 | PyCharm 里的按钮版 | VS Code 里的对应 |
+|---|---|---|
+| `uv sync` | 打开课目录自动识别 uv 项目并提示同步 | 选解释器时自动创建/同步 |
+| `uv add …` | Python Packages 工具窗口搜索安装（写入 pyproject） | 命令行跑（低频） |
+| `uv run python demo.py` | 右键文件 → Run ▶（用的就是 `.venv` 解释器） | 右上角 Run ▶ |
+| 带参数运行（`--real`、单号等，后续课） | Run → Edit Configurations → Parameters | launch.json 的 args |
+| `uv run python -m 包.模块` | Run Config 的 Launch option 选 Module name | launch.json 的 module |
+| `uv run python -c "…"`（hints 同理） | 底部 Python Console 直接敲（≈ jshell 常驻） | Interactive Window |
+| `uv run pytest` | 测试文件/用例行首 gutter 绿三角 | Testing 面板 |
+| `uv run ruff check .` | Ruff 插件 → Problems 面板 + quick-fix | Ruff 扩展同 |
+| `uv run ruff format .` | Ruff 插件接管 Reformat Code（⌥⌘L / Ctrl+Alt+L；插件设置里需启用 ruff format） | Ruff 扩展同 |
+| `uv run pyright` | 自带检查即标红；装 Pyright 插件则与命令行同引擎（结论偶有差异，以命令行为准） | Pylance 即同引擎 |
+| 起服务 / curl / git / docker（后续课） | Run Config 起 uvicorn、HTTP Client 与 Docker 面板（**Pro**）、Git 菜单 | 内置终端 / 扩展 |
 
 ### Step 8 模型端点约定（5 分钟）
 
@@ -196,7 +227,7 @@ uv run python -c "from hints import hint; print(hint('ex1', 1))"
 
 | 题 | 文件 | 考察 |
 |---|---|---|
-| ex1 | `exercises/ex1_preapprove.py` | 补全 `preapprove()` 三条规则（基础语法：循环 / any / sum） |
+| ex1 | `exercises/ex1_preapprove.py` | 补全 `preapprove()` 三条规则（基础语法：循环 / any / sum——`any(...)` 括号里的 `for` 形态今晚照抄，L1.1 速览、L1.4 正式讲） |
 | ex2 | `exercises/test_ex2_cases.py` | 补全参数化用例表：四种结果各≥1 组、含边界（恰好等于上限应 PASS）、共≥5 组——覆盖是否达标由文件内的 meta-test 机器验收，全 PASS 用例混不过去 |
 | ex3 | `exercises/ex3_ruff_fix.py` | 修复 3 处 ruff 违规（F401 未用 import / F841 未用变量 / E501 超长行——单字符串字面量，`ruff format` 拆不了它） |
 
@@ -236,7 +267,7 @@ uv run pyright
 - uv 官方文档（概念与全部命令）：https://docs.astral.sh/uv/
 - pytest 官方入门：https://docs.pytest.org/en/stable/getting-started.html
 - ruff 官方文档（规则一览）：https://docs.astral.sh/ruff/rules/
-- openai/openai-cookbook@9aad95f#articles/what_makes_documentation_good.md —— OpenAI 的「好文档写作宪法」，本教程讲义规范的同源出处；读它能让你具备鉴别好教程/坏教程的眼光。
+- openai/openai-cookbook@9aad95f#articles/what_makes_documentation_good.md —— OpenAI 的「好文档写作宪法」，本教程讲义规范的同源出处；读它能让你具备鉴别好教程/坏教程的眼光。（记法：`仓库@提交号#文件路径`——可在 GitHub 定位到该提交的逐字版本，后续 29 课的源码路标都用这个格式。）
 - microsoft/mcp-for-beginners@2f43408b#03-GettingStarted —— 它的「练习三层结构」（Exercise 步骤引导 → Assignment 开放作业 → solution 分离）是本课练习机制的设计先例之一，Unit 2 讲 MCP 时还会回来。
 
 ## 离毕业又近的一块

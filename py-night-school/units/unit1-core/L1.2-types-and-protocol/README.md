@@ -30,7 +30,7 @@ uv run pyright         # 无类型错误（练习 2 完成前它会对 exercises
 |---|---|---|
 | javac 编译期硬拒收 | pyright（或 mypy）静态检查 | 类型错误不挡运行，只挡「编译」这一步 |
 | 类型是语言强制约束 | 类型是**可选标注**（渐进类型，PEP 484 起） | 老代码零标注也能跑 |
-| IDE 红线即编译错误 | IDE 红线 = Pylance = pyright 同引擎 | 你的 IDEA 直觉可以整体平移 |
+| IDE 红线即编译错误 | IDE 红线：VS Code 的 Pylance（pyright 同引擎）、PyCharm 自带检查（要同引擎可装 Pyright 插件） | 你的 IDEA 直觉可以整体平移 |
 | `@Nullable` 注解 + 人肉判空 | `str | None`（类型系统一等公民） | 联合类型会被静态检查器追踪 |
 
 眼见为实——标注真的不影响运行时：
@@ -117,7 +117,7 @@ def pluck[K, V](rows: list[dict[K, V]], key: K) -> list[V]:
     return [row[key] for row in rows]
 ```
 
-对照 Java 的 `<K, V> List<V> pluck(List<Map<K, V>> rows, K key)`。旧教程里的 `TypeVar("T")` + `Callable[..., T]` 形态你在框架源码里还会大量见到（它们是同一件事的历史版本），3.12 新代码用方括号。
+对照 Java 的 `<K, V> List<V> pluck(List<Map<K, V>> rows, K key)`。旧教程里的 `TypeVar("T")` + `Callable[..., T]` 形态你在框架源码里还会大量见到（`Callable`＝函数签名的类型，≈ Java 的函数式接口类型——与 `java.util.concurrent.Callable` 无关）（它们是同一件事的历史版本），3.12 新代码用方括号。
 
 ### 2.5 Protocol：结构化类型（本课高潮）
 
@@ -157,6 +157,8 @@ public class ItemLimitRule {          // 想用？必须改成 ... implements Pr
 ```python
 # code/protocols.py —— Python：什么都不用声明，长得像就行
 #（class 语法 L1.3 才主讲，此处只需看懂形状：一个只有方法签名、无实现的类）
+# 两个提前量：self ≈ this 但必须显式写成第一个参数、调用时不传；__init__ ≈ 构造器——
+# 练习里要手写，漏了 self 会得到 TypeError: ... takes 2 positional arguments but 3 were given
 from typing import Protocol, runtime_checkable
 
 
@@ -193,8 +195,8 @@ def run_rules(rules: list[Rule], items: list[int]) -> str:  # 参数类型是协
 四个要点：
 
 - 协议方法体写 `...`（Ellipsis）：对照 Java interface 方法没有方法体。
-- `run_rules` 的参数类型 `list[Rule]` 传 `ItemLimitRule` 实例完全合法——**pyright 在编译期做结构化检查**（静态版的鸭子类型）。这正是个成语的工程化：「走起来像鸭子……」现在鸭子有了图纸。
-- `@runtime_checkable` 解锁 `isinstance(rule, Rule)`（运行时只查「方法名在不在」，**不查签名与类型**——比静态检查粗得多）。没有这个装饰器，isinstance 一个 Protocol 直接 TypeError。
+- `run_rules` 的参数类型 `list[Rule]` 传 `ItemLimitRule` 实例完全合法——**pyright 在编译期做结构化检查**（静态版的鸭子类型）。这正是个成语的工程化：「走起来像鸭子、叫起来像鸭子，它就是鸭子」——只看行为不看出身；现在鸭子有了图纸（名义化的 interface 只认出身）。
+- `@runtime_checkable` 解锁 `isinstance(rule, Rule)`（运行时只查「方法名在不在」，**不查签名与类型**——比静态检查粗得多）。没有这个装饰器，isinstance 一个 Protocol 直接 TypeError（`@` 装饰器语法 L1.5 才主讲，此处照抄——先别把它当 Java 注解，两者只是长得像）。
 - 名义与结构不是宗教战争：框架两者都用（见 §6 路标——langchain 的 `Runnable` 是 ABC 名义基类，openai-agents 的 `Session` 是 runtime_checkable Protocol）。Python 给你选择权。
 
 ### 2.5.1 岔路口：「协议」这个词的四个意思
@@ -202,8 +204,8 @@ def run_rules(rules: list[Rule], items: list[int]) -> str:  # 参数类型是协
 Python 世界说「协议」时，可能指四种东西，都**不是** Java 的 interface（除了今晚这个
 最像）：① **typing.Protocol**（今晚）——结构化类型的声明工具；② **魔法方法协议**
 （L1.3 起）——`__init__`/`__len__` 这类 dunder 约定，长出这些方法就算实现了「协议」；
-③ **迭代器协议**（L1.6）——`iter()`/`next()` 那套;④ **with 协议**（L1.7）——
-`__enter__`/`__exit__`。共性是「按形状认、不看出身」；看到「协议」先问自己指哪一种。
+③ **迭代器协议**（L1.6）——`iter()`/`next()` 那套；
+④ **with 协议**（L1.7）——`__enter__`/`__exit__`。共性是「按形状认、不看出身」；看到「协议」先问自己指哪一种。
 
 ### 2.6 TypedDict：JSON 形状的轻量标注（一笔带过）
 
@@ -242,6 +244,8 @@ def upper_first(verdicts: list[object]) -> None:
 对照 Java：`if (x instanceof String s)` 的 pattern matching for instanceof（Java 16+）与收窄①②同构——条件成立后的作用域里类型变具体。Python 没有这个语法糖，但 pyright 对 `isinstance` / `is None` / `assert` 的流分析效果一样。
 
 **is vs ==**：`==` 问「值相等」（走 `__eq__`，可自定义）；`is` 问「是同一个对象」（身份，不可重载）。实测有保证的对照：
+
+（`>>>` 是 Python REPL 提示符，≈ jshell 的 `jshell>`——终端 `uv run python` 或 IDE 的 Python Console 可跟做；照抄进 .py 文件会 SyntaxError）
 
 ```text
 >>> a = [1200, 3500]; b = [1200, 3500]
@@ -293,7 +297,11 @@ bad: int = "abc"
 uv run pyright
 ```
 
-你会看到类似 `code/typed_rules.py:行:列 - error: Type "Literal['abc']" is not assignable to declared type "int"` 的报错（pyright 报错格式：`文件:行:列 - error: 说明`）。再看一眼 IDE 里的同一行——Pylance 的红波浪线就是同一条诊断。体验完**删掉这行**，`uv run pyright` 回到 0 errors 再继续。这个「写错 → 看报错 → 修复」的循环，就是你 Java 日常里 javac/IDEA 循环的 Python 版。
+你会看到类似 `code/typed_rules.py:行:列 - error: Type "Literal['abc']" is not assignable to declared type "int"` 的报错（pyright 报错格式：`文件:行:列 - error: 说明`）。再看一眼 IDE 里的同一行——VS Code 的 Pylance 红波浪线、PyCharm 自带检查的标红（要同引擎可装 Pyright 插件），都是同一条诊断。
+
+> **IDE 侧（PyCharm）**：亲手试一次——临时写 `bad: int = "abc"`，看自带检查的标红与悬停说明（要与命令行 100% 同引擎可装 Marketplace 的 Pyright 插件）；删掉错行后 Problems 面板归零。
+
+体验完**删掉这行**，`uv run pyright` 回到 0 errors 再继续。这个「写错 → 看报错 → 修复」的循环，就是你 Java 日常里 javac/IDEA 循环的 Python 版。
 
 ### Step 5 Protocol 与零继承实现（15 分钟）
 

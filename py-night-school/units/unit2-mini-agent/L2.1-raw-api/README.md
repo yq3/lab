@@ -24,7 +24,7 @@ uv run ruff check .
 uv run pyright
 ```
 
-发货态诚实说明：现在跑 pytest，`code/` 讲义区是绿的，`exercises/` 练习区是设计内的红
+发货态诚实说明（发货态＝你 clone 下来、练习未做时的初始状态）：现在跑 pytest，`code/` 讲义区是绿的，`exercises/` 练习区是设计内的红
 （TODO 未填）。真实端点演示（`--real`）需要 `.env`，可选、不影响验收。
 
 ## 2. 概念讲解
@@ -106,7 +106,7 @@ async with httpx.AsyncClient(base_url=..., headers={"Authorization": f"Bearer {k
   | `tool_calls` | 模型要调工具（此时 content 常为 `None`） | 执行工具、回喂、再来一轮 |
   | `length` | 到了 max_tokens 被截断 | 视为异常或续写 |
 
-- `usage`：token 计量（`prompt_tokens` / `completion_tokens` / `total_tokens`）——今晚
+- `usage`：token 计量（`prompt_tokens` / `completion_tokens` / `total_tokens`）；token＝模型读写文本的计量单元，约 ¼ 个词——计费、截断、上下文预算全按它算，与鉴权 token 无关——今晚
   只需认得这三个字段，成本核算与上下文预算会用到（L2.3 的加餐数据来源）。
 
 `json` 模块三件套（对照 Jackson，一个能打的都没有但全都很轻）：
@@ -198,7 +198,7 @@ Java 对照：这是「把方法签名序列化成契约，让外部决策者选
 ### Step 0：端点配置（真端点模式才需要）
 
 ```bash
-cp .env.example .env
+cp .env.example .env   # Windows: copy .env.example .env
 ```
 
 （Windows PowerShell：`copy .env.example .env`；今晚离线跑可以不做这步。）
@@ -265,6 +265,8 @@ def feed(self, chunk: bytes) -> list[str]:
     return payloads
 ```
 
+> **IDE 侧（PyCharm，一次配置全学段复用）**：File → Open 打开本课目录、解释器选 uv 建的 `.venv`（L0.1 Step 7 那套）——此后五课的 demo 都是右键 Run/Debug。进阶：在 `SSEDecoder.feed` 的 `find(b"\n\n")` 与切块两行打断点、Debug 跑 `demo_stream.py`，Watch `_buffer` 从半截 JSON 逐块长出——跨块半行重组从推断变成亲见。
+
 跨块重组的验收在 `code/test_client.py::test_sse_decoder_reassembles_events_split_across_chunks`
 ——事件的 JSON 被切在两块中间，第一块喂进去返回空列表（事件未到齐），第二块到了才吐出两个事件。
 
@@ -299,9 +301,9 @@ assistant(stop)」这个形状记住——L2.3 的循环就是把这两回合跑
 配好 `.env` 后给任意 demo 加 `--real`（如 `uv run python code/demo_chat.py --real`）。
 输出依端点与模型而异——这正是验收不依赖真实端点的原因。
 
-### Step 5：对照 SDK（明晚的 L2.2 之前值得花五分钟）
+### Step 5：对照官方 SDK（openai-python——OpenAI 官方 Python SDK；明晚的 L2.2 之前值得花五分钟）
 
-延伸段第二条路标是 openai-python 自己的 SSE 解码器。带着今晚的手撕经验去读：
+延伸段第三条路标是 openai-python 自己的 SSE 解码器。带着今晚的手撕经验去读：
 同样的「find 分隔符 + 缓冲 + 解码」形状，生产级的实现。
 
 ## 4. 练习（本课过关点）
@@ -367,7 +369,7 @@ uv run pyright
   契约的类型定义：`name` / `description` / `parameters`（JSON Schema）三件套的静态化。
 - openai/openai-cookbook@0aaed0f1d#examples/Orchestrating_agents.ipynb —— 本学段的
   **对照原件**：官方的「无框架手写 agent」名篇（`run_full_turn` 循环 + `tools_map` 分发）。
-  L2.3 写循环时直接对照它，Unit 3 每个框架课也会回来问：这层抽象替我付掉的代码在原典里是哪几行。
+  L2.3 写循环时直接对照它，Unit 3 每个框架课也会回来问：这层抽象替我付掉的代码在对照原件里是哪几行。
 - httpx 官方文档（Async API / 流式响应）：
   https://www.python-httpx.org/async/ 
 - theskumar/python-dotenv@a00cb2eed —— 生产里 `.env` 加载的事实标准库（本课手写了它的十行子集）：

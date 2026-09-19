@@ -83,7 +83,8 @@ executor 是**纯 dispatcher**：`for step in plan.steps` 的游标由代码掌�
 - **fail-closed 的纵深防御**（L4.3 预习）：白名单在两层设防——计划 schema 的 Literal tag
   枚举合法工具（第一层），executor 分发前再查一次 `TOOL_ALLOWLIST`（第二层）。第二层在
   正常流程「不可达」，但「不可达」和「不设防」是两回事：绕过校验门构造的对象（比如
-  `model_construct` 夹带私货工具）会被第二层响亮拦下（`PlanExecutionError`），而不是静默执行。
+  `model_construct`——Pydantic 的旁路构造函数，不跑校验直接造对象——夹带私货工具）
+  会被第二层响亮拦下（`PlanExecutionError`），而不是静默执行。
 
 ### 2.3 Plan JSON：一份能被机器把关的工单
 
@@ -314,6 +315,8 @@ uv run python -c "from hints import hint; print(hint('ex1', 1))"
 三题都是填空 + 改造混合（ex1/ex2 在同构骨架上补核心函数，ex3 在给定装配的图上补环的
 两个分支），零真实网络（ex3 的 planner 是离线替身 FakePlanner）。验收命令同 §1 的完成判据（三条同时全绿
 = 本课毕业）。
+
+> **IDE 侧**：ex3 这类控制流 bug（回环不触发、封顶不 escalate）print 极难定位——Debug 跑单个练习测试（gutter 三角，或 Run Config 的 Parameters 填 `-k ex3`），断点打在 `route_after_gate` 与回喂处，Watch `state['plan_rejections']` 逐次累积。
 
 ## 5. Java 直觉陷阱：假枚举 Literal
 

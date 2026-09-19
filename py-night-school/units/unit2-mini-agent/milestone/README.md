@@ -1,6 +1,6 @@
 # Unit 2 里程碑：mini-agent（学段结业项目）
 
-> 任务书 + 验收。没有六段式讲义——到这里，讲义是多余的：**零件全在前五课，
+> 任务书 + 验收。没有逐节讲义——到这里，讲义是多余的：**零件全在前五课，
 > 拼装是你的事**。这个项目是 Unit 3 的全程对照组：每个框架课都会回来问
 > 「这层抽象替我付掉的代码，在 mini-agent 里是哪几行」。
 
@@ -68,6 +68,8 @@ None 时走本地注册表（`self._default_execute`），注入时全走它。`
 
   前两个离线全链路（剧本模型 + 本地/MCP 工具 + 结构化决策）；`--real` 需先配 `.env`
   （`cp .env.example .env`，Windows PowerShell：`copy .env.example .env`），模型自己决定调用顺序，预算 6 轮兜底。
+
+> **IDE 侧**：`--mcp` 这类参数在 PyCharm 里不是敲命令行——Run → Edit Configurations → Parameters 填 `--mcp`（IDEA 的 Program arguments 对应物）；Debug 跑 `main.py` 在 T1 的 `run()` 断点自查。T3 侧沿用 L2.5 的结论：client 侧断点有效，server 子进程内不命中。
 
 ## 验收（全部绿 = Unit 2 结业）
 

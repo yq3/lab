@@ -115,7 +115,7 @@ def should_continue_debate(self, state: AgentState) -> str:
 | 交锋价值 | 零（防观点趋同是优点也是上限） | 对抗暴露单边盲区（申辩人 vs 合规官各自看不到的） |
 | 软肋 | 共识质量完全取决于合成权重 | 输出无强制力（裁决全在 prompt 层，无硬审批代码） |
 
-分轨结论（调研 dimensions 一句话版）：拓扑可组合、应按**金额 × 可逆性**分轨——低金额
+分轨结论（课程调研的一句话版）：拓扑可组合、应按**金额 × 可逆性**分轨——低金额
 可逆（报销初审）走层级投票，快而便宜；中金额（报销争议、异常调查，正是本课明线）叠
 辩论-裁决；高金额不可逆（付款）无论前面用什么拓扑，终点必须是代码门 fail-closed
 （L4.3 Vibe-Trading 的领地）。
@@ -237,9 +237,9 @@ uv run python code/step1_debate_loop.py
 简写（产品 `[current_tools, current_clear]`）；**辩论双方的条件边共享同一个
 DEBATE_PATH_MAP**、风险三方共享 RISK_PATH_MAP（#1088 的原样落地）；轮次从
 `AppealConfig` 流进 `AppealConditionalLogic`（ex1 改造的成品形态）。`demo.py` 是离线
-剧本编排：quick/deep 各起一个 MockLLMEndpoint，9 份剧本按确定性执行顺序入队（工具轮 →
-政策归纳 → 四段辩论台词 → 三方意见；deep 两份裁决 JSON）——rounds=2 时辩论段消费到第
-9 份，这正是 ex1 要你参数化的那条数据流。
+剧本编排：quick/deep 各起一个 MockLLMEndpoint——quick 端点备 9 份剧本、按确定性执行
+顺序入队（工具轮 → 政策归纳 → 四段辩论台词 → 三方意见；demo 跑 rounds=1 只消费
+7 份，这正是 ex1 要你参数化的那条数据流）——deep 端点另备 2 份裁决 JSON。
 
 ### Step 3：离线跑通争议全程（10 分钟）
 
@@ -340,8 +340,10 @@ uv run python code/demo_trace.py --real
 主线离线可验收，产品真跑是加餐（需要模型端点与网络）。克隆并安装：
 
 ```bash
-git clone https://github.com/TauricResearch/TradingAgents.git
-cd TradingAgents
+mkdir -p ~/develop/opensource
+git clone https://github.com/TauricResearch/TradingAgents.git ~/develop/opensource/TradingAgents
+git -C ~/develop/opensource/TradingAgents checkout be952b8
+cd ~/develop/opensource/TradingAgents
 uv sync
 ```
 
@@ -358,6 +360,8 @@ Bull/Bear 辩论 → Research Manager → 风险三方 → Portfolio Manager。
 真改造（Unit 4 里程碑的素材，改造说明留给 milestone）：在本地分支给产品加
 `max_debate_llm_calls`——在 `default_config.py` 加配置项与 env 映射，贯穿到辩论节点
 或路由器，超限即停——把本课 ex2 的预算轴移植进真产品。
+
+> **IDE 侧**：第一次动陌生仓的代码，用 JetBrains 的 Git 集成更稳——右下角分支 widget 新建/切换改造分支，⌥F7 / Alt+F7 追 `max_debate_rounds` 的引用点贯穿改动，Commit 窗口预览 diff；误操作可撤，比裸 git 命令友好得多。
 
 ## 4. 练习（本课过关点）
 
@@ -414,7 +418,7 @@ ex3 三个测试函数共 13 例参数化（脏归一 8 + 哨兵 4 + 合法存�
 
 ## 6. 延伸
 
-源码路标（本地克隆 `~/develop/opensource/TradingAgents`，锚定 be952b8，按图索骥）：
+源码路标（本地克隆后 checkout 到 be952b8（Step 6 的命令已带），按图索骥）：
 
 - `TauricResearch/TradingAgents@be952b8#tradingagents/graph/conditional_logic.py` ——
   本课教学主轴的本体：`should_continue_debate` / `should_continue_risk_analysis`，

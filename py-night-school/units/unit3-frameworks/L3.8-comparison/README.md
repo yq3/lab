@@ -12,7 +12,7 @@
 不写新 agent——换一种交付物。完成后你能：
 
 - 用 `code/tablegen.py` 重新生成「能力-成本-锁定性」决策表数据页，并**逐格说出取数口径**
-  （依赖数怎么数的、装配行数什么口径、轮数是哪一课实测的）——宪法纪律「量化结论必须
+  （依赖数怎么数的、装配行数什么口径、轮数是哪一课实测的）——课程纪律「量化结论必须
   可复现」的选型版落地；
 - 对六个维度（HITL / 检查点 / 扇出 / 子代理 / 调试器 / eval）与三种锁定性
   （端点中立 / 私有格式 / 生态绑定）各给出一个**带课次出处的机制证据**；
@@ -32,8 +32,8 @@ uv run pyright
 发货态诚实说明：`code/` 讲义区绿，`exercises/` 是设计内的红（TODO 未填）。
 
 本课运行依赖**仅标准库**（解析 TOML 与统计行数都不需要第三方包）——决策表生成器
-本身就是一个「零依赖也能干重活」的样本。`.env.example` 照宪法随课携带（本课无
-真实端点调用，留给同目录其他命令的习惯延续）。
+本身就是一个「零依赖也能干重活」的样本。`.env.example` 虽本课无真实端点调用，
+仍按全课程惯例随课携带。
 
 ## 2. 概念讲解
 
@@ -43,7 +43,7 @@ uv run pyright
 |---|---|---|
 | 技术选型评审表（容量/风险/迁移成本列） | 能力-成本-锁定性决策表 | 三维同构；差别在定量列——Python 生态的依赖数可以从锁文件直接机器数，Java 侧要 `mvn dependency:tree` 解析 POM 才有树 |
 | Maven 依赖树的大小（dependency:tree 的节点数） | uv.lock 的 `[[package]]` 计数（tomllib） | 同一个信号：传递依赖的重量；uv.lock 是锁文件即事实，不用解析仓库元数据 |
-| ArchUnit 自定义规则 / SonarQubit 度量 | ast 口径行数统计（count_loc / tablegen） | 都是把「评审标准」写成可执行检查——不靠 grep 印象，口径写在代码里 |
+| ArchUnit 自定义规则 / SonarQube 度量 | ast 口径行数统计（count_loc / tablegen） | 都是把「评审标准」写成可执行检查——不靠 grep 印象，口径写在代码里 |
 | 供应商锁定 / Spring 生态迁移成本 | 锁定性三格（端点中立/私有格式/生态绑定） | Java 老话题的新拼写：从「换消息中间件」变成「换模型端点 / 换框架 / 迁出平台」 |
 | Jackson 序列化的版本兼容矩阵 | Checkpoint msgpack / RunState JSON / DSL version | 私有序列化格式的 `version` 字段管导入策略，不管行为兼容（L3.7 §5 的教训） |
 | `javac` 编译期全量检查 | 「重新生成一遍」的验收 | 决策表的可信度不来自讲义，来自任何人重跑同一命令得到同一页 |
@@ -77,9 +77,10 @@ harness（工作台） →  deepagents（L3.5）：虚拟文件系统/子代理/
 
 三维合成一句话：**能力问「能不能」，成本问「现在付多少」，锁定性问「以后付多少」**。
 
-### 2.3 为什么定量列必须可复现：宪法纪律的选型版
+### 2.3 为什么定量列必须可复现：课程纪律的选型版
 
-宪法先例：「292 行」因 BSD grep 不认 `\s` 而不可复现，四处复述全部返工为 249（ast 口径）。
+本教程纪律的真实出处（Unit 2 的教训）：曾用 grep 管道数出 mini-agent「292 行」，换
+BSD grep 复现失败，四处引用全部返工为 ast 口径的 249——所以量化结论必须写明工具与口径。
 选型评审比讲义更不能容忍口径漂移——数字会被抄进技术评审文档、被不同的人复述。
 本课的落地：
 
@@ -92,7 +93,7 @@ harness（工作台） →  deepagents（L3.5）：虚拟文件系统/子代理/
 自证口径一致性：生成器实测复现了 L3.4 讲义已发布的 `build_graph` 10 loc 与
 `build_agent` 6 loc——同一口径能重算已发布数字，口径才算可复现。
 
-### 2.4 tomllib：标准库的 TOML 解析器（新知识点，首现）
+### 2.4 tomllib：标准库的 TOML 解析器（里程碑 tablegen.py 已先用过，这里正式讲）
 
 Python 3.11 起标准库自带 TOML 读取器 `tomllib`（本教程 3.12 环境直接可用）：
 
@@ -105,7 +106,8 @@ packages = data["package"]            # [[package]] 是 TOML 的「表数组」�
 ```
 
 对照 Java：没有等价的一等公民——POM 是 XML 要 DOM/ JAXB，TOML 在 Python 世界是
-「配置即数据」（pyproject.toml / uv.lock 都是它），解析器进了电池。两个工程细节：
+「配置即数据」（pyproject.toml / uv.lock 都是它），标准库连 TOML 解析器都内置（Python
+自带电池——batteries included）。两个工程细节：
 只进不出（写入要第三方 `tomli-w`——标准库刻意只管读）；`data["package"]` 的每个元素
 是 `dict`，键就是锁文件里的字段（name/version/source…）。
 
@@ -115,8 +117,8 @@ packages = data["package"]            # [[package]] 是 TOML 的「表数组」�
 记在函数对象上，同参数第二次调用直接回缓存。生成器数 L3.1 的三个装配函数都要
 `ast.parse` 同一个 demo.py：不缓存就 parse 三遍（ast 解析不便宜）。对照 Java：
 手写 `ConcurrentHashMap` + computeIfAbsent 的活儿，这里一个装饰器。纪律两条：
-参数必须**可哈希**（所以签名收 `str` 不收 `Path`——`Path` 可哈希但两个等价路径
-会击穿缓存，统一 `str(path)` 更稳）；只用于**纯函数**（`parse_module` 无副作用）。
+参数必须**可哈希**（cache 的键就是参数值：同一文件传 `str` 与 `Path` 两种写法会得到
+两个缓存条目，统一 `str(path)` 归一）；只用于**纯函数**（`parse_module` 无副作用）。
 L1.5 装饰器课讲过「装饰器是运行时替换行为」——`cache` 是「行为不变、加记忆」的最小样本。
 
 ## 3. 动手代码
@@ -267,6 +269,8 @@ uv run pytest code/
 五个仓都克隆在 `~/develop/opensource/`（HEAD 锚点已核实，路径以锚点为准）。跳读的
 通用方法：**先找核心抽象（1–3 个类）→ 再找入口方法（谁驱动循环）→ 最后扫 quickstart
 样例**——带着本单元学过的概念去对照，每个仓 30 分钟足够定位。
+
+> **IDE 侧（PyCharm / IDEA + Python 插件）**：跳读克隆仓时用 PyCharm 打开它，⇧⇧（Search Everywhere，IDEA 同款；Windows 连按两次 Shift）按类名直达 `Crew` / `AgentWorkflow` / `Agent`，配讲义的行号锚点——30 分钟预算花在读上，不花在找上。
 
 **① crewAIInc/crewAI@894898f84 —— 角色化多代理编排**
 定位：Crew/Agent/Task 三原语——「一组有人设的 agent 按流程干一组有交付物的任务」。

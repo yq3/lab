@@ -49,6 +49,10 @@ uv run pyright
 **class 语句**：冒号 + 缩进代替花括号（缩进即语法，L0.1 陷阱讲过）；类名没有 `public/private`
 前缀——可见性约定靠下划线前缀（`_x` 表示「内部用」，纯约定），本课全用公有。
 
+双下划线前缀 `__x` 则是另一回事：Python 会在类内把它改名成 `_类名__x`（name mangling，
+名字改写）——不是真私有（改完的名字仍可访问），更像「防误碰」；Java 的 private 是硬边界，
+Python 没有对应物。（L1.2 承诺过这在这里讲，兑现。）
+
 **`__init__` 与 self**——并排看：
 
 ```python
@@ -149,7 +153,7 @@ from pydantic import BaseModel, Field
 
 class ExpenseClaim(BaseModel):
     claim_id: str = Field(pattern=r"^CLM-\d{4}-\d{4}$")
-    items_cents: list[Annotated[int, Field(gt=0)]]  # 列表元素级约束写进泛型参数
+    items_cents: list[Annotated[int, Field(gt=0)]]  # Annotated[类型, 约束]＝把校验规则贴进类型本身（≈ List<@Min(1) Integer>）；元素级约束写进泛型参数
     submitter: str = Field(min_length=1)
     submitted_at: datetime | None = None  # 可选字段
 ```
@@ -173,7 +177,7 @@ Pydantic 把三件事压成**同一时刻**：
 
 | Java 动作 | Pydantic 动作 | 校验时机 |
 |---|---|---|
-| `readValue` + 手动触发 validate | `ExpenseClaim(**dict)` 或 `model_validate(dict)` | **构造那一刻**，两者合一 |
+| `readValue` + 手动触发 validate | `ExpenseClaim(**dict)` 或 `model_validate(dict)`（`**dict` 把 dict 摊开成关键字参数，L1.4 §2.2 主讲） | **构造那一刻**，两者合一 |
 | `readValue(json, ...)` | `model_validate_json(json_str)` | 同上（还多挡一层 JSON 语法错） |
 | `writeValueAsString` | `model_dump()`（dict）/ `model_dump_json()`（str） | 序列化不校验，只是出口 |
 
@@ -258,6 +262,8 @@ uv run pytest code/test_claims.py
 uv run python code/validation_demo.py
 ```
 
+> **IDE 侧**：在 `ClaimBatch.model_validate(bad_batch)` 行打断点、Debug 跑 `validation_demo.py`——Step Over 后停在异常抛出点，用 Evaluate Expression 看 `exc.errors()` 的四要素。「校验发生在构造那一刻」一帧胜十行输出。
+
 真实输出（三处伤一起报，不是只报第一个）：
 
 ```text
@@ -309,9 +315,10 @@ uv run python -c "from hints import hint; print(hint('ex1', 1))"
 | ex2 | `exercises/ex2_schema.py` | 补 Pydantic 字段约束 + 补非法样本表（meta-test 判定覆盖） |
 | ex3 | `exercises/ex3_batch.py` | 嵌套模型 + `from_lines` 替代构造（model_dump 结构断言） |
 
-三题的验收口径：
+三题的验收标准：
 
-- ex1 行为等价之外，`is_dataclass(ExpenseLineData)` 必须为 True——把上面的手写类换个名字
+- ex1 行为等价之外，`is_dataclass(ExpenseLineData)` 必须为 True（`dataclasses` 模块自带的
+  检查函数：类是否真被 `@dataclass` 处理过）——把上面的手写类换个名字
   抄下来糊弄过不了；
 - ex2 双向判据：合法样本全过、非法样本全部被 `ValidationError` 拒收；样本表本身要覆盖
   三个字段各自的违规、至少 4 组、不重复（文件内 meta-test 机器判定）；
@@ -331,7 +338,7 @@ uv run pyright
 
 ## 5. Java 直觉陷阱：dataclass 可变默认
 
-这是本课的命名化失败模式，以后说「可变默认」我们秒懂。
+这是本课起过名字的失败模式——以后说「可变默认」我们秒懂。
 
 - **现象**：`ValueError: mutable default <class 'list'> for field items is not allowed:
   use default_factory`——注意，是**类定义时**抛，不是运行时踩雷。

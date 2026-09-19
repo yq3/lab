@@ -103,7 +103,7 @@
 
 **L0.1 环境与工具链（uv / pytest / ruff / pyright / IDE / Jupyter）**
 - Maven→uv、JDK 管理→uv python、Checkstyle→ruff、javac→pyright、JUnit→pytest 全对照表；
-- 动手：`uv init` 项目、加依赖、配国内 PyPI 镜像（bash / PowerShell 双版本）、三件套全绿、断点调试与 IDE 接入（VS Code+Pylance 或 PyCharm，图形化跑 pytest 与断点）、Jupyter 起一次；
+- 动手：`uv init` 项目、加依赖、配国内 PyPI 镜像（bash / PowerShell 双版本）、三件套全绿、虚拟环境 101（`.venv` / activate / `uv run` 机制 / pip↔uv 关系）、断点调试与 IDE 接入（VS Code+Pylance 或 PyCharm 双 checklist + 终端↔IDE 全量对照表）、Jupyter 起一次；
 - 产出：`units/unit0/` 项目模板，后续每课复制起步。
 - 里程碑：模板仓库三件套全绿。
 
@@ -224,7 +224,7 @@ py-night-school/
 - 每课是独立 uv 项目并提交 `uv.lock`——竞品反例：MS 钉版与 `%pip install -U` 自相矛盾、GenAI_Agents 依赖 pin 分裂、Anthropic 同课三份手工拷贝漂移。
 - 讲义图片本地化存储，不外链 CDN（langchain-academy 反例）；仓库克隆即完整可学，教学主体不外置（HF 全外置 Colab 反例）。
 - 所有外链延伸材料锚定 commit；源码路标格式 `仓库@commit#路径`。
-- **平台中立**：学员命令一律 `uv run ...`（macOS / Windows / Linux 一致），多步命令分行走（**不用 `&&` 串联**——Windows PowerShell 5.1 默认不支持）；平台差异（安装脚本、环境变量语法、cp/copy）在课时内以对照块标注，不默认 macOS。约定：学员命令统一放 bash 代码块——`check_lesson.py` 只检查 bash 块内的 `&&`，Java 对照示例（`a && b`）不受影响。
+- **平台中立**：学员命令一律 `uv run ...`（macOS / Windows / Linux 一致），多步命令分行走（**不用 `&&` 串联**——Windows PowerShell 5.1 默认不支持）；平台差异（安装脚本、环境变量语法、cp/copy）在课时内以对照块标注，不默认 macOS。约定：学员命令统一放 bash 代码块——`check_lesson.py` 只检查 bash 块内的 `&&`，Java 对照示例（`a && b`）不受影响。**IDE 侧栏**（PyCharm / VS Code 的图形化等价操作提示）以 blockquote 定式（`> **IDE 侧…**`）存在：不入 bash 块、不作验收判据，L0.1 Step 7 的终端↔IDE 对照表是全书锚点、各课侧栏只做回收指路。另两条同源纪律：仓库根脚本进入学员路径时同样 `uv run python` 化（先例：unit5 里程碑重验五连的 `python3`）；`~` 家目录参数须双端交代（Windows PowerShell 不为命令参数展开 `~`，源码克隆约定见 unit3 README，课程自有工具用 `expanduser()` 兜底）。
 
 ## 7. 验收标准（结业自查）
 

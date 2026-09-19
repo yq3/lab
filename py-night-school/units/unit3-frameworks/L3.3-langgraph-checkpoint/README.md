@@ -228,12 +228,15 @@ events: ['reviewer', 'tools', 'reviewer', 'human_gate', 'reviewer', 'finalize']
 - **剧本要在恢复侧重新布置**：进程 2 的 `MockLLMEndpoint` 是全新实例，进程 1 的两份
   剧本对它不存在——它只布置「人审后收束」这一份。这就是「无状态模型 + 有状态图」的
   分界线：模型每次都是新的（7 条历史全部由引擎从 db 恢复后全量重发），图的状态却一直
-  活着。把 `approve` 换成 `deny` 再跑一遍，结论变成 `REJECT / REJECT:HUMAN_DENIED`。
+  活着。想看否决路：重新 `start` 一单拿到新 thread_id、再用 `deny` 恢复（同一
+  thread 恢复一次即完结），结论变成 `REJECT / REJECT:HUMAN_DENIED`。
 - **`pytest` 里的等价模拟**：测试没法真开两个进程，用「两个独立 graph 实例 + 两个
   saver 连接 + 同一个 db 文件」等价模拟（讲义明说：Step1 的 B 实验已证明这种等价——
   内存无共享，状态全在 db）。`test_demo.py` 的 resume 测试就是这么写的。
 - **非 ESCALATE 单不暂停**：`start CLM-2026-0001` 会一跑到底（human=skipped），
   图里那条 `human_gate` 路径根本不会被触发。
+
+> **IDE 侧（PyCharm / IDEA + Python 插件）**：建两个 Run Configuration——`start`（Parameters: `start CLM-2026-0003`）与 `approve`（Parameters: `approve <thread_id>`，thread_id 从 Run 窗口输出里选中复制）——「另开终端」变成「再点一次 Run」；Stop 按钮就是那个 kill：按下它再 approve，验证 checkpoint 恢复照样成立。
 
 ### Step 3：approve / deny / skipped 三条路一次看全（10 分钟）
 
@@ -352,9 +355,10 @@ uv run python code/demo_resume.py --real approve <thread-id>
 ## 4. 练习（本课过关点）
 
 规则：**单变量编辑约束**——只改 TODO 标注区与所需的顶部 import（骨架只预置了 given
-部分用到的）。卡住先想 5 分钟，再看渐进提示（在 exercises/ 目录下）：
+部分用到的）。卡住先想 5 分钟，再看渐进提示：
 
 ```bash
+cd exercises
 uv run python -c "from hints import hint; print(hint('ex1', 1))"
 ```
 

@@ -136,7 +136,7 @@ except ValueError as exc:
 |---|---|---|
 | `raise X from e` | `X.__cause__ = e`，traceback 打印 "direct cause" | `new X(msg, e)` 传 cause |
 | `raise X`（except 块内） | `X.__context__ = e`（隐式上下文，打印 "during handling"） | 没有对应——Java 会丢上一层 |
-| `raise`（裸，except 块内） | 原对象原样重抛，traceback 完整保留 | `throw e;`（但不会刷新栈） |
+| `raise`（裸，except 块内） | 原对象原样重抛，traceback 完整保留（Java 的 `throw e;` 会把栈刷成重抛点） | `throw e;` |
 | `raise X from None` | 切断因果链（底层异常是噪音时） | 无对应 |
 
 纪律：**包装异常时永远 `from exc`**——保留因果链，排查时一段 traceback 看到底（动手 ② 打印给你看）。
@@ -171,7 +171,7 @@ class ApprovalSession:
 
 ### 2.8 @contextmanager：上一课 yield 的直接复用
 
-类协议要写两个方法；`@contextmanager` 让你**用生成器函数写上下文管理器**——课程设计线在这里收拢：L1.6 的「函数可以暂停」直接变成 with 的两个阶段：
+类协议要写两个方法；`@contextmanager` 让你**用生成器函数写上下文管理器**——L1.6 的「函数可以暂停」在这里收拢：直接变成 with 的两个阶段：
 
 ```python
 @contextmanager
@@ -222,6 +222,8 @@ uv run python code/eafp_demo.py
 ```bash
 uv run python code/chains.py
 ```
+
+> **IDE 侧**：Run → View Breakpoints → 勾选 Python Exception Breakpoints 的 `AmountParseError`（≈ IDEA 的 Java Exception Breakpoints）——再次触发时直接停在抛出点，Variables 里展开 `__cause__` / `__context__`：异常链从「读日志」变成「看对象」。
 
 `parse_amount` 把底层 `ValueError` 包成 `DomainError`，`raise ... from exc` 之后 traceback 会打出两段栈和一行 `The above exception was the direct cause of ...`——对照 2.6 的表格看输出。
 文件里还有裸 `raise`（原样上抛）与 `from None`（切断链）两个对照组。
@@ -310,7 +312,7 @@ uv run pyright
 - contextlib 文档（contextmanager / closing / ExitStack / suppress）：https://docs.python.org/zh-cn/3.12/library/contextlib.html
 - 《Fluent Python》第 2 版「装饰器与闭包」章对 `@contextmanager` 实现的源码级剖析（它就是靠 L1.6 的生成器协议驱动的），以及异常相关的「Iterators, Generators」章尾；
 - 框架真实异常体系源码（两版对照，都是「领域异常基类 + 属性携带上下文」的实践）：
-  - agentscope@b82253ba#src/agentscope/exception/_base.py —— 27 行的教科书样本：`AgentOrientedException`（错误回喂给 agent 处理）与 `DeveloperOrientedException`（错误上抛给开发者）两个基类——
+  - agentscope@b82253ba#src/agentscope/exception/_base.py —— 阿里开源多智能体框架 agentscope 的 27 行教科书样本：`AgentOrientedException`（错误回喂给 agent 处理）与 `DeveloperOrientedException`（错误上抛给开发者）两个基类——
     **「这个错该由谁处理」直接做进异常类型**，这正是 L2.4 校验错误回喂重试的语义雏形；具体子类看同目录 `_tool.py`（`ToolNotFoundError` 等四个）；
   - openai-agents-python@fbd2dbca#src/agents/exceptions.py —— 搜 `class AgentsException`：SDK 全部异常的基类，`run_data` 属性携带整次运行上下文（比 claim_id 激进得多），子类 `MaxTurnsExceeded` / `ModelBehaviorError` 各带专属属性——异常即事件的对象化样本。
 

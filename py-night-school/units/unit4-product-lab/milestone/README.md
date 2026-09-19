@@ -44,6 +44,8 @@ uv run python -c "from hints import hint; print(hint('notes', 1))"
 （另两把钥匙：`hint('repro', 1)` 复现步骤怎么写得可复现、`hint('evidence', 1)` 证据
 怎么摘录。）
 
+> **IDE 侧**：改造说明的「最小 diff」「证据」两节天然由 IDE 产出——Show Diff 拷贝统一 diff，Run 窗口右键 Copy All 摘日志，Local History 找回中间态。
+
 ## verify 实测输出（发货态，2026-09-16，耗时随机器波动）
 
 ```text
@@ -75,10 +77,10 @@ verify 退出码: 0（0=全绿；1=有 FAIL；2=全跳过）
    `exit_code` / `notes_status`）是纯函数；执行层（`run_lesson`）是薄壳——**runner
    可注入**：默认实现起真 subprocess（`subprocess.run([...], cwd=...)` ≈ Java 的
    `ProcessBuilder`，参数走列表不经 shell 解析），`tests/` 注入 fake runner 喂合成
-   输出离线验收 PASS/FAIL/超时分支。为什么 pytest 不直接去跑兄弟课时（Unit 3 里程碑的
-   先例）：三态验证的毕业态把本目录镜像到临时目录时只带 `milestone/` 与
-   `data/`——兄弟课时不在镜像里，测试碰它们必红。真跑（`uv run python verify.py`）
-   是学员命令；在毕业态镜像里跑会如实标 SKIPPED、退出码 2——「没跑」绝不伪装成
+   输出离线验收 PASS/FAIL/超时分支。为什么 pytest 不直接去跑兄弟课目录（Unit 3 里程碑的
+   先例）：课程的验收脚本在一个只含 `milestone/` 与 `data/` 的干净副本里跑——
+   兄弟课目录不在副本里，测试碰它们必红。真跑（`uv run python verify.py`）
+   是学员命令；在验收副本里跑会如实标 SKIPPED、退出码 2——「没跑」绝不伪装成
    「全绿」。
 2. **verify 的两个命令契约**（都在 `tests/test_verify_logic.py` 钉死）：只跑
    `pytest code/` 不碰 `exercises/`（里程碑验机制件层，不替各课判毕业）；不叠 `-q`
@@ -87,8 +89,8 @@ verify 退出码: 0（0=全绿；1=有 FAIL；2=全跳过）
    误判失败）。
 3. **改造说明是作答物，文档不硬造判分**：`tests/test_notes_meta.py` 只判结构——三页
    齐、五节齐且正文非空、模板态每节都有占位符（防预填）、含占位符的页必须有
-   `solution/notes` 完成版对照；任务卡关键词（`max_debate_llm_calls`、`weight:`、
-   `check_mandate` 这些产品真物）对齐发货时从三课讲义提炼的合成夹具。内容质量没有
+   `solution/notes` 完成版对照；meta 测试的期望关键词从三课讲义提炼成合成夹具
+   （不依赖产品仓）；你只需知道它查结构不查内容。内容质量没有
    机器判据——对照 `solution/notes/` 的范本收口（先例 Unit 3 milestone）。
 
 ## 验收（全部绿 = Unit 4 结业）
@@ -105,7 +107,7 @@ uv run python verify.py
 发货态诚实说明：**本里程碑没有设计内红**——与 Unit 3 里程碑（aggregate TODO 的 3 个
 设计内红）不同，本里程碑的作答物是文档（notes/*.md 不可 pytest 判分，meta 测试只查
 结构），verify.py 是给定基础设施不含 TODO，所以发货态与毕业态的三命令本来就全绿。
-这在三态验证法下是合法形态（宪法 §5「只有设计内的失败」在零失败时平凡成立；里程碑
+这在三态验证法下是合法形态（三态只要求「红必须是设计内的」——零失败时该条件自然成立；里程碑
 的作答物是文档）。配套的毕业态布局：三态的 solution 覆盖规则只 glob `solution/*.py`
 覆盖到目录根——本里程碑 solution/ 只有 `.md`（范本说明，不参与覆盖），毕业态镜像与
 发货态同构。防「预填答案」由 meta 测试守着（模板态五节每节必须有占位符）。
@@ -121,7 +123,7 @@ milestone/
 │   ├── tradingagents.md
 │   └── vibe-trading.md
 ├── hints.py             # 三级渐进提示（notes / repro / evidence）
-├── tests/               # 离线验收（不要改；不碰兄弟课时）
+├── tests/               # 离线验收（不要改；不碰兄弟课目录）
 │   ├── test_verify_logic.py   # fake runner 注入合成输出（零子进程）
 │   └── test_notes_meta.py     # 三页结构 + 任务卡关键词对齐（合成夹具）
 ├── solution/            # notes/ 三份完成版范本（不走覆盖，供誊写对照）+ README

@@ -62,7 +62,7 @@ uv run pyright
   `ValueError`（fail-closed：审计词汇表是封闭集合，防止拼错的事件类型静默进账本）。
 
 产品先例：sst/opencode 的事件表就是这个形状——`event(aggregate_id, seq, type, data)` 加
-`event_aggregate_seq_idx` 唯一索引（见 §6 路标，SQLite + drizzle 声明）；报告 A11 的结论
+`event_aggregate_seq_idx` 唯一索引（见 §6 路标，SQLite + drizzle（opencode 所用的 TS ORM）声明）；报告 A11 的结论
 「JSONL 只做归档不做主存」的理由在这里能摸到：事件表能按聚合点查、按类型过滤、能 join
 决策缓存表，JSONL 每次都要全文件扫。
 
@@ -103,7 +103,7 @@ key 的纪律是 L4.1 §5「相等不等哈希」的正解落地：`canonical_pr
 4 月的出自 v2 的图，而审计记录里不带版本——重放无法解释，合规无法对账。报告 A15 的
 方案：图形状签名进 checkpoint key，改图自动作废旧执行态。产品先例是 TradingAgents 的
 `_run_signature`（§6 路标）：分析师选择、辩论轮次、资产模式拼进 checkpoint thread_id——
-换了配置的 resume 不许静默续旧检查点（#1089）。本课三个件把它落地：
+换了配置的 resume 不许静默续旧检查点（TradingAgents issue #1089）。本课三个件把它落地：
 
 - `run_key(claim_id, signature)`：聚合键 = 单号 + 签名前 12 位——checkpoint thread_id 与
   事件聚合共用（同图同单稳定；图一改自动换世界）；
@@ -120,8 +120,7 @@ key 的纪律是 L4.1 §5「相等不等哈希」的正解落地：`canonical_pr
 ### 2.4 审计层怎么接进图：旁挂，不改写
 
 L5.1 的图一行拓扑未动——本课图的拓扑签名与 L5.1 Step 4 打出的值**相同**（`5dbfa594e113…`
-开头那个），这是「审计层
-是旁路」的可验证证据）。接线只有两类加法：
+开头那个），这是「审计层是旁路」的可验证证据。接线只有两类加法：
 
 - **节点旁挂事件发射**（`graph._with_events`）：节点本体先跑，再把它的 (输入状态, 输出
   更新) 翻译成事件逐条 emit。取舍：另一条路是节点内直接 `store.append`——那会让每个节点
@@ -279,7 +278,7 @@ uv run pytest code/
 是旁路的回归证据）+ EventStore 9（顺序 seq、冲突翻译、聚合隔离、事务回滚、表外类型
 fail-closed、时钟注入、类型过滤、无 update/delete 接口 meta、fold 重放）+ 决策缓存 6
 （canonical 等价、变一字换 key、命中零请求、审计查询原话、换单不误命中、put/get 往返）+
-版本绑定 6（同图同 key、改图换签、守门两态、事件带版本、旧 key 拒续、新 key 正常）+
+版本绑定 6（同图同 key、改图换签、守门两种结局（兼容续跑 / 抛 GraphVersionMismatch）、事件带版本、旧 key 拒续、新 key 正常）+
 端到端 4（四单事件流水逐条全等、重放视图与终态全等、成本累计、重跑追加不重花）。
 
 ### Step 4：事件重放——状态是投影的现场（10 分钟）
@@ -326,6 +325,8 @@ uv run python code/step2_replay.py
      答案不是翻 state，是重放事件——这就是事件溯源（A11）的全部立场。
 （审计库在系统临时目录 tmpXXXX/ 下，演示结束自动销毁）
 ```
+
+> **IDE 侧（Pro 版）**：Database 面板直接打开 demo 生成的 SQLite 库跑 SQL——`SELECT type, COUNT(*) FROM events GROUP BY type`、按 aggregate_id 点查——§2.2「可查询的审计」最直接的兑现（Community 学员用 `sqlite3` CLI 同样能跑）。
 
 ## 4. 练习（本课过关点）
 
@@ -387,10 +388,10 @@ uv run python -c "from hints import hint; print(hint('ex1', 1))"
 - 源码路标（本地克隆 `~/develop/opensource/`，按图索骥）：
   - `sst/opencode@95daf90670#packages/core/src/event/sql.ts` —— 产品级事件表的声明现场：
     `event(aggregate_id, seq, type, data)` + `event_aggregate_seq_idx` 唯一索引——
-    本课 `events` 表的母本（SQLite + drizzle，A11 的真实形状）；
+    本课 `events` 表的母本（SQLite + drizzle——opencode 所用的 TS ORM——，A11 的真实形状）；
   - `TauricResearch/TradingAgents@be952b8#tradingagents/graph/trading_graph.py` ——
     `_run_signature`：图形状输入拼进 checkpoint thread_id（改分析师/轮次，旧检查点自动
-    失效，#1089）——`run_key` 的先例原文（L4.2 复引，今晚轮到自己写）；
+    失效，TradingAgents issue #1089）——`run_key` 的先例原文（L4.2 复引，今晚轮到自己写）；
   - `virattt/ai-hedge-fund@fc1bf25#hedge_fund/llm/cache.py` —— PromptCache：48 行的
     缓存=审计=调试三合一文件版（L4.1 精读过）——今晚 `llm_decisions` 表的上一世；
   - `langchain-ai/langgraph@e539ac122#libs/langgraph/langgraph/pregel/main.py` ——

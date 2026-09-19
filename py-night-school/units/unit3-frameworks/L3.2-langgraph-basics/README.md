@@ -86,7 +86,9 @@ class ClaimState(TypedDict):
 ### 2.3 Annotated 与 reducer：合并 vs 覆盖
 
 `Annotated[T, meta]` 是 typing 的**元数据包**：第一参是类型，后面随便挂什么，静态检查器
-只看第一参，框架在运行时读 `__metadata__`。langgraph 用它声明「这个键怎么合并」——
+只看第一参，框架在运行时读 `__metadata__`。langgraph 用它声明「这个键怎么合并」。通道
+（channel）＝每个状态键背后的『合并器』对象——LastValue / BinaryOperatorAggregate 是它
+的两种实现：
 
 - **无 reducer → LastValue 通道**：`update()` 取 `values[-1]`，谁后写谁赢（覆盖）；
 - **有 reducer → BinaryOperatorAggregate 通道**：对每个新值执行 `operator(旧值, 新值)`
@@ -168,8 +170,12 @@ return builder.compile()
 
 三个节点对着 mini-agent 逐个读：`reviewer` = 模型请求；`tools` = L2.2 的注册表分发
 （含 unknown_tool 回喂不抛）；`finalize` = L2.4 的 `model_validate_json` 出口。
-模型的工具绑定只剩一行——`ChatOpenAI(...).bind_tools([check_budget, verify_invoice])`：
+`ChatOpenAI` 是 langchain（第三个包 `langchain-openai`）对 chat-completions 客户端的封装——
+等价于你 L2.1 手写的 client，`bind_tools` 自动生成工具 schema。模型的工具绑定只剩一行——
+`ChatOpenAI(...).bind_tools([check_budget, verify_invoice])`：
 框架读函数签名自动生成 JSON Schema，对照 L2.2 你手写的那份，一个字段不差。
+
+> **IDE 侧（PyCharm / IDEA + Python 插件）**：断点打在 `make_reviewer` 与 `tools_node` 两个节点函数内、Debug 跑 demo_trace——Variables 面板亲眼看「节点收整份 state、返回更新 dict」，这是本单元「调试器比终端强」的最佳代言。
 
 ### Step 3：离线跑通四用例（10 分钟）
 
@@ -276,9 +282,10 @@ uv run python code/demo_trace.py --real CLM-2026-0001
 ## 4. 练习（本课过关点）
 
 规则：**单变量编辑约束**——只改 TODO 标注区与所需的顶部 import（骨架只预置了 given 部分用到的）。
-卡住先想 5 分钟，再看渐进提示（在 exercises/ 目录下）：
+卡住先想 5 分钟，再看渐进提示：
 
 ```bash
+cd exercises
 uv run python -c "from hints import hint; print(hint('ex1', 1))"
 ```
 
@@ -367,7 +374,7 @@ uv run pyright
 | `REGISTRY` 注册表分发 + unknown_tool 回喂 | `tools` 节点（同样的注册表、同样的纪律） |
 | `max_turns` 轮数预算 → `AgentBudgetExceeded` | `recursion_limit` superstep 预算 → `GraphRecursionError` |
 | `AgentResult`（回答/轨迹/轮数三件套） | 状态本身（messages/events/advice 就是档案） |
-| 手写轨迹打印 | `astream(stream_mode=...)` 免费获得 |
+| 手写轨迹打印 | `astream(stream_mode=...)` 免费获得（astream＝invoke 的流式版，逐 superstep 吐状态——L2.3 手写 SSE 循环的框架版） |
 
 一句话总结：**框架替你付掉的就是 while 那十行**，外加免费的流式可观测——以及 L3.3 即将
 登场的、手写版永远给不了的检查点。

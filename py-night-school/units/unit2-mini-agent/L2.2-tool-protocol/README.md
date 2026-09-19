@@ -217,8 +217,10 @@ uv run python code/demo_registry.py
   [最终回答] 报销单 CLM-2026-0002（项目验收宴请）预审拒绝：单笔 8800 分超过 5000 分上限。
 ```
 
-`get_claim` 读的是仓库共享素材 `data/expense/budget_mock.json`（明线纪律：素材唯一来源）。
-注意这个 while 循环——它已经是 ReAct 循环的雏形，只是没有轮数预算；L2.3 把它抽成类、
+> **IDE 侧**：Debug 跑 `demo_registry.py`，断点打在 `model_validate_json` 那行前后——亲眼看 `arguments` 从 str 变 dict，「字符串套娃」拆封的瞬间。
+
+`get_claim` 读的是仓库共享素材 `data/expense/budget_mock.json`（素材唯一来源是 data/）。
+它已经是 ReAct（Rea**soning + Act**ing，L2.3 主讲）循环的雏形，只是没有轮数预算；L2.3 把它抽成类、
 配上 `ModelClient` 协议与预算。
 
 ### Step 3：（可选）真实端点

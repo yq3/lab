@@ -36,11 +36,15 @@ handoff/guardrail 你写节点与边        子代理中间件      web 工具�
   `unit2-mini-agent/milestone/`。
 - **离线可验收的底线不变**：L2.3 的本地 mock 端点（协议级测试替身，Java 同学理解为
   WireMock）本学段继续服役——四个框架的模型调用全部指向它，`uv run pytest` 照样零 key
-  三态全绿。真实端点是可选加餐（`.env` 三变量 + `--real`）。
+  三条验收命令全绿。真实端点是可选加餐（`.env` 三变量 + `--real`）。
 - **openai-agents 第一件事是关 trace 外发**：`set_tracing_disabled(True)`——不默认把
   你的会话发去 OpenAI 服务器，这是生产习惯，也是本教程的端点中立纪律。
 - **可弃子与必修**：L3.1 / L3.5 / L3.6 时间紧可跳过，langgraph 三连（L3.2–L3.4）不可省；
   L3.7 是平台形态半日游，L3.8 是对照总结课（结业自查表）。
+- **源码克隆约定**：本学段与 Unit 4 的源码路标统一把仓库克隆到 `~/develop/opensource/<仓库名>`
+  （macOS/Linux 的家目录；Windows 的 PowerShell / cmd **不会**为命令参数展开 `~`，请统一放
+  `%USERPROFILE%\develop\opensource`——PowerShell 里即 `$env:USERPROFILE\develop\opensource`，
+  讲义中的 `~/develop/opensource` 均指该目录）。需要锚定版本的课，动手步里带 clone + checkout。
 
 ## 同题 demo 契约（四框架共用的「题面」）
 
@@ -80,7 +84,7 @@ meta 检查（三种 decision、两个部门必须齐），并用 `mock_tools.CA
 
 | 课 | 框架 | 一句话 |
 |---|---|---|
-| [L3.1](./L3.1-openai-agents/README.md) | openai-agents | 极简原语：Agent / handoff-as-tool / guardrail / RunState 的 HITL（先关 trace 外发） |
+| [L3.1](./L3.1-openai-agents/README.md) | openai-agents | 极简原语：Agent / handoff-as-tool / guardrail / RunState 的 HITL（human-in-the-loop，人审介入；先关 trace 外发） |
 | [L3.2](./L3.2-langgraph-basics/README.md) | langgraph ① | StateGraph / 状态 schema / 条件边 / subgraph |
 | [L3.3](./L3.3-langgraph-checkpoint/README.md) | langgraph ② | checkpoint / interrupt：暂停→杀进程→恢复（HITL 底层） |
 | [L3.4](./L3.4-langgraph-fanout/README.md) | langgraph ③ | `Send` 动态扇出；`create_react_agent` 源码导读（对照 mini-agent） |

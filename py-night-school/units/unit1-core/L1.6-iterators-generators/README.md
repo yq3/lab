@@ -58,7 +58,7 @@ Python 这个「一段式 + 异常终止」不是偷懒，是哲学：**先斩�
 ```python
 claims = [1200, 3500]
 iter(claims) is claims  # False：list 不是迭代器，iter() 现造一个
-gen = (c for c in claims)
+gen = (c for c in claims)  # （圆括号版＝生成器表达式，§2.4 正式讲，这里先借它一用）
 iter(gen) is gen  # True：生成器自己就是迭代器
 ```
 
@@ -151,7 +151,7 @@ def all_expenses(lines):
 
 ### 2.7 惰性的价值：内存恒定 + 短路省功
 
-- **内存恒定**：处理一个 10 GB 流水文件，`readlines()` 要全装进内存；生成器管线任意时刻只握一行。本课 Step 2 用 tracemalloc 实测峰值差异；
+- **内存恒定**：处理一个 10 GB 流水文件，`readlines()` 要全装进内存；生成器管线任意时刻只握一行。本课 Step 2 用 tracemalloc（标准库的内存峰值剖析器，≈ 轻量版 JFR / heap 直方图）实测峰值差异；
 - **短路**：`any(c > 5000 for c in amounts)` 找到第一个超标就停，后面的数根本不会被拉出来。Step 3 用「计数器」把这件事变成可见的断言（练习 2 的考点）。
 
 ### 2.8 预告：async generator（L1.9 的主角）
@@ -172,6 +172,8 @@ uv run python code/iter_basics.py
 ```
 
 对照输出与 §2.3 的逐行解释：第一段验证「手工 while + next + StopIteration 与 for 等价」，第二段看函数怎么在 yield 处冻结、被 next 唤醒。
+
+> **IDE 侧**：给三个 `yield` 行各打断点、Debug 跑——每按一次 Step，函数就停在 yield 行上「冻结」，Frames 面板里能看到挂起的生成器帧和还活着的局部变量。「暂停 / 恢复」是 print 演不出来的部分，调试器可以。
 
 ### Step 2 报销流水惰性管线（内存恒定的实测）
 

@@ -1,6 +1,6 @@
 # Unit 5 里程碑：毕业设计收口（学段结业项目 · 全教程收官件）
 
-> 任务书 + 验收。没有六段式讲义——三十课走到这里，讲义已经不需要了：**四课攒的每一层
+> 任务书 + 验收。没有逐节讲义——三十课走到这里，讲义已经不需要了：**四课攒的每一层
 > 都在这个目录里，毕业判据是你亲手把它们钉进测试**。CURRICULUM 对本里程碑的定义：
 > 可运行 PoC + 三条主链路（审批暂停/恢复、拒绝回环、fail-closed 拒绝）pytest 集成测试
 > 全绿 + JAVA-MAPPING.md。
@@ -43,6 +43,8 @@ L5.4 门——每课的 exercises 都是你填的）；毕业设计考的不是�
 | TODO(g2) `assert_hash_rotated` | ②核心 | 拒绝回环重生成后两张审批单的 content_hash 非空且互异（A6） |
 | TODO(g3) `assert_zero_payments` | ③核心 | 当日账本聚合上 payment.executed 零条（「没付」的铁证） |
 
+> **IDE 侧**：写断言前先 Debug 跑 `tests/test_graduation.py` 的单个链路测试（运行 ≠ 修改，不违「不要改」）——在断言处用 Evaluate Expression 直接执行 `store.events_for(...)` 看事件元组的真实形状，回去再填 `graduation_checks.py` 的 TODO。「先看形状再写断言」正是 debugger 相对 print 的强项。
+
 卡住先想 5 分钟，再看三级渐进提示（每次只看一级）：
 
 ```bash
@@ -68,7 +70,7 @@ Plan 判别联合 / fail-closed 执行门 / 缓存即审计 / 拒绝回环。补
   亲眼见过；克隆里没有的老实写「需自建」+ 一句为什么；
 - 结构把关在 `tests/test_mapping_meta.py`：主表 ≥13 行、四列非空、「需自建」两行保留
   （图版本绑定 / 当日账本——诚实纪律不可丢）、占位行数与全文标记数互证；
-- 参考对照版在 `solution/JAVA-MAPPING.md`（golden answer 行尾降级）——先自己写再对，
+- 参考对照版在 `solution/JAVA-MAPPING.md`（golden answer 以行尾注释给出，避免剧透）——先自己写再对，
   差异处才是认知增量。
 
 ## 验收（全部绿 = Unit 5 结业 = 全教程毕业）
@@ -91,11 +93,11 @@ TODO 未填抛 `NotImplementedError`，落在 tests/——三态验证允许的�
 
 ```bash
 cd py-night-school
-python3 scripts/three_state_check.py units/unit5-capstone/L5.1-plan-graph
-python3 scripts/three_state_check.py units/unit5-capstone/L5.2-approval-api
-python3 scripts/three_state_check.py units/unit5-capstone/L5.3-event-sourcing
-python3 scripts/three_state_check.py units/unit5-capstone/L5.4-execution-gate
-python3 scripts/three_state_check.py units/unit5-capstone/milestone
+uv run python scripts/three_state_check.py units/unit5-capstone/L5.1-plan-graph
+uv run python scripts/three_state_check.py units/unit5-capstone/L5.2-approval-api
+uv run python scripts/three_state_check.py units/unit5-capstone/L5.3-event-sourcing
+uv run python scripts/three_state_check.py units/unit5-capstone/L5.4-execution-gate
+uv run python scripts/three_state_check.py units/unit5-capstone/milestone
 ```
 
 （最后一行是本里程碑自己的三态：发货态精确红 → solution 覆盖后的毕业态全绿。）

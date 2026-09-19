@@ -1,6 +1,6 @@
 # Unit 3 里程碑：选型工作台（学段结业项目）
 
-> 任务书 + 验收。没有六段式讲义——四重奏跑完了，最后一晚把「选哪个框架」从
+> 任务书 + 验收。没有逐节讲义——四重奏跑完了，最后一晚把「选哪个框架」从
 > **体感**变成**证据**：三个动作，全部命令化、口径可复现。产出物就是 L3.8
 > 对照总结课的输入：你自己的数据与结论。
 
@@ -17,8 +17,8 @@
 
 ## 为什么是这副骨架（一个架构决定 + 三个新知识点）
 
-**为什么 pytest 不直接去跑兄弟课时？** 三态验证的毕业态把本目录镜像到临时目录时
-只带 `milestone/` 与 `data/`——兄弟课时不在镜像里，测试碰它们必红。所以 bench 的
+**为什么 pytest 不直接去跑兄弟课？** 课程的验收脚本在一个只含 `milestone/` 与
+`data/` 的干净副本里跑 pytest——兄弟课时不在副本里，测试碰它们必红。所以 bench 的
 「执行」（subprocess 逐课真跑）是**学员命令**，你在真实仓库里自己跑；pytest 只测
 **解析层纯函数**（判 pass/fail、汇总、降级）与「目录缺失→SKIPPED」分支，全部用
 合成夹具离线跑。执行与解析分层，两边都能各自验收。
@@ -34,12 +34,12 @@
    文件句柄得到 dict——数 uv.lock 的 `[[package]]` 就是 `len(data["package"])`，
    不用任何第三方依赖。
 3. **ast 定位函数数行数**（tablegen.py，L3.4 `count_loc.py` 的同款纪律）：
-   `ast.parse` → 按 qualname 找 def/class → 行区间剔 docstring → 数非空非注释行。
-   「292→249」的教训在这里的制度化：量化结论必须写明工具与口径，禁止 grep 管道。
+   `ast.parse` → 按 qualname（带外层类/函数名的限定名，如 `Crew.kickoff`）找 def/class → 行区间剔 docstring → 数非空非注释行。
+   量化结论必须写明工具与口径（Unit 2 的 292→249 教训的制度化），禁止 grep 管道。
 
 ## 动作一：bench 真跑五课时（本里程碑的灵魂）
 
-在**真实仓库**的本目录下跑（毕业态镜像里没有兄弟课时，bench 会如实标 SKIPPED）：
+在**真实仓库**的本目录下跑（干净副本里没有兄弟课时，bench 会如实标 SKIPPED）：
 
 ```bash
 uv run python bench.py
@@ -84,7 +84,7 @@ uv run python tablegen.py
 及每行的「= L3.8 装配 + 节点 + 胶水」拆分）：
 
 ```text
-- 手写总行数（装配+节点+胶水）：ast 定位各课手写函数（对照行是被框架替掉的四个零件），剔 docstring 后数非空非注释行。与 L3.8 决策表数据页的「装配 loc / 自写节点/循环 loc」两列刻意不同名：本列 = 那两列之和 + 胶水（入口消息 / 模型客户端 / run_review 运行编排），发货态对账 29=15+0+14、63=10+20+33、28=6+0+22、71=8+0+63、33=9+0+24；
+- 手写总行数（装配+节点+胶水）：ast 定位各课手写函数（对照行是被框架替掉的四个零件），剔 docstring 后数非空非注释行。
 
 | 框架与装配 | 依赖数（uv.lock 包） | 手写总行数（装配+节点+胶水，ast 口径） |
 |---|---|---|
@@ -138,6 +138,8 @@ uv run python tablegen.py
 
 然后填 `summary.py::aggregate()`（唯一编码 TODO）：把 bench 结果、tablegen 数据、
 笔记的「锁定性一句话」按框架 key join 成决策表。卡住先想 10 分钟，再看三级提示：
+
+> **IDE 侧（PyCharm / IDEA + Python 插件）**：本里程碑唯一编码点 `aggregate()`——直接 Run `summary.py` 报错时，在 `aggregate()` 内打断点 Debug，Variables 面板看三路数据（bench 结果 / tablegen 数据 / 笔记）的真实形状再拼，字段对不上是这里最高频的卡点。另外：bench.py 的五课时重跑是子进程——在子进程内打断点不命中是正常的，调试请调解析层的纯函数。
 
 ```bash
 uv run python -c "from hints import hint; print(hint('aggregate', 1))"
@@ -197,7 +199,7 @@ milestone/
 │   ├── test_tablegen.py
 │   ├── test_notes_meta.py
 │   └── test_summary.py  # 含 3 个设计内红（aggregate TODO）
-├── solution/            # summary.py 完成版（毕业态覆盖到根）+ notes/ 完成版（不走覆盖，供誊写对照）
+├── solution/            # summary.py 完成版（结业时复制到本目录根替换 TODO 版）+ notes/ 完成版（不复制，供誊写对照）
 └── pyproject.toml / uv.lock / .env.example / .python-version
 ```
 

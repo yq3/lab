@@ -20,10 +20,11 @@ uv run build.py --serve          # 构建并预览 http://127.0.0.1:8000（见�
 `build.py` 生成（gitignore）。**改课程内容永远改 `units/` 下的源文件**，然后重跑构建——
 不要手改 `.stage/`、`dist/`、`mkdocs.yml`。
 
-本地预览推荐静态服务（重建不会弄死服务）：
+本地预览推荐静态服务（重建不会弄死服务；`uv run python` 三端一致，Windows 没有 `python3`、多步命令也不用 `&&` 串联）：
 
 ```bash
-uv run build.py && python3 -m http.server 8347 -d dist
+uv run build.py
+uv run python -m http.server 8347 -d dist
 ```
 
 ## 架构决策（变更前先读）
@@ -219,8 +220,8 @@ handbook/
    `.md-typeset a`（0-1-1），主按钮文字被主题链接色覆盖。→ 自定组件挂到内容上下文下写：
    `.md-typeset a.ns-btn--primary`。
 8. **`mkdocs serve` 在本管线里没法用**：build.py 每次构建 `rmtree(.stage/)`，
-   serve 的 watcher 失去监听目录直接崩。→ 预览改静态服务产物：`python3 -m http.server
-   8347 -d dist`（重建不影响服务）。
+   serve 的 watcher 失去监听目录直接崩。→ 预览改静态服务产物：`uv run python -m http.server
+   8347 -d dist`（重建不影响服务；`uv run python` 三端一致，Windows 没有 `python3`）。
 9. **`generator: false` 报 Unrecognised configuration**：它是 `theme:` 的子键，放顶层
    无效。→ 挪进 `theme:` 块（页脚不再显示主题署名）。
 10. **印章竖排溢出**：`writing-mode: vertical-rl` + 固定方形盒在小尺寸下字符计算超框，

@@ -14,7 +14,7 @@
   **它的循环对应 mini-agent 的哪十行**（§6 对照表）；
 - 用 `function_tool` 直包普通函数（签名 + docstring 自动生成工具 schema），对照
   L2.2 手写注册表的每一条纪律；
-- 装配 handoff-as-tool 双 agent 与 InputGuardrail 输入护栏，并用 wire 取证解释
+- 装配 handoff-as-tool 双 agent 与 InputGuardrail 输入护栏，并用 wire（HTTP 线上的原始报文）取证解释
   「转交」与「绊线」在协议层到底是什么；
 - **第一件事形成肌肉记忆：`set_tracing_disabled(True)`**——这门框架默认把会话
   trace 外发到 api.openai.com，端点中立的工程纪律要求先关（§2.7 有源码证据）；
@@ -142,8 +142,8 @@ Filter 完全不同的语义要刻进脑子：
 
 ### 2.7 tracing：默认外发，先关再说
 
-每次 `Runner.run` 都会产一整棵 span 树（agent/turn/generation/function），
-默认交给 `BatchTraceProcessor → BackendSpanExporter`，其端点**硬编码**
+每次 `Runner.run` 都会产一整棵 span 树（agent/turn/generation/function 四种），
+默认经两个内部 processor 接力外发，端点**硬编码**
 `https://api.openai.com/v1/traces/ingest`（openai/openai-agents-python@fbd2dbca#src/agents/tracing/processors.py）。
 只要环境里有 `OPENAI_API_KEY`——配过 .env 的同学都有——即使你的模型端点是
 GLM/DeepSeek/本地 vLLM，会话内容也会发往 OpenAI。没配 key 时不发只告警，
@@ -281,8 +281,9 @@ InputGuardrailTripwireTriggered: output_info={'claim_id': None, 'known': False}
 ```
 
 护栏函数在 `code/demo_guardrail.py` 里只有三步：抽单号 → 查 mock 用例表 →
-包 `GuardrailFunctionOutput`。异常类型从 `agents.exceptions` 导入——框架异常
-也是 API 的一部分（ex2 会再写一遍）。
+包 `GuardrailFunctionOutput`。异常类型从 `agents.exceptions` 导入（注意：pip
+包叫 `openai-agents`，import 名却是 `agents`——Maven 的 artifactId≠Java 包名，
+同款现象）——框架异常也是 API 的一部分（ex2 会再写一遍）。
 
 ### Step 5（进阶）：RunState 的 HITL 试跑（20 分钟，可留到 L3.3 前）
 
@@ -312,7 +313,7 @@ from_string / Runner.run 恢复），不深入实现——L3.3 讲 checkpoint �
 ### Step 6（可选）：真实端点
 
 ```bash
-cp .env.example .env
+cp .env.example .env   # Windows: copy .env.example .env
 ```
 
 （Windows PowerShell：`copy .env.example .env`；填 `OPENAI_BASE_URL` /
@@ -322,6 +323,8 @@ cp .env.example .env
 uv run python code/demo.py --real
 uv run python code/demo.py --real CLM-2026-0003
 ```
+
+> **IDE 侧（PyCharm / IDEA + Python 插件）**：第一个带参运行——Run → Edit Configurations → Parameters 填 `--real CLM-2026-0003`，之后 L3.2 的单号、L3.3 的 start/approve 子命令全是同一招，不用再敲终端。
 
 台词不再预生成——调哪个工具、按什么顺序、给什么结论，全由模型自己决定；
 `max_turns` 默认 10 兜底。注意两点：① 模型质量不可控，四张单可能不是全对
@@ -341,7 +344,7 @@ uv run python -c "from hints import hint; print(hint('ex1', 1))"
 | 题 | 文件 | 考察 |
 |---|---|---|
 | ex1 | `exercises/ex1_handoff.py` | 单 agent → 审查员+复核专员双 agent（handoff-as-tool）；验收：四用例契约决策不变、ESCALATE 单 3 请求且 last_agent 换人 |
-| ex2 | `exercises/ex2_guardrail.py` | 无护栏入口 → InputGuardrail 拦不存在单号；验收：好单号照常出 Advice、坏单号抛 tripwire 异常且 output_info 对口径 |
+| ex2 | `exercises/ex2_guardrail.py` | 无护栏入口 → InputGuardrail 拦不存在单号；验收：好单号照常出 Advice、坏单号抛 tripwire 异常且 output_info 与护栏实际输出逐字段一致 |
 | ex3 | `exercises/ex3_budget.py` | 默认预算 → 显式小预算 + 取证记账；验收：`MaxTurnsExceeded` 恰在第 N 轮、REQUESTS 账本兑现 |
 
 验收（三条同时全绿 = 本课毕业）：
@@ -398,7 +401,7 @@ uv run pyright
 
 源码路标（本地克隆 `~/develop/opensource/openai-agents-python`，HEAD fbd2dbca
 ＝发布版 0.22.2 之后 5 个提交——CI/文档为主，唯一代码修复在 server-managed resume
-路径，本课引用的文件两版一致；依赖按宪法钉 `openai-agents==0.22.2`）：
+路径，本课引用的文件两版一致；依赖按课程纪律钉 `openai-agents==0.22.2`）：
 
 - openai/openai-agents-python@fbd2dbca#src/agents/agent.py —— `Agent` dataclass
   与全部字段语义（instructions 可为函数、handoffs/output_type/guardrails 的挂载点）；

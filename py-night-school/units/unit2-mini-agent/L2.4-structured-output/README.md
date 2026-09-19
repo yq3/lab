@@ -66,7 +66,7 @@ class PreapprovalDecision(BaseModel):
     claim_id: str = Field(pattern=r"^CLM-\d{4}-\d{4}$")
     verdict: Verdict
     reason: str = Field(min_length=1)
-    reviewer: str = "night-school-agent"  # 有默认值 → 不进 required（L2.2 的漂移点）
+    reviewer: str = "night-school-agent"  # 有默认值 → 不进 required（L2.2 §2.2 讲过的 required 行为）
 ```
 
 `Literal[...]` 是类型层的**值域枚举**：pyright 拿它做静态收窄（你传 `"REJECT:NEW_RULE"`
@@ -74,11 +74,13 @@ class PreapprovalDecision(BaseModel):
 JSON Schema：`"verdict": {"enum": ["PASS", "REJECT:INVALID_AMOUNT", ...], ...}`——
 **值域对模型可见**，幻觉率显著下降。
 
+> **IDE 侧**：正文开了「编辑器当场红线」的支票，亲手兑现一次——临时写 `PreapprovalDecision(claim_id="X", verdict="REJECT:NEW_RULE", reason="x")`，看 IDE 标红与悬停说明（PyCharm 自带检查即可），再撤销。
+
 对照 Java：`enum Verdict { PASS, ... }` 是「真枚举类」（有 name/ordinal/可挂方法）；
 `Literal` 只是「类型注解里的一组字符串」，更轻但也更浅——没有 `values()`、没有
 switch 穷尽检查。夜校的约定（返回码 `REJECT:<原因>` 枚举风格）用 `Literal` 表达
 刚好：**值域是文档、校验、schema 三处共享的一张表**。这也是 `REJECT:NEW_RULE`
-必须抛错的原因（ex3 的 fail-closed）：值域是闭合集合，宁可失败也不猜。
+必须抛错的原因（ex3 的 fail-closed）：值域是闭合集合，宁可失败也不猜。顺带辨三个近形词：fail-fast（迭代器快速暴露并发修改）、fail-loud（本课的『重试耗尽响亮抛出』）、fail-closed（值域外一律拒绝）——前两个暴露问题，最后一个拒绝放行。
 
 一个意外之喜（今晚验收里就会遇到）：pyright 对 Literal 的静态收窄太尽职，
 测试里**故意**传非法值的用例得走 `model_validate(dict)` 的 dict 路径——
@@ -139,8 +141,8 @@ raise StructuredOutputError(f"{attempts} 次尝试仍未得到合法决策 JSON 
 
 ### 2.5 端点侧约束 vs 客户端方案
 
-很多端点支持 `response_format: {"type": "json_schema", ...}`——把 schema 交给端点，
-由端点约束解码器，理论上从根上消灭格式错误（OpenAI 文档称之为 Structured Outputs）。
+很多端点支持 `response_format: {"type": "json_schema", ...}`——把 schema 交给端点做受约束解码（生成时只允许吐出符合 schema 的 token），
+理论上从根上消灭格式错误（OpenAI 文档称之为 Structured Outputs）。
 取舍表：
 
 | | 端点侧 `response_format` | 客户端方案（本课） |
@@ -153,7 +155,7 @@ raise StructuredOutputError(f"{attempts} 次尝试仍未得到合法决策 JSON 
 夜校主线用客户端方案——**端点中立纪律**（GLM/DeepSeek/Qwen/本地 vLLM 都能跑同
 一份代码）；工程实践是两层叠加：端点支持就带上 `response_format`，客户端的解析
 校验回喂照留（兜底 + 审计）。openai-agents 的 `output_type` 就是这两层的框架化
-（延伸路标）。
+（见 §6 延伸）。
 
 ## 3. 动手代码
 

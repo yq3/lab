@@ -60,7 +60,7 @@ messages = [system, user]
         messages.append({"role": "tool", "tool_call_id": id, "content": result})
 ```
 
-LangGraph 的 `create_react_agent`、openai-agents 的 `Runner.run`、cookbook 原典的
+LangGraph 的 `create_react_agent`、openai-agents 的 `Runner.run`、cookbook 对照原件的
 `run_full_turn`——骨架都是这十行。你在 Unit 3 每个框架课都会回来对照：**这层抽象
 替我付掉的代码，就是这十行，加上可观测性、检查点、并发调度**。
 
@@ -103,8 +103,8 @@ L1.2 讲过：Protocol 是**结构化类型**——`ScriptedModel` 没有 `class
 ### 2.4 加餐：朴素上下文管理
 
 无状态协议的代价：**历史每轮全量重发**（L2.1 §2.2），历史越长请求越贵、越可能
-顶破模型的上下文窗口。生产框架的答案是 tokenizer 精确计数 + checkpoint 策略
-（langgraph 的 checkpointer，L3.3 会实验它）；本课用「字符近似」把问题讲清楚：
+顶破模型的上下文窗口。生产框架会用更精确的计数与存档策略
+（L3.3 的 checkpointer 再见）；本课用「字符近似」把问题讲清楚：
 
 ```python
 def estimate_chars(messages) -> int:
@@ -183,6 +183,8 @@ uv run pytest code/
 `turns` 实际轮数）、`run` 的 for 循环与两个出口。明天 L2.4 的
 结构化输出，就是给这个循环的「出口」再上质量闸。
 
+> **IDE 侧**：Debug 跑 `demo_agent.py`，断点打在 `for turn` 循环与两处 `messages.append`——§2.1 那十行伪代码变成可暂停的实物，Watch 里 messages 列表逐轮生长。
+
 ### Step 4：（可选）真实端点
 
 ```bash
@@ -252,14 +254,14 @@ uv run pyright
   （而不是循环外掐秒表）；预算耗尽抛**有名异常**（`AgentBudgetExceeded`），让上层决定
   重试、降级还是报警（L1.7 异常分层的复习）；异常信息里带轮数与历史长度——
   值班同学第一眼就要知道烧了几轮。langgraph 的 `recursion_limit`、openai-agents 的
-  `max_turns` 是同一条纪律的框架化（延伸路标）。
+  `max_turns` 是同一条纪律的框架化（见 §6 延伸）。
 
 ## 6. 延伸
 
 - openai/openai-cookbook@0aaed0f1d#examples/Orchestrating_agents.ipynb —— **对照原件**，
   今晚必读「Executing Routines」一节：官方 `run_full_turn` 与我们的 `run` 并排读，
   逐行找对应（它用 `tools_map` 分发、我们用注册表；它没有预算——你会带着 §5 的
-  眼光发现原典也留着这个坑）。Unit 3 的对照问题从今晚开始积累。
+  眼光发现对照原件也留着这个坑）。Unit 3 的对照问题从今晚开始积累。
 - langchain-ai/langgraph@f6d95abbe#libs/prebuilt/langgraph/prebuilt/chat_agent_executor.py ——
   `create_react_agent` 的本体（已搬进独立的 prebuilt 包）：搜工具节点装配——
   它是把今晚 81 行的循环包进 StateGraph 的产物（L3.4 会精读，先混个眼熟）。

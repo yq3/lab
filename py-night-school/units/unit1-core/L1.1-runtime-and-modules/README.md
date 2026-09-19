@@ -156,11 +156,11 @@ public class Cli {
 跑一遍 `code/demo_name.py` 就能肉眼看到双身份（Step 3 你会亲手跑）：
 
 ```text
-$ python demo_name.py            ← 直接运行
+$ uv run python demo_name.py            ← 直接运行
 demo_name 模块正在被加载，此刻 __name__ == '__main__'
 → 我是入口（直接运行），走进了 __main__ 分支
 
-$ python -c "import demo_name"   ← 被导入
+$ uv run python -c "import demo_name"   ← 被导入
 demo_name 模块正在被加载，此刻 __name__ == 'demo_name'
 → 我是被导入的，__main__ 分支不会执行
 ```
@@ -176,7 +176,7 @@ import 找模块的搜索路径是 `sys.path` 列表，对照：
 | classpath（启动时定死，`-cp` / 环境变量） | `sys.path`（**运行中的普通列表**，可改） | Python 的搜索路径是可编程对象 |
 | 当前目录默认在 classpath 里（`java Hello`） | 脚本所在目录自动**插队到 `sys.path[0]`** | 这是很多「为什么这里能 import」的答案 |
 | `CLASSPATH` 环境变量 | `PYTHONPATH` 环境变量（**插在标准库之前**，因此能遮蔽标准库） | 同为「追加搜索路径」的逃生门，Python 这条优先级更高 |
-| 依赖 jar 全部平铺在 classpath | 每个项目一个 `.venv/`，依赖只在 `site-packages` | uv 在 L0.1 已替你管好 |
+| 依赖 jar 全部平铺在 classpath | 每个项目一个 `.venv/`，依赖只在 `site-packages`（venv 里平铺第三方包的目录——L0.1 的虚拟环境 101） | uv 在 L0.1 已替你管好 |
 
 注意 `sys.path[0]` 随**启动方式**变：直接跑脚本时是**脚本所在目录**；`python -m 包.模块` 时是**当前目录**；`python -c` 时也是当前目录。这个细节是 §5 陷阱的直接成因。
 
@@ -193,7 +193,7 @@ import 找模块的搜索路径是 `sys.path` 列表，对照：
 
 没有 group 的直接后果：PyPI 上的名字是稀缺资源（`pytest` 被官方占了，你就只能叫 `pytest-anyio` 这类带前缀的名字）。
 
-### 2.7 语言杂项补讲：f-string、字符串不可变、print 的 sep/end（推导式速览，切片与解包）
+### 2.7 语言杂项补讲：f-string、字符串不可变、print 的 sep/end、推导式速览、切片与解包
 
 前面代码反复用了几个「Java 没有对应物」的形态，这里一次讲透。
 
@@ -224,7 +224,7 @@ print("done")  # loading...done（接在上行后面）
 ```python
 [int(part) for part in "1200,3500".split(",")]  # [1200, 3500]  ≈ map(Integer::parseInt)
 [c for c in items if c > 5000]  # 过滤          ≈ filter
-any(c <= 0 for c in items)  # 生成器表达式：惰性逐个取，any 短路
+any(c <= 0 for c in items)  # 生成器表达式（≈ Stream.anyMatch；生成器 L1.6 主讲）：惰性逐个取，any 短路
 ```
 
 **切片与解包**——`序列[起:止]` 取一段（**含头不含尾**，`argv[1:]` 是「从下标 1 到末尾」）；`a, b = 对子` 把元组拆给多个变量：
@@ -385,6 +385,8 @@ uv run pyright
 
 - **Java 直觉为何失效**：Java 的类路径与包结构天然统一——`java -cp . com.acme.Cli` 从哪个目录敲都行，「文件在哪」与「类是谁」无关。Python 里**文件的身份随启动方式变**：`-m` 启动时 `cli.py` 是包成员 `expense.cli`（`__name__` 带包前缀，`__package__` 有值，相对导入 `.rules` 有处安放）；直接跑时它是顶层脚本 `__main__`（无包上下文，`.rules` 无从解析）。同一个文件，两种身份——Java 里没有这种事。
 - **修复与纪律**：**包内入口永远 `python -m 包.模块`**，并且站在能让包被找到的目录上（包的父目录，或用 PYTHONPATH 补位）。反过来，如果你拿到一个「单文件工具」想直接跑，就不要在它里面用相对导入——顶层脚本的 import 一律写绝对形式。看到这条 ImportError，第一反应不该是「改 import」，而是「改启动方式」。
+
+> **IDE 侧（PyCharm / IDEA + Python 插件）**：在 PyCharm 里点 `cli.py` 行首 gutter 的绿色三角 = 直接跑文件——第一次运行就会复现上面这个 ImportError，这不是你的锅。正解：Run → Edit Configurations → + → Python，Launch option 选 **Module name** 填 `expense.cli`、Working directory 设 `code/`。Run Configuration 这个概念后面 28 课的带参运行全靠它（L0.1 Step 7 对照表的「带参数运行」行）。
 
 ## 6. 延伸
 

@@ -16,8 +16,8 @@
   亲手跑通这条管线（快照→投票→合成→clamp→回执，全程离线零 key）；
 - **改对**：完成三道改造题——自己实现 `weighted_vote` 加权合成（ex1）、`DecisionCache`
   缓存即审计（ex2）、`apply_limits` 双闸门 clamp（ex3），数学精确到分；
-- **精读**：按 §6 路标读产品源码的六个文件（run_cycle / construction / limits / cache /
-  llm_agent / buffett），每个机制在 `code/` 里都有对版件，读完能回答「为什么共识靠算术
+- **精读**：按 §6 路标读产品源码的八个文件（run_cycle / construction / limits / cache /
+  llm_agent / buffett / base / spec），每个机制在 `code/` 里都有对版件，读完能回答「为什么共识靠算术
   不靠辩论、为什么缓存即审计、为什么 LLM 影响力必须终止于 Signal」。
 
 **完成判据**：本目录下三条命令同时全绿（`exercises/` 是设计内的 TODO 红）——
@@ -54,8 +54,11 @@ STRATEGY  = 一队分析师 + 合成政策 + 资本切片（"pod"）      Strate
 MODEL     = 一个观点生成器 -> Signal                       AlphaModel 实现
 ```
 
+（mandate＝一份写死额度与权限的授权合同 YAML——「给 agent 读的合同」。）
+
 MODEL 层是本课主角：**LLM 人格 ×5**（Buffett/Munger/Graham/Lynch/Druckenmiller，每个 =
-一个 name + 一段 system prompt，机制全在基类 `LLMAgent`）与**量化模型**（PEAD，纯数学）
+一个 name + 一段 system prompt，机制全在基类 `LLMAgent`）与**量化模型**
+（PEAD＝盈余公告后价格漂移的经典量化因子，纯数学）
 实现**同一个 ABC**，对引擎完全可互换——「主观 pod 与量化 pod 同一个 spec 形状」。
 
 执行侧只有一条管线（`pipeline/run_cycle.py`）：
@@ -63,6 +66,8 @@ MODEL 层是本课主角：**LLM 人格 ×5**（Buffett/Munger/Graham/Lynch/Druc
 ```text
 run_cycle: point-in-time 数据 -> analysts 投票 -> blend 合成 -> risk clamp -> 执行 -> 记录
 ```
+
+point-in-time＝只喂当时已发生的数据——回测不偷看未来。
 
 **一管线三模式**：回测 = 历史时钟 + SimBroker 循环；「跑今天」= 同一 run_cycle 单 tick；
 paper/live（规划中）= 同一循环换时钟换 broker——**回测即生产代码路径**，研究实现与
@@ -92,8 +97,8 @@ Python 函数调用链，langchain 只当多厂商传输层用。它故意把 LL
 
 ### 2.3 风控光谱：本课站在第 ③ 层
 
-调研报告把金融产品的 LLM 风控分成五层（dimensions/A-金融交易组.md §4，模式编号来自
-research 报告）：
+课程的竞品调研把金融产品的 LLM 风控分成五层（模式编号一句话版见 Unit 5 开头的
+A 模式速查表）：
 
 ```text
 ① 观点层（prompt 里写风险人格）   ② 决策层（schema 校验失败 -> 弃权哨兵）
@@ -153,7 +158,7 @@ uv run python code/step1_blend.py
 [三] 全弃权：显式边界，不捏造中性
   conviction = None  <- None 而非 0.0：pipeline._decide 据此 ESCALATE 转人审
 [四] 权重即话语权：同一组票，把 budget 的权重 0.5 抬到 3.0
-  conviction = (0.8 + 3.0*(-0.6) + 0.9) / 5.5 = -0.0200  <- 反对票拿到了话语权
+  conviction = (0.8 + 3.0*(-0.6) + 0.9) / 5.0 = -0.0200  <- 反对票拿到了话语权
   产品对应物：mandate YAML 里的 model_weights（deep-value.yaml 给 graham 2.0 同款操作）
 ```
 
@@ -340,16 +345,20 @@ uv run python code/step3_limits.py
 [financialdatasets.ai](https://financialdatasets.ai) 与任一 LLM 厂商）：
 
 ```bash
-git clone https://github.com/virattt/ai-hedge-fund.git
+mkdir -p ~/develop/opensource
+git clone https://github.com/virattt/ai-hedge-fund.git ~/develop/opensource/ai-hedge-fund
+git -C ~/develop/opensource/ai-hedge-fund checkout fc1bf25
 ```
 
-在克隆目录里安装（pipx 与 uv tool 都行；产品 README 的开发路径是 poetry）：
+在克隆目录里安装（pipx——隔离安装 CLI 工具——与 uv tool 都行；产品的开发路径是
+poetry——产品自用的依赖管理器，≈ Maven）：
 
 ```bash
+cd ~/develop/opensource/ai-hedge-fund
 uv tool install . --force
 ```
 
-配好环境变量再跑单周期（PowerShell 用 `$env:` 语法）：
+配好环境变量再跑单周期（双端对照）：
 
 ```bash
 export FINANCIAL_DATASETS_API_KEY=<你的行情 key>
@@ -357,6 +366,15 @@ export HEDGE_FUND_LLM_MODEL=gpt-5.6
 export OPENAI_API_KEY=<你的 key>
 export OPENAI_API_BASE=<你的 OpenAI 兼容端点>
 aihf ~/.hedge-fund/mandates/example.yaml --tickers AAPL,MSFT
+```
+
+```powershell
+# Windows（PowerShell）
+$env:FINANCIAL_DATASETS_API_KEY = "<你的行情 key>"
+$env:HEDGE_FUND_LLM_MODEL = "gpt-5.6"
+$env:OPENAI_API_KEY = "<你的 key>"
+$env:OPENAI_API_BASE = "<你的 OpenAI 兼容端点>"
+aihf "$env:USERPROFILE\.hedge-fund\mandates\example.yaml" --tickers AAPL,MSFT
 ```
 
 三个细节：模型 id 由 `HEDGE_FUND_LLM_MODEL` 指定，provider 由 `llm/registry.py` +
@@ -438,7 +456,9 @@ uv run python -c "from hints import hint; print(hint('ex1', 1))"
 
 ## 6. 延伸
 
-- 源码路标（本地克隆 `~/develop/opensource/ai-hedge-fund`，HEAD 即此 commit，按图索骥；
+> **IDE 侧**：路标全是「文件路径 + 函数名」形态，在 IDE 里是按钮——⇧⇧（Windows：连按两次 Shift）按文件名直达，⌘B / Ctrl+B Go to Definition（如 LLMAgent → 缓存调用链），⌥F7 / Alt+F7 Find Usages（如 AlphaModel 在哪注册）：读 75 个文件的生产仓，导航键就是生产力。
+
+- 源码路标（本地克隆后 checkout 到 fc1bf25（Step 6 的命令已带），按图索骥；
   本节引用的行数均为 `wc -l` 口径，与 §3 Step5 的标注同一口径）：
   - `virattt/ai-hedge-fund@fc1bf25#hedge_fund/pipeline/run_cycle.py` —— 管线心脏：一条
     确定性函数调用链怎么组织「数据→投票→合成→风控→执行→记录」，以及「唯一不纯的一块」
@@ -470,5 +490,5 @@ uv run python -c "from hints import hint; print(hint('ex1', 1))"
 建议单→送审」确定性管线的投票段——固定拓扑、纯函数合成、数字全部代码算；apply_limits
 的 clamp 是 L5.4 fail-closed 执行门「限额裁剪」的直接先例（先单后总、只缩不放、每刀
 留事件）；缓存即审计是 L5.3「每个 LLM 决策可回放」的最经济实现——audit log 不用另建
-子系统，缓存文件就是审计记录（模式编号来自 research 报告的推荐架构，到 Unit 5 逐一对
-号）。下一课 L4.2 换 TradingAgents：共识从算术换成辩论——你会开始想念今晚的确定性。
+子系统，缓存文件就是审计记录（模式编号见 Unit 5 开头的 A 模式速查表）。下一课
+L4.2 换 TradingAgents：共识从算术换成辩论——你会开始想念今晚的确定性。

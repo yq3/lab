@@ -1,6 +1,6 @@
 # Unit 1 里程碑：async 并发 fetcher（学段结业项目）
 
-> 任务书 + 验收。没有六段式讲义——到这里，讲义是多余的：**零件前面九课全铸好了，拼装是你的事**。
+> 任务书 + 验收。没有逐节讲义——到这里，讲义是多余的：**零件前面九课全铸好了，拼装是你的事**。
 > 对应 CURRICULUM 结业自查第一条：「不查资料手写 async 并发 fetcher + retry 装饰器」。
 
 ## 场景（明线：报销域）
@@ -61,8 +61,8 @@ def retry(max_retries, exceptions):  # 第 1 层：收参数（带参装饰器�
   ```
 
 - 手动看效果：`uv run python fetcher.py`（演示入口已给，跑一次打印结构化报告）；
-- 零额外依赖：mock 端点是 `asyncio.sleep` + 内存数据；测试不用 pytest-asyncio——
-  验收测试本身就是「同步 test 函数 + `asyncio.run` 包异步断言」的模板示范（L1.8 §4）。
+- 零额外依赖：mock 端点是 `asyncio.sleep` + 内存数据；测试不用 pytest-asyncio（社区插件，让 test 函数直接 `async def`）——
+  验收测试本身就是「同步 test 函数 + `asyncio.run` 包异步断言」的模板示范（见 L1.8 的 `code/test_demos.py` 文件头与各练习测试，同款）。
 
 ## 验收（全部绿 = Unit 1 结业）
 
@@ -83,7 +83,9 @@ uv run ruff check .
 uv run pyright
 ```
 
-三条同时全绿，回到 [unit1-core/README.md](../README.md) 把里程碑打卡，然后进 Unit 2。
+> **IDE 侧**：改 `fetcher.py` → 跑测试的高频循环里，用 PyCharm 打开 `tests/test_fetcher.py` 点测试旁 gutter 绿三角运行——失败用例可单条重跑、断言 diff 直接展示 Summary 实际值（≈ IDEA 的 JUnit 面板；与 L0.1 Step 7 同一招）。
+
+三条同时全绿，回到 [unit1-core/README.md](../README.md) 复盘本学段，然后进 Unit 2。
 
 ## 目录
 

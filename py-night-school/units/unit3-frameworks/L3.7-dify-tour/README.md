@@ -14,7 +14,7 @@
 - 说清「平台 vs 库」的分界线：库是**你 pip 安装的依赖**（进你的进程、归 pytest 管），
   平台是**你部署的系统**（你的逻辑是它画布上的数据）；这条线决定了可测试性、
   可 git 性与迁移成本三件事的全部走向；
-- 用 pyyaml 离线解析平台的两类「静态物」：docker compose 服务拓扑（谁依赖谁）
+- 用 pyyaml（Python 事实标准的 YAML 库，≈ Java 的 SnakeYAML）离线解析平台的两类「静态物」：docker compose 服务拓扑（谁依赖谁）
   与 App DSL（平台的图序列化格式——节点计数、边邻接、找会停下来等人的节点）；
 - 产出本课固定收尾**平台能力清单**：六个维度（画布编排 / HITL 表单 / 知识库 / 模型接入 /
   观测与运营 / 部署形态）逐行回答「dify 有没有、入口在哪、库形态对应物是什么、锁定代价」；
@@ -22,7 +22,7 @@
   报销审查流，亲眼看它跑到 human-input 节点时**暂停等人填表单**——跑不了不影响毕业。
 
 一个先说破的教学点：**平台课没有「离线模型替身」这回事**。前六课的 mock 端点能让框架
-课零 key 三态全绿，是因为框架在你的进程里，替身可以插进调用链；平台跑在自己的容器里，
+课零 key 三条验收命令全绿，是因为框架在你的进程里，替身可以插进调用链；平台跑在自己的容器里，
 离线验收只能测「静态物」（DSL / 拓扑 / 配置），**动态行为要么起平台、要么免谈**——
 这本身就是平台与库的重要差异，今晚你会反复撞到它。
 
@@ -80,14 +80,10 @@ dify 自部署用 docker compose 起**一组**互相依赖的服务。先补两�
   其实是熟的，陌生的是它在这里定义的不是配置而是**系统本身**。
 
 dify 的模板（`docker/docker-compose-template.yaml`，1322 行）声明了 **39 个服务**（pyyaml
-口径：顶层 services 键计数；模板按 compose profiles 分档，档位引擎是
-`COMPOSE_PROFILES=${VECTOR_STORE:-weaviate},${DB_TYPE:-postgresql},collaboration`）：
-**21 个服务挂在向量库档位后面**（17 个向量库本体 + 4 个配套件：milvus 的 etcd/minio、
-opensearch 的 dashboards、elasticsearch 的 kibana），13 个常驻骨架件，5 个其他档位件
-（db_postgres / api_websocket 默认开；db_mysql / certbot / unstructured 可选）。本课
-`data/compose_excerpt.yaml` 裁的是默认上岗骨架 12 个：常驻 13 件里留 10（略去
-ssrf_proxy / agent_ssrf_proxy / local_sandbox 三个代理沙箱件），加上默认档的
-db_postgres 与 weaviate：
+口径：顶层 services 键计数；模板用 compose profiles 开关按需启用可选服务；`${VAR:-默认}`
+是 shell 的『有则用 VAR、无则用默认』写法。默认档开 16 个——常驻 13 加档位相关的
+db_postgres / api_websocket / weaviate（口径同前，锚定 commit 实测）。本课
+`data/compose_excerpt.yaml` 摘录的是其中 12 个上岗骨架：
 
 ```text
 nginx :80（唯一入口，depends_on: [api, web]）
@@ -101,6 +97,7 @@ nginx :80（唯一入口，depends_on: [api, web]）
    sandbox        代码节点执行沙箱
    plugin_daemon  插件运行时（工具/模型供应商以插件包安装）
    agent_backend  v2 新组件：dify-agent 的 FastAPI 服务
+   init_permissions  一次性的卷权限修正任务（busybox）
 ```
 
 读图三问（Java 部署直觉直接平移）：api 与 worker **同镜像不同 MODE**——正是 Java 里
@@ -108,9 +105,8 @@ nginx :80（唯一入口，depends_on: [api, web]）
 状态全部外置，任何应用容器都可以随意扩缩（无状态设计的经典分发）；nginx 是唯一入口——
 端口收敛、TLS 终结都在这一格。**注意「平台自己也在演进」**：`agent_backend` 是 v2 架构
 新加的（仓库根的 `dify-agent/` 与 `dify-agent-runtime/` 目录），它把 agent 运行时拆成了
-独立服务——`dify-agent/` 的定位是「用自研的 Agenton 包（`agenton`，组装 Pydantic AI
-运行；与 §2.3 的外部包 `graphon` 是两回事）藏在 FastAPI 后面」
-（其 pyproject 依赖 `pydantic-ai-slim`），Go 写的 runtime 负责 shell 沙箱。读旧博客的
+独立服务——`dify-agent/` 是 v2 新增的独立 agent 运行时服务（自研包组装 Pydantic AI，
+细节见 §6 路标；其 pyproject 依赖 `pydantic-ai-slim`），Go 写的 runtime 负责 shell 沙箱。读旧博客的
 架构图时以源码为准，别把 2024 年的图当现状。
 
 ### 2.3 DSL：平台的序列化格式
@@ -243,7 +239,7 @@ docker compose version
 
 ```bash
 cd docker
-cp .env.example .env
+cp .env.example .env   # Windows: copy .env.example .env
 docker compose up -d
 ```
 
@@ -396,7 +392,7 @@ uv run pyright
   平台自己的「节点类型总表」（19 种，给自然语言建流用的 planner 提示词）——比任何
   博客都权威的类型枚举出处。
 - langgenius/dify@79effdd498#api/services/dataset_service.py —— 知识库服务主体
-  （4484 行）：能力存在、入口在此，深入按宪法不做（指路 mcp-for-beginners 的
+  （4484 行）：能力存在、入口在此，深入按本教程的课程边界不做（指路 mcp-for-beginners 的
   retrieval/RAG 章节，L2.5 的 MCP 检索工具是它的库形态近亲）。
 - langgenius/dify@79effdd498#dify-agent/README.md 与
   langgenius/dify@79effdd498#dify-agent-runtime/README.md —— v2 架构的两个新组件：
@@ -407,9 +403,10 @@ uv run pyright
   应用的 DSL 导入/导出说明 https://docs.dify.ai/en/cloud/use-dify/workspace/app-management
   （文档随版本走，源码锚定以本文路标为准）。
 
-下一课 L3.8 是 Unit 3 收口：mini-agent vs 四框架 vs 今晚的平台放进同一张
-「能力-成本-锁定性」决策表——今晚的能力清单就是「平台」一行的数据来源；
-毕设选「库」不选「平台」的理由，明晚在决策表上正式落锤。
+Unit 3 还剩两晚：**下一晚先做[里程碑](../milestone/README.md)（选型工作台）**——重验
+五课 contract、跑出决策表的数据页；然后 L3.8 收口：mini-agent vs 四框架 vs 今晚的平台
+放进同一张「能力-成本-锁定性」决策表——今晚的能力清单就是「平台」一行的数据来源；
+毕设选「库」不选「平台」的理由，在决策表上正式落锤。
 
 ## 离毕业又近的一块
 
@@ -417,4 +414,4 @@ uv run pyright
 pytest 集成测试——平台行为够不着 CI）、可 git（L5.3 事件溯源与图版本绑定依赖代码
 可审查——画布 DSL 只是长得像文本）、可迁移（JAVA-MAPPING.md 要把每个模式翻译回
 Java——`interrupt` 的语义能用 langgraph4j 讲清楚，human-input 表单只能用 dify 讲）。
-L3.8 的决策表明晚把这些直觉收成一张表，毕业设计的技术评审（L5.0）直接引用它。
+L3.8 的决策表（先过里程碑拿到数据）把这些直觉收成一张表，毕业设计的技术评审（L5.0）直接引用它。

@@ -37,6 +37,8 @@ uv run pyright
 
 ## 2. 概念讲解
 
+FastAPI 一句话定位：Python 的异步 Web 框架，角色 ≈ Spring Boot + WebMVC（Pydantic 校验内置、依赖注入内置）；跑它需要 ASGI 服务器，本课验收用进程内直连、加餐用 uvicorn。
+
 先给全课对照表，再逐个展开：
 
 | 你熟悉的 Java 物 | 今天的 Python 物 | 一句话差异 |
@@ -100,8 +102,8 @@ updateState(反馈) + resume，A24）——反馈走**状态与消息**，不是
 ### 2.4 事件表与 SSE：审批是可重放事件（A2）
 
 `approvals.EventLog` 是 append-only 内存表（list + id 自增，L5.3 升级 SQLite 事件溯源），
-四类事件五种名字：`run.started` / `approval.requested` / `approval.replied` /
-`approval.auto_applied` / `run.completed`。两条纪律：
+五种事件名（run 生命周期占 2 个名字，审批侧 3 个）：`run.started` / `approval.requested` /
+`approval.replied` / `approval.auto_applied` / `run.completed`。两条纪律：
 
 - **无人订阅不丢单**：`append` 先记表（真相之源），订阅者只是视图——广播队列是空的
   也不影响事实发生；单同时挂在 pending 表里，`GET /approvals` 随时可查。绝不因为
@@ -270,16 +272,21 @@ reject 回环回喂+新 hash、无留言默认反馈、回环封顶双哨兵、r
 Last-Event-ID 截断、帧格式、live 生成器顺序）+ demo 侧 2（剧本形态、三幕服务面集成）。
 
 那个实测坑：测试里 SSE 断言走 `?mode=replay` 而不是默认的 live 流——httpx 的
-`ASGITransport` 会**等整个 ASGI app 跑完**才把响应交出来，常开的 live 流（生成器不结束）
-在它那里永远读不到（一读就挂起）。`mode=replay` 是「重放完即关流」的拉取面（轮询型
+`ASGITransport` 会**等整个 ASGI app 跑完**才把响应交出来（ASGI ≈ Python 版 Servlet
+接口——应用与容器之间的契约；ASGITransport＝进程内直连不走网络，所以能不起端口测
+HTTP），常开的 live 流（生成器不结束）在它那里永远读不到（一读就挂起）。`mode=replay` 是「重放完即关流」的拉取面（轮询型
 客户端的正当形态），live 推送的顺序断言则直接测事件生成器（`test_api.py` 最后一个
 测试）——两条路各测各的，都是真断言。
 
 ### Step 5（可选，加餐）：起真服务，用 curl 当工作台
 
+uvicorn ≈ 内嵌 Tomcat 的角色（ASGI 服务器）：把 FastAPI 应用对象跑成真端口。
+
 ```bash
 uv run uvicorn api:app --app-dir code --port 8000
 ```
+
+> **IDE 侧（PyCharm 工位版）**：三个终端换成——Run Configuration（Launch option 选 Module name 填 `uvicorn`，Parameters `api:app --app-dir code --port 8000`）起服务；非流式三连写进一个 `.http` 文件用内置 HTTP Client 发、可复放（Pro 版；Community 用内置终端 curl）；SSE 长流保留一个终端 `curl -N`——HTTP Client 对长连流的逐帧实时展示不可靠，别指望它。
 
 （macOS / Windows / Linux 命令一致；`--port` 可换。ctrl+c 停。）另开一个终端，先挂上
 SSE（`-N` 关闭 curl 缓冲，才能看到实时推送）：
@@ -308,6 +315,8 @@ curl -s -X POST http://127.0.0.1:8000/approvals/tkt-0001/reply -H "Content-Type:
 模型仍走离线剧本（审批面的加餐验的是 HTTP/SSE 传输形态，不是模型质量）；断线重连试法：
 Ctrl+C 掉 curl 再重连，加头 `-H "Last-Event-ID: 3"` 看续传。跑完删掉自动生成的
 `checkpoints/` 目录即可。
+
+> **IDE 侧（点睛实验）**：服务用 **Debug** 启动，断点打在 `graph.py` 的 `interrupt(payload)` 或 `approvals.py` 的 reply 处——HTTP Client 一发请求断点即命中，同时 SSE 终端停止蹦事件：调试器冻住的就是事件循环。§5 的「事件循环里睡死」从纸面反例变成亲手实验。
 
 ## 4. 练习（本课过关点）
 
@@ -377,7 +386,7 @@ uv run python -c "from hints import hint; print(hint('ex1', 1))"
   - `sst/opencode@95daf90670#packages/protocol/src/groups/permission.ts` ——
     审批外化 API 组的产品原型（opencode 的 permission 端点协议）：POST 建请求 /
     GET 待审总表 / reply / saved 授权 CRUD，配 SSE 事件推送——本课四个端点的语义
-    蓝本（A1 出处，Effect HttpApi 自动进 OpenAPI）。
+    蓝本（A1 出处；Effect 是 opencode 所用的 TS 框架，其 HttpApi 自动进 OpenAPI）。
 - 研究蓝本（lab 仓内，写作输入）：审批外化 API 组与三条纪律的出处
   [../../../../research/agent-oss/report.md](../../../../research/agent-oss/report.md)
   §2.1 表 A1（reply 三元 + reject 回喂纠错）/ A2（审批是可重放事件）/ A6（批准并记住
