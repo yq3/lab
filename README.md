@@ -26,4 +26,7 @@ Personal laboratory for experimental code and PoCs. No guarantees, all ideas wel
 
 Python 夜校教程：写给 Java 工程师的 Python Agent 开发晚课。以 agent 开发为场景学 Python、
 以 Java 心智模型为桥，30 课时全部练习 pytest 自动验收，克隆即学、模型端点中立。
-课表与入学指南见 [py-night-school/README.md](./py-night-school/README.md)。
+
+> **已拆仓独立演进**（2026-09-19）：新仓地址 [yq3/py-night-school](https://github.com/yq3/py-night-school)
+> （public、MIT、完整提交历史随迁）。本目录为拆仓时的过渡副本，定格于 lab 提交 `0a228cd`；
+> 后续维护一律在新仓进行。
