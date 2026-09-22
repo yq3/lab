@@ -54,3 +54,4 @@ research/<topic>/
 | `agent-framework/` | 主流 Agent 开发框架多维度对比（17 框架 × 15 维，源码级） | 2026-09 | 方法和评级体系的来源，见其 README.md |
 | `agent-oss/` | Agent 开源产品应用架构解剖（18 仓 → 财务 agent 参考模式，pattern catalog + 推荐架构） | 2026-09 | 产品轮：8 维解剖模板 + 三级模式清单（直接可用/需改造/仅参考），见其 README.md |
 | `agent-tutorials/` | Agent 开源教程解剖（8 仓 → py-night-school 教程设计依据，教学机制级） | 2026-09 | 教程轮：市场扫描（landscape.md）+ 课时内容级逐仓解剖（profiles ×8）+ 教学机制综合（report.md），结论直接回灌教程 CURRICULUM |
+| `agent-persistence/` | Agent 持久化专项（25 仓 → 七类运行时数据的 schema 级存储实现全景） | 2026-09 | 持久化轮：不做 profiles、按数据类别 × 六路深挖（会话转录/执行状态/记忆/权限审批/审计成本/产物大对象），dimensions ×6 + pattern 清单 18 条 + 反模式 7 条；含对旧档案的 3 处修正（cline 转录非 JSONL 等），见其 report.md §12 |
