@@ -23,7 +23,7 @@
 
 ragflow 的混合检索是「引擎粗召回 + 应用层精算」两段式【核心】`~/develop/opensource/ragflow/internal/service/nlp/retrieval.go#scoreSearchResult`：
 
-- **召回段**：ES（或 Infinity/OceanBase 等）同时跑 BM25 全文与 kNN 向量两路。关键细节：非 Infinity 引擎的 fusion 表达式用**固定权重 `"0.001,1"`**（即召回窗口实际按向量排），用户配置的权重延后到应用层【核心】`internal/service/nlp/retrieval.go#buildRetrievalFusionExpr` + 常量 `esFusionWeights`（注释明确对齐旧 Python `rag/nlp/search.py:331` 的行为）；只有 Infinity 引擎把用户权重直接传给引擎的 `weighted_sum`（`buildInfinityFusionExpr`）。
+- **召回段**：ES（或 Infinity/OceanBase 等）同时跑 BM25 全文与 kNN 向量两路。关键细节：非 Infinity 引擎的 fusion 表达式用**固定权重 `"0.001,1"`**（即召回窗口实际按向量排），用户配置的权重延后到应用层【核心】`internal/service/nlp/retrieval.go#buildRetrievalFusionExpr` + 常量 `esFusionWeights`。**历史对照修正（dim11a，2026-10-15）**：该常量注释自称 "Matches rag/nlp/search.py:331"，经锚点考古证伪——纯 Python 时代（锚点 2508c46c8）引擎侧权重为 `"0.05,0.95"`（`rag/nlp/search.py:127`，自 2025-07 起），"0.001,1" 是 2026-09 过渡期/Go 自定值，且 :331 行实际是 hybrid_similarity 应用层融合调用，与引擎权重无关；只有 Infinity 引擎把用户权重直接传给引擎的 `weighted_sum`（`buildInfinityFusionExpr`；Python 版在 Infinity 路径固定 0.05/0.95 且跳过 rerank，Go 注入用户权重——行为修正型偏离）。
 - **融合段**（无 rerank 模型时）【核心】`internal/service/nlp/reranker.go#HybridSimilarity`：
 
 ```
@@ -177,7 +177,7 @@ haystack 把融合做成独立组件【核心】`~/develop/opensource/haystack/h
 - kotaemon：`libs/kotaemon/kotaemon/indices/vectorindex.py#VectorRetrieval.run`；`libs/kotaemon/kotaemon/rerankings/`（base/cohere/voyageai/tei_fast_rerank）；`libs/kotaemon/kotaemon/indices/rankings/`（llm/llm_scoring/llm_trulens/cohere）；`libs/ktem/ktem/index/file/pipelines.py#DocumentRetrievalPipeline`；`libs/kotaemon/kotaemon/indices/qa/citation_qa_inline.py`；`libs/ktem/ktem/reasoning/simple.py`；`libs/ktem/ktem/index/file/index.py`
 
 **存疑/查不到（❌/⚠️）**：
-1. ⚠️ **ragflow 基线已 Go 重写**：任务书所述 `rag/nlp/`、`api/` Python 路径在 deb1235be 不存在（`rag/` 仅剩 prompts），本文全部以 `internal/` Go 代码取证；Go 版多处注释声明"镜像旧 Python 行为"（如 search.py:331、insert_citations），但旧 Python 与 Go 的行为等价性未逐条验证（有 `python_parity_test.go` / `golden_parity_test.go` 等对拍测试佐证）。
+1. ⚠️ **ragflow 基线已 Go 重写**：任务书所述 `rag/nlp/`、`api/` Python 路径在 deb1235be 不存在（`rag/` 仅剩 prompts），本文全部以 `internal/` Go 代码取证；~~Go 版多处注释声明"镜像旧 Python 行为"未逐条验证~~ **已验证（2026-10-15，见 dim11a 锚点对照）**：融合公式/字段 boost/默认参数/引用阈值等核心算法与纯 Python 锚点（2508c46c8）逐项一致；但三处实质偏离——ES 引擎权重（Python 0.05,0.95 vs Go 0.001,1，注释引用失实）、min_match（Python 固定 0.3 vs Go 条件式）、rerank 输入（Python 喂分词串 vs Go 喂原文，Go 为有意改进）；另有 resume/tag 两模板与 agent 插件管理器为 Go 回归项。
 2. ⚠️ ragflow `use_kg` 图增强检索：Go 版明确未实现（仅 Warn 跳过），需 KG 能力时应参考其旧 Python 版或 LightRAG（见维度 05）。
 3. ⚠️ haystack cross-encoder rerank：core 仓库无 TransformersSimilarityRanker/SentenceTransformersDiversityRanker（类定义全仓零命中），应移至社区组件库 haystack-hub（未克隆该仓库验证，标存疑）；网上 haystack 2.x 教程多与现状不符。
 4. ❌ dify：无 query rewrite/multi-query/HyDE（core 无原语）；无 RRF（融合仅加权与 cross-encoder 两模式）。

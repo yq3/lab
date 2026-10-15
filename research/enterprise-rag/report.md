@@ -50,7 +50,7 @@
 | spring-ai-alibaba | DashScope RAG 增强包 | 已转型 Agentic/Graph 编排框架，DashScope 与 RerankModel 外迁 extensions 仓；GraphRAG 宣称在主仓全历史零命中 | 〔dim09〕 |
 | Google 全家（补充轮） | Vertex AI Search / RAG Engine / GPT-RAG 旧名资料 | 三处更名：Vertex AI Search→**Agent Search**（Gemini Enterprise Agent Platform）、RAG Engine→**Gemini Data**、Azure GPT-RAG→**Agent Landing Zone**（老四组件架构作废，gh api 核实 MIT/1186⭐仍活跃） | 〔dim10b〕 |
 
-**对选型的直接含义**：(a) 选型判断必须锚定本次调研基线（HEAD 见 README），半年后需重核；(b) ragflow 的 Go 版仍有迁移回归项（use_kg 图检索直接 Warn 跳过未实现），Python 时代能力 ≠ 现有能力；(c) star 数与「能抄的代码量」无关（quivr 39.6k⭐ 但 5 周前清零重来）。
+**对选型的直接含义**：(a) 选型判断必须锚定本次调研基线（HEAD 见 README），半年后需重核；(b) ragflow 的 Go 版与 Python 版核心检索算法一致，但**存在已验证的回归项**——use_kg 图检索半移植（聊天路径已移植、dataset/chunk 检索 API 路径 Warn 跳过）、resume/tag 两种 chunk 模板消失、agent 运行时插件管理器无等价物；且 Go 注释自称「镜像旧 Python」至少一处失实（ES 引擎融合权重 Python 传统 0.05,0.95 vs Go 写死 0.001,1，dim11a 锚点考古）；(c) star 数与「能抄的代码量」无关（quivr 39.6k⭐ 但 2026-09 清零重来，且锚点对照确证 V2 是**同牌新产品**而非重写——组织易主、代码零继承，v1 封存于 `v1-final` tag，dim11b）。
 
 ## 3. 参考架构：从五家平台提炼的企业 RAG 标准拓扑
 
@@ -290,6 +290,15 @@
 
 dim10b 为纯网络文档级（Azure/Google 文档不可本地核验），其关键数字（BEIR、k=60、Check Grounding 0.6）均带 URL 与引文标注，按【一手-文档/转述-微软原文】等级采信。
 
+**历史锚点轮复核（2026-10-15，dim11a/11b，4 项亲自回码验证）**：
+
+| # | 断言 | 证据 | 结果 |
+|---|---|---|---|
+| H1 | 锚点 Python ES 融合权重 0.05,0.95 | `/tmp` worktree `rag/nlp/search.py:127` `FusionExpr("weighted_sum", topk, {"weights": "0.05,0.95"})` | ✅ 原文命中 |
+| H2 | Go 写死 0.001,1 且注释自称 Matches search.py:331 | `internal/service/nlp/retrieval.go:628/643/645` | ✅ 三处命中；**修正 11a 一处过强表述**：锚点 search.py 共 709 行，:331 行号存在（内容是 hybrid_similarity 调用，非引擎权重），「根本不存在该行」不准确，已改写 |
+| H3 | quivr v1-final tag 存在且 d9f490782 自述嫁接历史 | `git tag` 含 v1-final；提交说明原文「Joins the v2 history … v1 remains available … under the v1-final tag」 | ✅ |
+| H4 | 锚点 Python 版形态（ragflow api/rag/deepdoc/agent 齐、quivr core/ 纯库） | worktree 目录树 | ✅（quivr 锚点已无服务端代码，印证 Era B 纯库形态） |
+
 ---
 
 ## 附录 A：维度文档导航
@@ -307,3 +316,5 @@ dim10b 为纯网络文档级（Azure/Google 文档不可本地核验），其关
 | 09 Java 生态 | [09-java-ecosystem.md](./dimensions/09-java-ecosystem.md) | langchain4j 检索层胜出；Java 主管线 + Python 解析/评测边界 |
 | 10a 厂商实践：OpenAI/Anthropic | [10a-vendor-openai-anthropic.md](./dimensions/10a-vendor-openai-anthropic.md) | 托管黑盒 vs 方法学；Contextual Retrieval 数字链（-67%）；索引侧 vs 查询侧分歧 |
 | 10b 厂商实践：Google/Microsoft | [10b-vendor-google-microsoft.md](./dimensions/10b-vendor-google-microsoft.md) | BEIR 量化背书；文档级 ACL 托管闭环；Check Grounding 在线评测；三处产品更名 |
+| 11a 历史锚点：ragflow Python 版 | [11a-legacy-python-ragflow.md](./dimensions/11a-legacy-python-ragflow.md) | 核心算法逐项一致；Go 注释失实证伪（0.05,0.95 vs 0.001,1）；回归项清单（use_kg 半移植/resume/tag/插件管理器）；lazy-load 传说纠正（反射+LiteLLM） |
+| 11b 历史锚点：quivr Python 版 | [11b-legacy-python-quivr.md](./dimensions/11b-legacy-python-quivr.md) | V1 两段形态（SaaS 全栈→纯库）；V2 确证为同牌新产品（嫁接历史+v1-final tag）；V1 检索水平（纯向量+rerank+token 预算截断） |

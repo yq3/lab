@@ -114,7 +114,8 @@ spring-ai（b5eb0272f）、langchain4j（0028928ea）、spring-ai-alibaba（f82d
 - [x] Phase 3：report.md 综合报告（TL;DR 十条 / 参考架构 / 三路线 / 分场景技术栈 / 实施蓝图 / 落差汇总 / 风险登记）
 - [x] 复核：14 项抽查（13 命中 + 1 处修正：milvus jieba 中文 Python 用例被 skip，证据改锚 Go 活测试，见 report §12）
 - [x] 补充轮（2026-10-15）：厂商第一方实践两路网络调研——dimensions/10a（OpenAI+Anthropic，含本地 openai-cookbook 源码级）+ 10b（Google+Microsoft）；report TL;DR 增补 11-13 条、检索配方补 Contextual Retrieval 与 BEIR 背书、治理补托管 ACL 闭环模式、时效表补三处产品更名；补充轮复核 4 项全中（含 10a 一处路径修正）
-- 备注：本轮不做 profiles（九维已覆盖 ragflow/haystack 等对象的机制细节，单档全景信息增量低于成本），方法沿 agent-persistence 轮「维度主导」先例
+- [x] 历史锚点轮（2026-10-15）：ragflow/quivr 的 Python 版对照——git worktree 挂历史锚点（ragflow `2508c46c8` 纯 Python 最后完整态 / quivr `947a78541` Python 版最后态）只读深挖，dimensions/11a + 11b；核心产出：Go 注释失实证伪（ES 权重 0.05,0.95 vs 0.001,1）、use_kg 半移植修正、resume/tag 回归项、quivr V2 确证同牌新产品（v1-final tag）；dim04 与 report §2 已回填修正；复核 4 项（含 11a 一处表述修正）
+- 备注：本轮不做 profiles（九维已覆盖 ragflow/haystack 等对象的机制细节，单档全景信息增量低于成本），方法沿 agent-persistence 轮「维度主导」先例；历史锚点轮新增证据形态【历史源码】（worktree 挂历史提交，先例：agent-persistence 轮 OpenHands 锚点）
 
 ## 目录
 
@@ -130,4 +131,6 @@ spring-ai（b5eb0272f）、langchain4j（0028928ea）、spring-ai-alibaba（f82d
   [08 评测可观测](./dimensions/08-eval-observability.md) ·
   [09 Java 生态](./dimensions/09-java-ecosystem.md) ·
   [10a 厂商：OpenAI/Anthropic](./dimensions/10a-vendor-openai-anthropic.md) ·
-  [10b 厂商：Google/Microsoft](./dimensions/10b-vendor-google-microsoft.md)
+  [10b 厂商：Google/Microsoft](./dimensions/10b-vendor-google-microsoft.md) ·
+  [11a 历史锚点：ragflow Python 版](./dimensions/11a-legacy-python-ragflow.md) ·
+  [11b 历史锚点：quivr Python 版](./dimensions/11b-legacy-python-quivr.md)
