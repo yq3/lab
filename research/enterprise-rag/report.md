@@ -1,8 +1,8 @@
 # 企业级 RAG 系统/Agent 搭建调研报告
 
 > **调研问题**：要搭建一个企业级 RAG agent/系统（私有化、可治理、可评测、中文为主），业界开源方案在数据接入→文档解析→切分索引→检索重排→生成→评测可观测→权限治理全链路分别做到了什么程度、怎么实现、怎么选型组装。
-> **方法**：六层对象（5 平台 + 3 框架 + 2 GraphRAG + 3 解析器 + 3 向量库 + 2 评测库，另有 Java 生态 3 仓对照）× 九个构建块维度，全部源码级对码（15 仓新克隆 + 7 仓复用，基线见 [README.md](./README.md)）。证据三级标注，结论可溯源到 `~/develop/opensource/<repo>/路径#符号`。
-> **过程文档**：九份维度深挖在 [dimensions/](./dimensions/)，本文是综合层——每个结论标注来源维度（如〔dim04〕）。
+> **方法**：六层对象（5 平台 + 3 框架 + 2 GraphRAG + 3 解析器 + 3 向量库 + 2 评测库，另有 Java 生态 3 仓对照）× 九个构建块维度，全部源码级对码（15 仓新克隆 + 7 仓复用，基线见 [README.md](./README.md)）。证据三级标注，结论可溯源到 `~/develop/opensource/<repo>/路径#符号`。**补充轮（2026-10-15）**：厂商第一方最佳实践两路网络级调研（OpenAI/Anthropic〔dim10a〕、Google/Microsoft〔dim10b〕，证据等级【一手-文档/一手-源码/转述】），用于与开源结论互证。
+> **过程文档**：九份维度深挖 + 两份厂商补充在 [dimensions/](./dimensions/)，本文是综合层——每个结论标注来源维度（如〔dim04〕）。
 
 ---
 
@@ -18,6 +18,12 @@
 8. **Agentic RAG 别神化**：企业知识问答 80% 场景固定管线（retrieve→rerank→generate）就是工业默认；agent 循环留给多信源/多跳/自判信息充分的场景。经典范式（CRAG/self-RAG/adaptive）的官方实现只剩 langgraph（已归档示例）和 llama_index（吸收进 core）两家；工程件最全的是 haystack 的 PipelineTool + Agent（state_schema/hooks/上下文压缩）。〔dim06〕
 9. **评测组合定型**：ragas（评测计算器：faithfulness/answer_relevancy/context 指标 + 知识图谱合成测试集）+ deepeval（pytest 门禁 + 自带 ragas 适配器 + OTel tracing 在线抽样评测）。中文场景两库都没有开箱 judge prompt，上线前必须人工校准 judge 与人的一致性。〔dim08〕
 10. **Java 团队能搭主链**：langchain4j 的五段式检索增强管线（路由/重排/RRF 全有 + 本地 ONNX rerank）明显强于 spring-ai（无 rerank 抽象、无混合检索）；边界划法 = Java 主管线 + Python 解析微服务（MinerU/docling）+ Python 评测脚本。〔dim09〕
+
+**厂商互证增补（补充轮 2026-10-15，dim10a/10b）**：
+
+11. **开源侧的核心配方全部拿到厂商量化背书**：Azure 官方 BEIR 实测 NDCG@10 = BM25 40.6 / 纯向量 45.0 / 混合 48.4 / 混合+semantic ranker 50.3；Anthropic Contextual Retrieval 数字链：上下文化嵌入 -35% → +contextual BM25 -49% → +Cohere Rerank **-67%**（top-20 失败率 5.7%→1.9%，一次性成本 $1.02/百万文档 token，靠 prompt caching 撑住）。**钱优先花在「索引侧补语境 + 混合 + 重排」三件已验证的事上**，别急着上花哨的分块图算法——两家厂商都没把父子块/句子窗口当核心武器。
+12. **RRF k=60 是跨实现行业默认**（Azure 固定 k=60 + llama_index 60 + haystack 61）；但托管侧只走 RRF，ragflow 式 0.7/0.3 可解释加权是自建特色，两派各自成立。Google 敢给默认数字（chunk 1024/overlap 256，实验区间 100-600；LLM 增强分块官方增益：摘要 +12.9%、问题式 +15-20%、组合 +27-33%），可作自建起步锚点。
+13. **托管服务对开源的最大降维打击恰是文档级权限**（正中 dim07 缺口）：Google 文档级 ACL 原生 GA（`acl_info` 随索引摄入 + 查询时用户身份过滤，LLM 增强发生在 ACL 过滤之后）；Azure 四路线（security filter GA + 引擎内 Entra token 比对等三条 preview）。自建等价模式可抄：**ACL 随索引摄入 + 查询时引擎内过滤（勿 post-trim）+ 权限增量同步**。另外评测被产品化（Google Check Grounding 在线 groundedness 打分，partial entailment 判失败比 ragas 严格）、引用细到字符区间（OpenAI annotations）——都是开源该追的方向。
 
 ---
 
@@ -42,6 +48,7 @@
 | dify | agent 可挂知识库工具 | agent_v2 对 DATASET_RETRIEVAL 工具类型直接 raise（「知识路径与 agent 路径分离」的产品决策）；workflow 引擎已外置为独立包 graphon | 〔dim06〕 |
 | langgraph | examples 里有 CRAG/self-RAG | 全部标注 archived（迁往 LangChain 文档站），不再随库演进 | 〔dim06〕 |
 | spring-ai-alibaba | DashScope RAG 增强包 | 已转型 Agentic/Graph 编排框架，DashScope 与 RerankModel 外迁 extensions 仓；GraphRAG 宣称在主仓全历史零命中 | 〔dim09〕 |
+| Google 全家（补充轮） | Vertex AI Search / RAG Engine / GPT-RAG 旧名资料 | 三处更名：Vertex AI Search→**Agent Search**（Gemini Enterprise Agent Platform）、RAG Engine→**Gemini Data**、Azure GPT-RAG→**Agent Landing Zone**（老四组件架构作废，gh api 核实 MIT/1186⭐仍活跃） | 〔dim10b〕 |
 
 **对选型的直接含义**：(a) 选型判断必须锚定本次调研基线（HEAD 见 README），半年后需重核；(b) ragflow 的 Go 版仍有迁移回归项（use_kg 图检索直接 Warn 跳过未实现），Python 时代能力 ≠ 现有能力；(c) star 数与「能抄的代码量」无关（quivr 39.6k⭐ 但 5 周前清零重来）。
 
@@ -129,7 +136,8 @@
 推荐配方（五家对码合成，细节见 dim04 §9）：
 
 1. 召回：BM25+kNN 双路，召回窗口给足（ragflow 口径：knn_top_k 1024、rerank 候选 64）；不要在召回期用用户阈值过滤向量分（dify #35233 教训：分数不同尺度过早过滤误杀）。
-2. 融合：默认 RRF（k=60/61）免调参；要「可解释权重旋钮」用线性加权（`0.7·关键词 + 0.3·向量` 是 ragflow 验证过的锚点），但两路分数必须同尺度（重算 TF-IDF/token 相似度，不能拿引擎 BM25 原始分硬混）。
+2. 融合：默认 RRF（k=60/61）免调参；要「可解释权重旋钮」用线性加权（`0.7·关键词 + 0.3·向量` 是 ragflow 验证过的锚点），但两路分数必须同尺度（重算 TF-IDF/token 相似度，不能拿引擎 BM25 原始分硬混）。**厂商量化背书（补充轮）**：Azure BEIR 实测混合比纯向量 NDCG@10 +3.4、再加重排 +1.6；RRF k=60 是 Azure 固定常量，与 llama_index(60)/haystack(61) 跨实现一致。〔dim10b〕
+2b. **索引侧补语境（Contextual Retrieval，预算允许时强烈建议）**：LLM 为每 chunk 生成 50-100 token 定位上下文前置后再嵌入/入 BM25 索引，Anthropic 实测与混合+rerank 叠加共降检索失败率 67%，一次性成本 $1.02/百万文档 token（关键前提是 prompt caching 类经济学，自建要对缓存命中率算总账）；与「查询侧变换」是两条互补路线（OpenAI 押查询侧 rewrite_query、Anthropic 押索引侧补语境）。〔dim10a〕
 3. 重排：有预算 → Cohere/Jina/BGE API；私有化 → llama_index 进程内 sbert/BGE（flag-embedding）、自托管 TEI 端点（kotaemon/ragflow 同款）或 langchain4j ONNX 本地（Java 侧）。分数进融合公式前归一 [0,1]（ragflow min-max/clamp 双分支值得直接抄）；cross-encoder 喂 chunk 原文不喂分词文本。
 4. 切分配合：递归 token（256-512）打底；高价值场景加父子块（三家同思路：ragflow mom_id / dify parent-child / llama_index AutoMerging）；**ragflow 字段级权重（title×2 / important_kwd×5 / question_tks×6 进重排）是低成本高收益的独门技巧**。
 5. 引用溯源：ragflow 双机制（embedding 句级归因兜底 + agentic 确定性 chunk_id 提取）或 kotaemon START/END_PHRASE 协议（LLM 声明+程序校验）；纯 prompt 引用只适合 demo。
@@ -155,14 +163,14 @@
 - **离线**：ragas TestsetGenerator（知识图谱+persona+multi_hop 合成候选）→ 人工抽检修正如黄金集；指标组合：无参考先跑 faithfulness+answer_relevancy+ContextUtilization，有标注补 context_recall（NonLLM/ID-based 零 LLM 成本）+answer_correctness；检索侧 hit-rate/MRR 自算（两家平台都不带 IR 指标）。
 - **门禁**：deepeval pytest 断言（assert_test+threshold）挂 CI；ragas 指标可经其内置适配器包进去。
 - **在线**：trace（dify 原生接 Langfuse；自建用 ragas 导出端或 deepeval OTel @observe）+ 流量抽样 1-5% 跑 reference-free 指标 + 用户弱信号（点赞/标注命中）定期回灌评测集。
-- **中文硬前提**：两库 judge prompt 全英文（ragas `adapt()` 运行时 LLM 翻译、deepeval community 模板未落地），上线前用 ~50 条人工双评验证 judge-人一致性后才可作门禁。
+- **中文硬前提**：两库 judge prompt 全英文（ragas `adapt()` 运行时 LLM 翻译、deepeval community 模板未落地），上线前用 ~50 条人工双评验证 judge-人一致性后才可作门禁。**厂商参照（补充轮）**：Google 把 groundedness 做成在线 API（Check Grounding：claim 级打分、**partial entailment 判失败**（比 ragas 宽松判定更严）、引用阈值默认 0.6、<500ms）——自建 judge prompt 可抄其严格口径；评测必须分层（检索层 Recall@k/MRR 与响应层 faithfulness 分开）是两家厂商共同纪律。〔dim10a/10b〕
 - 平台自带的都是「调试器」不是「评测系统」（dify hit testing/ragflow RetrievalTest 只返回 chunk 列表供人眼看）；ragflow 引用机制可当免费的在线幻觉检测锚点（引用了不存在的 ID = 幻觉证据）。
 
 ### 5.7 企业治理（dim07）
 
 自研补齐清单（按优先级）：
 
-1. **文档级 ACL + 检索期过滤**（最大缺口，五家全无）：ACL 表（doc→用户/组）+ chunk 带 doc_id 映射，**在返回给 LLM 组 prompt 之前过滤**（前置：把允许 doc_id 集合转成引擎 filter——milvus 标量过滤/qdrant payload/ES bool 都支持；后置：rerank 前过滤兜底）。
+1. **文档级 ACL + 检索期过滤**（最大缺口，五家全无）：ACL 表（doc→用户/组）+ chunk 带 doc_id 映射，**在返回给 LLM 组 prompt 之前过滤**（前置：把允许 doc_id 集合转成引擎 filter——milvus 标量过滤/qdrant payload/ES bool 都支持；后置：rerank 前过滤兜底）。**托管服务的成熟模式可照抄（补充轮）**：Google 的「ACL 随索引摄入（`acl_info.readers.principals`）+ 查询时带用户身份在引擎内过滤 + LLM 增强发生在过滤之后 + 权限增量同步」闭环；Azure 的 `search.in()` 亚秒级 security filter（GA）与 Entra token 引擎内比对（preview）——自建等价物 = ACL 冗余进检索索引字段 + 查询注入用户组过滤，勿在应用层 post-trim。〔dim10b〕
 2. **协议级 SSO**：平台前加 OAuth2 proxy / Keycloak；只有 kotaemon 给了 OIDC 样板（gradiologin）。
 3. **查询级审计**（谁/何时/查了什么/返回哪些来源）：dify dataset_queries + anything-llm event_logs 抄表结构，quivr 的 append-only 触发器 + SECURITY DEFINER 定长清理整体搬。
 4. **配额与成本分摊**：只有 anything-llm 有每用户日限；按部门 token/存储配额需自建计量+拦截。
@@ -237,6 +245,7 @@
 
 ## 10. 元数据级对象与排除记录
 
+- **厂商第一方实践（补充轮，网络级非源码）**：OpenAI 把 RAG 收敛成托管黑盒（vector store 自动分块 800/400 + 内置 RRF 混合 + ranker + rewrite_query，$0.10/GB/天），其「小库不做 RAG」与 Anthropic 口径（<200k token 直接长上下文+缓存）构成有用的出口判断；Anthropic 只发方法学（Contextual Retrieval + Citations API 原语）；Google/微软托管服务代表企业级 RAG 天花板形态（原生 ACL、在线 grounding 评测、引擎内 agentic retrieval GA）。详见 dim10a/10b。
 - **open-webui**（154k⭐）：LLM 前端网关，RAG 为外挂，知识库场景不如上述平台；**litellm**（61k⭐）：模型网关，支持 /rerank 端点，可作自建系统的模型接入层补充（与 dify plugin_daemon 同生态位）；**private-gpt/zylon**（57.6k⭐）：活跃但架构被 ragflow/dify 覆盖；**DocsGPT**（18.3k⭐，MIT）：宣称 air-gapped 全环境内跑，轻量备选；**khoj**（37.7k⭐）：AGPL-3.0，商用传染性强，排除；**Verba/Cognita/vanna 已归档**（2026-02~06）；**txtai**（13k⭐）：嵌入式一体化设计有参考价值（向量+图+SQL 融合数据库），未源码级核验。
 - 模型层事实（生态通识，未源码级）：嵌入中文主流 BGE 系 / 多语 E5 系；rerank 主流 BGE-reranker 系（TEI/vLLM 可自托管）。
 
@@ -270,6 +279,17 @@
 
 结论：14 项抽查 13 项直接命中、1 项（milvus jieba 测试表述）已修正。总体证据质量可信。
 
+**补充轮复核（2026-10-15，dim10a/10b 本地可核部分 4 项）**：
+
+| # | 断言 | 证据 | 结果 |
+|---|---|---|---|
+| S1 | OpenAI cookbook「ranker uses hybrid search」原文 | `openai-cookbook/examples/File_Search_Responses.ipynb` grep 命中 "ranker which uses hybrid search" | ✅（10a 原引用路径多了一层目录，已修正为 examples/ 根） |
+| S2 | 「search is better than fine-tuning」官方口径出处 | `examples/Question_answering_using_embeddings.ipynb` grep 命中原文 | ✅ |
+| S3 | HyDE 教程存在 | `examples/vector_databases/chroma/hyde-with-chroma-and-openai.ipynb` | ✅ |
+| S4 | cross-encoder 重排教程存在 | `examples/Search_reranking_with_cross-encoders.ipynb` | ✅ |
+
+dim10b 为纯网络文档级（Azure/Google 文档不可本地核验），其关键数字（BEIR、k=60、Check Grounding 0.6）均带 URL 与引文标注，按【一手-文档/转述-微软原文】等级采信。
+
 ---
 
 ## 附录 A：维度文档导航
@@ -285,3 +305,5 @@
 | 07 企业治理 | [07-governance.md](./dimensions/07-governance.md) | 文档级权限 5/5 缺失；SSO 假象；自研补齐清单七条 |
 | 08 评测可观测 | [08-eval-observability.md](./dimensions/08-eval-observability.md) | ragas+deepeval 组合；中文 judge 校准硬前提；平台只有调试器 |
 | 09 Java 生态 | [09-java-ecosystem.md](./dimensions/09-java-ecosystem.md) | langchain4j 检索层胜出；Java 主管线 + Python 解析/评测边界 |
+| 10a 厂商实践：OpenAI/Anthropic | [10a-vendor-openai-anthropic.md](./dimensions/10a-vendor-openai-anthropic.md) | 托管黑盒 vs 方法学；Contextual Retrieval 数字链（-67%）；索引侧 vs 查询侧分歧 |
+| 10b 厂商实践：Google/Microsoft | [10b-vendor-google-microsoft.md](./dimensions/10b-vendor-google-microsoft.md) | BEIR 量化背书；文档级 ACL 托管闭环；Check Grounding 在线评测；三处产品更名 |

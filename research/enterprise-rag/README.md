@@ -60,6 +60,15 @@
 
 spring-ai（b5eb0272f）、langchain4j（0028928ea）、spring-ai-alibaba（f82da0b50）：RAG 能力面（ETL/向量库适配/检索增强 API）与 Python 生态差距对照——面向 Java 团队的企业落地选型。
 
+### H. 厂商第一方最佳实践（补充轮 2026-10-15，网络级非源码）
+
+| 对象 | 覆盖内容 | 证据等级 |
+|---|---|---|
+| OpenAI | File Search/vector store 托管设计（自动分块/内置 RRF 混合/ranker/rewrite_query）、cookbook RAG recipe（本地 openai-cookbook 源码级）、agentic search 口径 | 【一手-文档】【一手-源码】 |
+| Anthropic | Contextual Retrieval 完整方法与数字链（-35%→-49%→-67%）、Citations API、context engineering 叙事演进 | 【一手-文档】 |
+| Google | Agent Search（原 Vertex AI Search）文档级 ACL、RAG Engine（→Gemini Data）官方参数、Check Grounding 在线评测、架构中心三子系统 | 【一手-文档】 |
+| Microsoft | Azure AI Search hybrid+semantic ranker BEIR 数字与 RRF k=60、agentic retrieval GA、文档级权限四路线、RAG 架构指南；GPT-RAG→Agent Landing Zone 更名核实（gh api） | 【一手-文档】【转述-微软原文】 |
+
 > 复用仓基线 2026-10-12 全数核验，与 persistence 轮记录一致，无漂移。langchain 348c9dc572 / langgraph e539ac122f 同步冻结备用于 Agentic RAG 维度。
 
 ### 排除记录（Phase 0 核验，2026-10-12）
@@ -93,6 +102,8 @@ spring-ai（b5eb0272f）、langchain4j（0028928ea）、spring-ai-alibaba（f82d
 | 07 | 企业治理 | 权限（文档级/行级）、多租户、配额、审计、私有化部署清单 |
 | 08 | 评测与可观测 | ragas / deepeval 指标体系、平台自带评测、tracing |
 | 09 | Java 生态对照 | spring-ai / langchain4j / spring-ai-alibaba 的 RAG 能力面 |
+| 10a | 厂商实践：OpenAI 与 Anthropic | 托管黑盒 vs 方法学；Contextual Retrieval；与开源结论互证（补充轮，网络级） |
+| 10b | 厂商实践：Google 与 Microsoft | 托管服务能力面/权限闭环/官方参数/BEIR 数字；与开源结论互证（补充轮，网络级） |
 
 ## 进度 checklist（分批可续）
 
@@ -102,12 +113,13 @@ spring-ai（b5eb0272f）、langchain4j（0028928ea）、spring-ai-alibaba（f82d
 - [x] Phase 2：dimensions ×9（01平台架构 / 02解析切分 / 03向量库 / 04检索重排 / 05GraphRAG / 06Agentic / 07治理 / 08评测 / 09Java）——dim02 首跑撞 API 限流后重跑完成
 - [x] Phase 3：report.md 综合报告（TL;DR 十条 / 参考架构 / 三路线 / 分场景技术栈 / 实施蓝图 / 落差汇总 / 风险登记）
 - [x] 复核：14 项抽查（13 命中 + 1 处修正：milvus jieba 中文 Python 用例被 skip，证据改锚 Go 活测试，见 report §12）
+- [x] 补充轮（2026-10-15）：厂商第一方实践两路网络调研——dimensions/10a（OpenAI+Anthropic，含本地 openai-cookbook 源码级）+ 10b（Google+Microsoft）；report TL;DR 增补 11-13 条、检索配方补 Contextual Retrieval 与 BEIR 背书、治理补托管 ACL 闭环模式、时效表补三处产品更名；补充轮复核 4 项全中（含 10a 一处路径修正）
 - 备注：本轮不做 profiles（九维已覆盖 ragflow/haystack 等对象的机制细节，单档全景信息增量低于成本），方法沿 agent-persistence 轮「维度主导」先例
 
 ## 目录
 
 - [report.md](./report.md) —— 综合报告（最终交付，先读这篇：TL;DR 十条 / 参考架构 / 三条路线 / 分场景技术栈 / 实施蓝图 / 宣称vs实现落差 / 复核记录）
-- [dimensions/](./dimensions/) —— 九份构建块深挖（过程档案，结论均可溯源到源码路径）：
+- [dimensions/](./dimensions/) —— 九份构建块深挖 + 两份厂商补充（过程档案，结论均可溯源到源码路径或官方 URL）：
   [01 平台架构](./dimensions/01-platform-arch.md) ·
   [02 解析切分](./dimensions/02-ingestion-parsing.md) ·
   [03 索引向量库](./dimensions/03-index-vector-store.md) ·
@@ -116,4 +128,6 @@ spring-ai（b5eb0272f）、langchain4j（0028928ea）、spring-ai-alibaba（f82d
   [06 Agentic RAG](./dimensions/06-agentic-rag.md) ·
   [07 企业治理](./dimensions/07-governance.md) ·
   [08 评测可观测](./dimensions/08-eval-observability.md) ·
-  [09 Java 生态](./dimensions/09-java-ecosystem.md)
+  [09 Java 生态](./dimensions/09-java-ecosystem.md) ·
+  [10a 厂商：OpenAI/Anthropic](./dimensions/10a-vendor-openai-anthropic.md) ·
+  [10b 厂商：Google/Microsoft](./dimensions/10b-vendor-google-microsoft.md)
