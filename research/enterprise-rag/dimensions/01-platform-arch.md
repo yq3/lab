@@ -246,7 +246,8 @@ quivr V2 的"RAG"是围绕**内容不可变模型**重做的（CONTEXT.md 定义
 
 ### 存疑清单（未定论，不臆测）
 
-1. **quivr-core Python 库去向**：旧 `QuivrHQ/quivr-core` 独立仓库是否仍在维护、是否有 v1 停服公告——本轮未克隆未核实。若后续维度需要旧 quivr 的 RAG 实现作参照，只能 checkout 本仓 2026-09 前历史提交。
+1. **quivr-core Python 库去向**：~~独立仓库是否仍在维护未核实~~ **已关闭（2026-10-15 复核）**：`gh api repos/QuivrHQ/quivr-core` 返回 404——公开仓已删除或转私有。旧 quivr 的 Python 实现只能经本仓 git 历史获取：**旧链末端 `947a78541`（2025-06-19 "add Claude 4 support"，Python 版自此停更）**；V2 起点 2026-09-03 之间有 15 个月空窗。另：旧 root `921d7e250`（2023-05-12）是最初 Streamlit 形态。
+   - ragflow 的 Python 历史锚点同步记录：**纯 Python 最后完整状态 = `2508c46c8`（2026-03-04，go.mod 首提前一提交）**；删除分批于 670e68872（9-28 part2）/efbb80074/62972b152（9-30）；**tag 陷阱：`v1.0.0-rc1`（2026-09-29）已是 Go 版**，Python 时代 tag 为 v0.3.2~v0.9.0 系列。
 2. **quivr "重水合+重鉴权"检索的精确代码位**：README 宣称了语义，`internal/retrieval/` 结构印证方向，但未逐行定位鉴权调用点，标 ⚠️。
 3. **dify rag_pipeline 的产品成熟度**：`api/tasks/rag_pipeline/` 与 `models.dataset.Pipeline` 是新代码，是否有 UI/文档配套未查，后续"检索与索引策略"维度应跟进。
 4. **ragflow Python 残余的删除进度**：AGENTS.md 说 pending removal，冻结时 `rag/` 只剩 prompts、`api/` 已不存在，但 `sdk/python/`、`ragflow_deps/download_deps.py` 等仍在（【文档】AGENTS.md 迁移清单），最终形态可能再变。
