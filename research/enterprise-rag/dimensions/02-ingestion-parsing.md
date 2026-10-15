@@ -85,7 +85,7 @@ License：**Apache-2.0 + 附加条款**——MAU 超 1 亿或月收入超 2000 �
 ## 3. unstructured：partition 分区体系，模型推理外包
 
 - **格式面**：`unstructured/partition/` 一格式一文件——pdf/doc/docx/ppt/pptx/xlsx/csv/tsv/html/image/epub/email/msg/md/org/rst/rtf/odt/xml/json/ndjson/text/audio；`partition/auto.py#partition_auto` 按 FileType 从 `partitioner_loader` 注册表取 partitioner（auto.py:222-293）。
-- **PDF 三策略**（`partition/strategies.py`）：`fast`（pdfminer 纯文本，`pdf.py:456 _partition_pdf_with_pdfminer`）；`ocr_only`（pytesseract，pytesseract 缺失则回退 fast，strategies.py:72）；`hi_res`（调 `unstructured_inference` 包做布局+表格，未安装则降级，:58-69）。**模型（YOLOX 布局、detectron2 表格）全部在闭源协作仓 unstructured-inference**——本仓 `unstructured/models/` 只剩空 `__init__.py`，默认 hi_res 模型名从 env `UNSTRUCTURED_HI_RES_MODEL_NAME` 或 inference 包 DEFAULT_MODEL 取（pdf.py:133-139）⚠️权重细节无法在本仓溯源。
+- **PDF 三策略**（`partition/strategies.py`）：`fast`（pdfminer 纯文本，`pdf.py:456 _partition_pdf_with_pdfminer`）；`ocr_only`（pytesseract，pytesseract 缺失则回退 fast，strategies.py:72）；`hi_res`（调 `unstructured_inference` 包做布局+表格，未安装则降级，:58-69）。**模型（YOLOX 布局、detectron2 表格）全部在外置的 unstructured-inference 包**（复核修正 2026-10-15：该仓实为公开仓 Unstructured-IO/unstructured-inference，Apache-2.0、活跃——初判「闭源协作仓」有误）——本仓 `unstructured/models/` 只剩空 `__init__.py`，默认 hi_res 模型名从 env `UNSTRUCTURED_HI_RES_MODEL_NAME` 或 inference 包 DEFAULT_MODEL 取（pdf.py:133-139）⚠️权重细节无法在本仓溯源。
 - **输出**：Element 列表（`unstructured/documents/elements.py`）——`Table.text_as_html`（:220）保 HTML 表格，`metadata.coordinates`（CoordinatesMetadata，:57-66,167）保 bbox，层级类型 Title/NarrativeText/ListItem 等。
 - **中文短板**：OCR 只有 tesseract 一条路（chi_sim），无公式识别，布局标签体系西式——中文扫描件效果不占优。
 - **切分**：`unstructured/chunking/title.py#chunk_by_title`——按 Title 元素分段、超长再按 max_characters/overlap 切（:23-110），可经 `add_chunking_strategy` 装饰器直接在 partition 调用里启用（pdf.py:145 附近）。
@@ -122,7 +122,7 @@ License：**Apache-2.0 + 附加条款**——MAU 超 1 亿或月收入超 2000 �
 1. **默认选择：MinerU 4.0 作为扫描件/复杂 PDF 主力解析服务**。理由：ch_PP-OCRv6 中文 OCR 一等公民、PP-FormulaNet 公式标配、SLANet 表格、high/xhigh 档有 1.2B VLM 兜底；basic 档 0.8GB CPU 可跑（冷启动便宜），吞吐需求上来再上 vLLM + 8GB GPU。部署形态用它自带的 api_server。注意 Apache+附加条款的署名义务。
 2. **原生 PDF/Office/HTML：docling（或 docling-serve）**。格式面最宽、DoclingDocument 结构最完整（bbox/页码/阅读序原生），Office/HTML 走原生解析不走 OCR，速度快质量稳。中文扫描件需显式配 rapidocr 引擎（默认 OCR 引擎选择要验证）⚠️。
 3. **组合建议（生产拓扑）**：文件入口按类型路由——Office/HTML/原生 PDF→docling-serve；扫描 PDF/图片→MinerU api_server（medium 起步，重要文档 high）；产出统一为结构化块（DoclingDocument/content_list），再进**自研结构感知切分层**（标题边界 + 表格整块 + token 上限），最后入库。ragflow Go 版已经示范了这种"自研轻量 + 外挂重炮"拓扑（internal/parser 的 parse_method 分发就是现成设计参考）。
-4. **不推荐**：unstructured 作为中文深度解析主力（OCR 仅 tesseract、无公式、模型在闭源包）；dify 默认管线处理扫描件（pypdfium2 纯文本）。
+4. **不推荐**：unstructured 作为中文深度解析主力（OCR 仅 tesseract、无公式、模型推理外置在独立包、深度解析商业重心在 SaaS）；dify 默认管线处理扫描件（pypdfium2 纯文本）。
 5. **license 风险动作**：采购前上 HF 逐一核实 docling Heron/Egret、MinerU2.5、InfiniFlow/deepdoc 的权重协议（本环境网络未验，见存疑清单）。
 
 ---
@@ -136,7 +136,7 @@ License：**Apache-2.0 + 附加条款**——MAU 超 1 亿或月收入超 2000 �
 ❌/⚠️ 存疑：
 1. **模型权重 license 全线未落地**：docling/MinerU/ragflow 的 HF 模型卡在本环境网络不可达（huggingface.co 连接重置），仓内均无权重协议声明。IBM 系（Heron/Egret/Granite-Docling）历史上有 CC-BY-NC 先例，商用前必须逐卡核实。
 2. kotaemon **无 MinerU 集成**（与任务预期相反）；它选了 PaddleOCR 生态（PPStructureV3/PaddleOCR-VL）作为深度解析备选。
-3. unstructured hi_res 的模型细节（YOLOX 版本、表格模型）在闭源协作仓 unstructured-inference，本仓不可溯源 ⚠️。
+3. unstructured hi_res 的模型细节（YOLOX 版本、表格模型）在外置仓 unstructured-inference（复核修正：公开仓 Apache-2.0，非闭源；权重细节仍不在其主仓内、溯源链条断在其依赖），主仓不可直接溯源 ⚠️。
 4. docling 默认 OCR 引擎在无 tesseract 环境下的实际回退行为（auto→rapidocr 还是禁用）未实测，仅确认工厂注册齐全。
 5. MinerU `advanced` tier（types.py:137）与 effort `xhigh` 的精确对应关系未逐行核对（README 硬件表把 standard/advanced 并列）。
 6. docling TableFormerV2 与 V1 的默认切换时点：代码默认仍是 V1 kind `docling_tableformer`（pipeline_options.py:2152），V2 类已就绪但需显式启用。

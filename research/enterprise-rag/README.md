@@ -115,12 +115,14 @@ spring-ai（b5eb0272f）、langchain4j（0028928ea）、spring-ai-alibaba（f82d
 - [x] 复核：14 项抽查（13 命中 + 1 处修正：milvus jieba 中文 Python 用例被 skip，证据改锚 Go 活测试，见 report §12）
 - [x] 补充轮（2026-10-15）：厂商第一方实践两路网络调研——dimensions/10a（OpenAI+Anthropic，含本地 openai-cookbook 源码级）+ 10b（Google+Microsoft）；report TL;DR 增补 11-13 条、检索配方补 Contextual Retrieval 与 BEIR 背书、治理补托管 ACL 闭环模式、时效表补三处产品更名；补充轮复核 4 项全中（含 10a 一处路径修正）
 - [x] 历史锚点轮（2026-10-15）：ragflow/quivr 的 Python 版对照——git worktree 挂历史锚点（ragflow `2508c46c8` 纯 Python 最后完整态 / quivr `947a78541` Python 版最后态）只读深挖，dimensions/11a + 11b；核心产出：Go 注释失实证伪（ES 权重 0.05,0.95 vs 0.001,1）、use_kg 半移植修正、resume/tag 回归项、quivr V2 确证同牌新产品（v1-final tag）；dim04 与 report §2 已回填修正；复核 4 项（含 11a 一处表述修正）
+- [x] 博客系列轮（2026-10-15）：[blog/](./blog/) 10 篇《给 Agent 造知识库：企业级 RAG 搭建手记》——五路写手并行（每人 2 篇），论断范围不超出调研档案、存疑项如实标注；含档案修正三处（unstructured-inference 实为公开仓、BEIR 数字定案 50.0、llama_index 集成包 25→26）；系列级校对（统一十篇文末目录、修正 08 篇错误预告）；抽检 3/3 命中（qdrant DEFAULT_RRF_K/ragas 行号/MinerU 模型注册）
 - 备注：本轮不做 profiles（九维已覆盖 ragflow/haystack 等对象的机制细节，单档全景信息增量低于成本），方法沿 agent-persistence 轮「维度主导」先例；历史锚点轮新增证据形态【历史源码】（worktree 挂历史提交，先例：agent-persistence 轮 OpenHands 锚点）
 
 ## 目录
 
 - [report.md](./report.md) —— 综合报告（最终交付，先读这篇：TL;DR 十条 / 参考架构 / 三条路线 / 分场景技术栈 / 实施蓝图 / 宣称vs实现落差 / 复核记录）
-- [dimensions/](./dimensions/) —— 九份构建块深挖 + 两份厂商补充（过程档案，结论均可溯源到源码路径或官方 URL）：
+- [blog/](./blog/) —— 《给 Agent 造知识库：企业级 RAG 搭建手记》10 篇博客系列（面向公众的调研重述，入口 [blog/README.md](./blog/README.md)：目录 / 统一基线表 / 写作纪律）
+- [dimensions/](./dimensions/) —— 九份构建块深挖 + 两份厂商补充 + 两份历史锚点对照（过程档案，结论均可溯源到源码路径或官方 URL）：
   [01 平台架构](./dimensions/01-platform-arch.md) ·
   [02 解析切分](./dimensions/02-ingestion-parsing.md) ·
   [03 索引向量库](./dimensions/03-index-vector-store.md) ·

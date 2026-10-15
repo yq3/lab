@@ -21,7 +21,7 @@
 
 **厂商互证增补（补充轮 2026-10-15，dim10a/10b）**：
 
-11. **开源侧的核心配方全部拿到厂商量化背书**：Azure 官方 BEIR 实测 NDCG@10 = BM25 40.6 / 纯向量 45.0 / 混合 48.4 / 混合+semantic ranker 50.3；Anthropic Contextual Retrieval 数字链：上下文化嵌入 -35% → +contextual BM25 -49% → +Cohere Rerank **-67%**（top-20 失败率 5.7%→1.9%，一次性成本 $1.02/百万文档 token，靠 prompt caching 撑住）。**钱优先花在「索引侧补语境 + 混合 + 重排」三件已验证的事上**，别急着上花哨的分块图算法——两家厂商都没把父子块/句子窗口当核心武器。
+11. **开源侧的核心配方全部拿到厂商量化背书**：Azure 官方 BEIR 实测 NDCG@10 = BM25 40.6 / 纯向量 45.0 / 混合 48.4 / 混合+semantic ranker 50.0；Anthropic Contextual Retrieval 数字链：上下文化嵌入 -35% → +contextual BM25 -49% → +Cohere Rerank **-67%**（top-20 失败率 5.7%→1.9%，一次性成本 $1.02/百万文档 token，靠 prompt caching 撑住）。**钱优先花在「索引侧补语境 + 混合 + 重排」三件已验证的事上**，别急着上花哨的分块图算法——两家厂商都没把父子块/句子窗口当核心武器。
 12. **RRF k=60 是跨实现行业默认**（Azure 固定 k=60 + llama_index 60 + haystack 61）；但托管侧只走 RRF，ragflow 式 0.7/0.3 可解释加权是自建特色，两派各自成立。Google 敢给默认数字（chunk 1024/overlap 256，实验区间 100-600；LLM 增强分块官方增益：摘要 +12.9%、问题式 +15-20%、组合 +27-33%），可作自建起步锚点。
 13. **托管服务对开源的最大降维打击恰是文档级权限**（正中 dim07 缺口）：Google 文档级 ACL 原生 GA（`acl_info` 随索引摄入 + 查询时用户身份过滤，LLM 增强发生在 ACL 过滤之后）；Azure 四路线（security filter GA + 引擎内 Entra token 比对等三条 preview）。自建等价模式可抄：**ACL 随索引摄入 + 查询时引擎内过滤（勿 post-trim）+ 权限增量同步**。另外评测被产品化（Google Check Grounding 在线 groundedness 打分，partial entailment 判失败比 ragas 严格）、引用细到字符区间（OpenAI annotations）——都是开源该追的方向。
 
