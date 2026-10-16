@@ -1,0 +1,54 @@
+@startuml term-pipeline
+skinparam defaultFontName "PingFang SC"
+skinparam ActivityBackgroundColor #FDF6E3
+skinparam ActivityBorderColor #B58900
+
+start
+:用户输入（含行业/公司/产品术语）;
+:术语识别前置层
+**AC 自动机别名精确匹配**（主力，确定性）
+向量模糊召回（错别字/口语变体，兜底）;
+if (命中术语?) then (是)
+  :消歧与归一
+同形术语靠对话上下文 + 业务线路由
+别名 → 标准实体;
+  :分层注入
+核心术语表常驻 system prompt
+Skill 三层渐进披露（按需展开）
+MCP 活查询（高频变结构化术语）;
+else (否)
+  :注入"未命中许可"
+允许回答"未找到权威定义";
+endif
+:LLM 生成
+回答附术语来源引用;
+:反馈就地采集（会话内纠正 / PR 评论，零提交摩擦）;
+stop
+@enduml
+
+@startuml term-growth-loop
+skinparam defaultFontName "PingFang SC"
+skinparam ActivityBackgroundColor #ECFDF5
+skinparam ActivityBorderColor #059669
+
+start
+:定时触发 improver agent;
+:拉取累积反馈
+对比 agent 行为与专家纠正;
+:挖掘对话日志
+未识别词 / 高频纠错模式;
+if (产出候选（新术语 / 条目修改）?) then (有)
+  :生成最小 diff
+术语条目 PR（版本化文件）;
+  :人工评审
+护栏：默认反馈可能有错;
+  if (评审通过?) then (是)
+    :合并入库;
+  else (否)
+    :丢弃或打回重写;
+  endif
+else (无)
+endif
+:下次运行自动继承新术语库;
+stop
+@enduml

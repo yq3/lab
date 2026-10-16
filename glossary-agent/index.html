@@ -1,0 +1,1049 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>glossary-agent · 企业级 Agent 术语理解技术方案</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231D46C9'/%3E%3Ctext x='16' y='22' font-size='16' font-family='monospace' font-weight='700' fill='%23fff' text-anchor='middle'%3E词%3C/text%3E%3C/svg%3E">
+<style>
+  :root{
+    --paper:#F5F7FA;
+    --panel:#FFFFFF;
+    --ink:#1B2A3D;
+    --ink-soft:#4A5A6E;
+    --muted:#7A8A9C;
+    --line:#DDE4EC;
+    --grid:rgba(27,42,61,.055);
+    --cobalt:#1D46C9;
+    --cobalt-deep:#14338F;
+    --cobalt-wash:#EBF0FE;
+    --amber:#C77414;
+    --amber-text:#9A5A0C;
+    --amber-wash:#FDF3E7;
+    --green:#0E7C5B;
+    --green-wash:#E9F6F0;
+    --red:#C0392B;
+    --red-wash:#FBEDEB;
+    --mono:"SF Mono",Menlo,Consolas,"JetBrains Mono",monospace;
+    --sans:-apple-system,"PingFang SC","Hiragino Sans GB","Noto Sans SC","Microsoft YaHei",sans-serif;
+    --radius:12px;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    font-family:var(--sans);
+    color:var(--ink);
+    background:
+      linear-gradient(var(--grid) 1px,transparent 1px),
+      linear-gradient(90deg,var(--grid) 1px,transparent 1px),
+      var(--paper);
+    background-size:28px 28px,28px 28px,auto;
+    font-size:16px;
+    line-height:1.75;
+  }
+  ::selection{background:var(--cobalt);color:#fff}
+  a{color:var(--cobalt);text-decoration:none}
+  a:hover{text-decoration:underline;text-underline-offset:3px}
+  :focus-visible{outline:2px solid var(--cobalt);outline-offset:2px;border-radius:4px}
+
+  /* ── topbar ── */
+  .topbar{
+    position:sticky;top:0;z-index:50;
+    background:rgba(245,247,250,.88);backdrop-filter:blur(10px);
+    border-bottom:1px solid var(--line);
+    display:flex;align-items:center;justify-content:space-between;
+    padding:0 24px;height:52px;
+    font-family:var(--mono);font-size:12.5px;
+  }
+  .topbar .brand{display:flex;align-items:center;gap:10px;color:var(--ink)}
+  .topbar .brand .dot{width:9px;height:9px;border-radius:50%;background:var(--cobalt)}
+  .topbar .meta{color:var(--muted);letter-spacing:.04em}
+  .topbar a.repo{color:var(--ink-soft)}
+
+  /* ── layout ── */
+  .shell{display:grid;grid-template-columns:200px minmax(0,1fr);max-width:1180px;margin:0 auto;gap:48px;padding:0 24px}
+  .toc{
+    position:sticky;top:84px;align-self:start;
+    font-size:13px;line-height:2.1;padding-top:8px;
+  }
+  .toc .toc-title{font-family:var(--mono);font-size:11px;letter-spacing:.14em;color:var(--muted);margin-bottom:10px}
+  .toc a{display:block;color:var(--ink-soft);padding-left:12px;border-left:2px solid transparent}
+  .toc a .no{font-family:var(--mono);font-size:11px;color:var(--muted);margin-right:6px}
+  .toc a:hover{color:var(--cobalt);text-decoration:none}
+  .toc a.active{color:var(--cobalt);border-left-color:var(--cobalt);font-weight:600}
+  main{min-width:0;padding-bottom:120px}
+
+  /* ── hero ── */
+  .hero{padding:72px 0 48px}
+  .eyebrow{
+    font-family:var(--mono);font-size:12px;letter-spacing:.16em;
+    color:var(--cobalt);text-transform:uppercase;margin-bottom:20px;
+    display:flex;align-items:center;gap:10px;
+  }
+  .eyebrow::before{content:"";width:26px;height:2px;background:var(--cobalt)}
+  h1{
+    font-size:clamp(34px,5.2vw,58px);line-height:1.22;font-weight:600;
+    letter-spacing:-.01em;max-width:16em;
+  }
+  h1 .hl{
+    color:var(--cobalt);
+    box-shadow:inset 0 -.34em var(--cobalt-wash);
+  }
+  .hero-sub{margin-top:20px;font-size:17px;color:var(--ink-soft);max-width:44em}
+  .hero-sub b{color:var(--ink)}
+  .hero-facts{
+    display:flex;flex-wrap:wrap;gap:10px;margin-top:26px;
+    font-family:var(--mono);font-size:12px;
+  }
+  .hero-facts span{
+    background:var(--panel);border:1px solid var(--line);border-radius:99px;
+    padding:5px 13px;color:var(--ink-soft);
+  }
+  .hero-facts span b{color:var(--cobalt);font-weight:600}
+
+  /* ── section ── */
+  section{padding:56px 0 8px}
+  .sec-head{display:flex;align-items:baseline;gap:14px;margin-bottom:8px}
+  .sec-no{font-family:var(--mono);font-size:13px;color:var(--cobalt);letter-spacing:.06em}
+  h2{font-size:27px;font-weight:600;letter-spacing:-.01em}
+  .sec-lede{color:var(--ink-soft);max-width:46em;margin-bottom:28px}
+  .sec-lede b{color:var(--ink)}
+  h3{font-size:17px;font-weight:600;margin:34px 0 14px;display:flex;align-items:center;gap:8px}
+  h3 .tag{font-family:var(--mono);font-size:10.5px;font-weight:500;color:var(--amber-text);background:var(--amber-wash);border:1px solid #EED9BC;border-radius:5px;padding:1px 7px;letter-spacing:.06em}
+
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);box-shadow:0 1px 2px rgba(27,42,61,.04)}
+
+  /* ── playground (signature) ── */
+  .pg{margin-top:40px;overflow:hidden}
+  .pg-head{
+    display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;
+    padding:14px 20px;border-bottom:1px solid var(--line);
+    background:linear-gradient(#FBFCFE,#F7F9FC);
+  }
+  .pg-title{font-family:var(--mono);font-size:12px;letter-spacing:.12em;color:var(--ink-soft);display:flex;align-items:center;gap:8px}
+  .pg-title .pulse{width:8px;height:8px;border-radius:50%;background:var(--green);animation:pulse 2.4s infinite}
+  @keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(14,124,91,.35)}55%{box-shadow:0 0 0 7px rgba(14,124,91,0)}}
+  .pg-presets{display:flex;gap:8px;flex-wrap:wrap}
+  .pg-presets button{
+    font-family:var(--mono);font-size:11.5px;padding:4px 12px;cursor:pointer;
+    border:1px solid var(--line);background:#fff;border-radius:99px;color:var(--ink-soft);
+    transition:all .15s;
+  }
+  .pg-presets button:hover{border-color:var(--cobalt);color:var(--cobalt)}
+  .pg-presets button.on{background:var(--cobalt);border-color:var(--cobalt);color:#fff}
+  .pg-body{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+  .pg-io{padding:20px;border-right:1px solid var(--line)}
+  .pg-io label{font-family:var(--mono);font-size:11px;letter-spacing:.12em;color:var(--muted);display:block;margin-bottom:8px}
+  .pg textarea{
+    width:100%;min-height:110px;resize:vertical;border:1px solid var(--line);border-radius:8px;
+    padding:12px 14px;font-family:var(--sans);font-size:15px;line-height:1.8;color:var(--ink);
+    background:#FDFEFE;
+  }
+  .pg textarea:focus{outline:none;border-color:var(--cobalt);box-shadow:0 0 0 3px var(--cobalt-wash)}
+  .pg-marked{
+    margin-top:14px;font-size:15px;line-height:2;padding:12px 14px;
+    background:var(--cobalt-wash);border-radius:8px;border:1px dashed #BCCBF6;
+    min-height:56px;
+  }
+  .pg-marked .lbl{font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;color:var(--cobalt-deep);display:block;margin-bottom:4px}
+  .pg-marked mark{background:var(--cobalt);color:#fff;border-radius:4px;padding:0 5px}
+  .pg-marked mark.amb{background:var(--amber)}
+  .pg-out{padding:20px;background:#FBFCFE}
+  .pg-status{
+    display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;
+    font-family:var(--mono);font-size:11.5px;
+  }
+  .pg-status span{border-radius:6px;padding:3px 10px;border:1px solid transparent}
+  .st-hit{background:var(--cobalt-wash);color:var(--cobalt-deep);border-color:#C9D7F8!important}
+  .st-amb{background:var(--amber-wash);color:var(--amber-text);border-color:#EED9BC!important}
+  .st-miss{background:var(--red-wash);color:var(--red);border-color:#F2CFCB!important}
+  .cards{display:flex;flex-direction:column;gap:10px}
+  .tcard{
+    background:#fff;border:1px solid var(--line);border-left:3px solid var(--cobalt);
+    border-radius:8px;padding:12px 16px;
+  }
+  .tcard.amb{border-left-color:var(--amber)}
+  .tcard.miss{border-left-color:var(--red)}
+  .tcard .head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+  .tcard .canon{font-weight:600;font-size:15.5px}
+  .tcard .alias{font-family:var(--mono);font-size:11.5px;color:var(--muted)}
+  .tcard .bl{font-family:var(--mono);font-size:10.5px;color:var(--cobalt-deep);background:var(--cobalt-wash);border-radius:5px;padding:1px 7px}
+  .tcard .def{font-size:13.5px;color:var(--ink-soft);margin-top:5px;line-height:1.65}
+  .tcard .amb-opts{display:flex;gap:8px;margin-top:9px;flex-wrap:wrap}
+  .tcard .amb-opts button{
+    font-size:12.5px;padding:4px 12px;border-radius:6px;cursor:pointer;
+    border:1px solid #EED9BC;background:#fff;color:var(--amber-text);transition:all .15s;
+  }
+  .tcard .amb-opts button:hover{background:var(--amber-wash)}
+  .tcard .amb-opts button.sel{background:var(--amber);border-color:var(--amber);color:#fff}
+  .tcard .resolved{font-size:13px;color:var(--amber-text);margin-top:7px;font-weight:500}
+  .tcard .hint{font-size:13px;color:var(--red);margin-top:4px}
+  .pg-foot{
+    padding:10px 20px;border-top:1px solid var(--line);background:#F7F9FC;
+    font-family:var(--mono);font-size:11px;color:var(--muted);letter-spacing:.03em;
+  }
+
+  /* ── §01 term types ── */
+  .types{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+  .type-card{padding:22px 22px 18px;position:relative}
+  .type-card .tt-no{font-family:var(--mono);font-size:11px;color:var(--muted);letter-spacing:.1em}
+  .type-card .tt-name{font-size:19px;font-weight:600;margin:6px 0 4px}
+  .type-card .tt-alias{font-family:var(--mono);font-size:12px;color:var(--cobalt);margin-bottom:10px}
+  .type-card .tt-desc{font-size:13.5px;color:var(--ink-soft);line-height:1.7}
+  .type-card .tt-risk{font-size:12.5px;margin-top:12px;padding-top:10px;border-top:1px dashed var(--line);color:var(--amber-text)}
+  .essence{
+    margin-top:22px;padding:18px 24px;display:flex;flex-wrap:wrap;gap:10px 34px;align-items:center;
+    background:var(--ink);color:#E7EDF5;border-radius:var(--radius);
+  }
+  .essence .k{font-family:var(--mono);font-size:11px;color:#8FA3BC;letter-spacing:.12em}
+  .essence .v{font-size:15.5px;font-weight:500}
+  .essence .v em{font-style:normal;color:#7EA6FF}
+  .essence .plus{color:#5C7188;font-family:var(--mono)}
+
+  /* ── §02 evidence ── */
+  .evid{display:grid;grid-template-columns:repeat(2,1fr);gap:16px}
+  .ev-card{padding:20px 22px;display:flex;flex-direction:column;gap:8px}
+  .ev-card .ev-stat{font-family:var(--mono);font-size:34px;font-weight:700;letter-spacing:-.02em;color:var(--cobalt);line-height:1.1}
+  .ev-card .ev-stat small{font-size:15px;color:var(--muted);font-weight:400;margin-left:4px}
+  .ev-card h4{font-size:15.5px;font-weight:600}
+  .ev-card p{font-size:13.5px;color:var(--ink-soft);line-height:1.7}
+  .ev-card .src{font-family:var(--mono);font-size:11px;color:var(--muted);margin-top:auto;padding-top:8px}
+
+  /* ── §03 pipeline diagram ── */
+  .pipe{padding:34px 26px 30px;overflow-x:auto}
+  .pipe-inner{min-width:640px;display:flex;flex-direction:column;align-items:center}
+  .pnode{
+    background:#fff;border:1.5px solid var(--ink);border-radius:10px;
+    padding:12px 22px;text-align:center;max-width:460px;
+    box-shadow:3px 3px 0 rgba(27,42,61,.12);
+  }
+  .pnode .pn-t{font-weight:600;font-size:14.5px}
+  .pnode .pn-d{font-size:12px;color:var(--ink-soft);line-height:1.6;margin-top:3px}
+  .pnode.root{background:var(--ink);color:#fff}
+  .pnode.root .pn-d{color:#A9B9CD}
+  .pnode.detect{border-color:var(--cobalt);border-width:2px;background:var(--cobalt-wash)}
+  .pnode.detect .pn-t{color:var(--cobalt-deep)}
+  .pnode.gen{border-color:var(--green);background:var(--green-wash)}
+  .pnode.gen .pn-t{color:var(--green)}
+  .pnode .badge{
+    display:inline-block;font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;
+    border-radius:4px;padding:1px 6px;margin-bottom:5px;
+  }
+  .bd-main{background:var(--cobalt);color:#fff}
+  .bd-fallback{background:#fff;color:var(--muted);border:1px solid var(--line)}
+  .varrow{width:2px;height:26px;background:var(--ink);position:relative;flex:none}
+  .varrow::after{
+    content:"";position:absolute;bottom:-1px;left:50%;transform:translateX(-50%);
+    border:5px solid transparent;border-top-color:var(--ink);
+  }
+  .pipe-split{display:flex;gap:40px;align-items:stretch;position:relative;padding:0 10px}
+  .pipe-branch{display:flex;flex-direction:column;align-items:center}
+  .pipe-branch .plabel{
+    font-family:var(--mono);font-size:11px;padding:3px 12px;border-radius:99px;margin-bottom:12px;
+  }
+  .plabel.yes{background:var(--cobalt-wash);color:var(--cobalt-deep)}
+  .plabel.no{background:var(--red-wash);color:var(--red)}
+  .inject-3{display:flex;gap:12px;margin:4px 0;flex-wrap:wrap;justify-content:center}
+  .inj{
+    border:1.5px dashed var(--cobalt);border-radius:9px;padding:9px 15px;background:#fff;
+    font-size:12px;text-align:center;max-width:170px;
+  }
+  .inj b{display:block;font-size:13px;color:var(--cobalt-deep)}
+  .inj span{color:var(--muted);font-family:var(--mono);font-size:10.5px}
+
+  /* ── §04 library ── */
+  .lib-grid{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,.95fr);gap:18px;align-items:start}
+  .code{
+    font-family:var(--mono);font-size:12.3px;line-height:1.72;
+    padding:20px 22px;overflow-x:auto;background:#101B2C;color:#D7E1EE;border-radius:var(--radius);
+  }
+  .code .c{color:#5E7290}
+  .code .k{color:#7EA6FF}
+  .code .s{color:#8FD3A8}
+  .code .y{color:#E8C07D}
+  .code-head{
+    display:flex;justify-content:space-between;align-items:center;
+    font-family:var(--mono);font-size:11px;color:var(--muted);
+    padding:10px 16px;border-bottom:1px solid var(--line);background:#F7F9FC;
+    border-radius:var(--radius) var(--radius) 0 0;
+  }
+  .code-wrap{border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:#101B2C}
+  .code-wrap .code{border-radius:0}
+  .layers{display:flex;flex-direction:column;gap:12px}
+  .layer{
+    border:1px solid var(--line);border-radius:10px;background:#fff;padding:14px 18px;
+    position:relative;transition:transform .18s,box-shadow .18s;cursor:default;
+  }
+  .layer:hover{transform:translateX(4px);box-shadow:0 3px 12px rgba(27,42,61,.08)}
+  .layer .lh{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .layer .lname{font-family:var(--mono);font-weight:700;font-size:14px;color:var(--cobalt-deep)}
+  .layer .tok{font-family:var(--mono);font-size:11px;background:var(--cobalt-wash);color:var(--cobalt-deep);border-radius:5px;padding:1px 8px}
+  .layer .when{font-size:11.5px;color:var(--muted);font-family:var(--mono);margin-left:auto}
+  .layer .ld{font-size:13px;color:var(--ink-soft);margin-top:6px;line-height:1.65}
+  .layer.l1{margin-left:18px}
+  .layer.l2{margin-left:36px}
+  .layer-note{font-size:12.5px;color:var(--muted);padding:2px 4px;line-height:1.7}
+  .layer-note b{color:var(--ink)}
+  .gov{margin-top:18px;padding:18px 22px;display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+  .gov .g h4{font-size:13.5px;font-weight:600;margin-bottom:5px;display:flex;gap:7px;align-items:center}
+  .gov .g h4 .gi{font-family:var(--mono);color:var(--cobalt);font-size:12px}
+  .gov .g p{font-size:12.5px;color:var(--ink-soft);line-height:1.65}
+
+  /* ── §05 steps ── */
+  .steps{display:flex;flex-direction:column;gap:0;counter-reset:step}
+  .step{
+    display:grid;grid-template-columns:52px minmax(0,1fr);gap:18px;padding:18px 0;
+    border-bottom:1px dashed var(--line);
+  }
+  .step:last-child{border-bottom:none}
+  .step .sn{
+    counter-increment:step;font-family:var(--mono);font-weight:700;font-size:15px;color:var(--cobalt);
+    border:1.5px solid var(--cobalt);border-radius:50%;width:38px;height:38px;
+    display:flex;align-items:center;justify-content:center;background:var(--cobalt-wash);
+  }
+  .step .sn::before{content:counter(step,decimal-leading-zero)}
+  .step h4{font-size:15.5px;font-weight:600;margin-bottom:4px}
+  .step p{font-size:13.5px;color:var(--ink-soft);line-height:1.7;max-width:46em}
+  .step p code{font-family:var(--mono);font-size:12px;background:var(--cobalt-wash);color:var(--cobalt-deep);border-radius:4px;padding:1px 6px}
+
+  /* ── §06 table ── */
+  .tbl-wrap{overflow-x:auto}
+  table{width:100%;border-collapse:collapse;font-size:13.5px;min-width:720px}
+  thead th{
+    font-family:var(--mono);font-size:11px;letter-spacing:.1em;color:var(--muted);text-align:left;
+    padding:12px 16px;border-bottom:2px solid var(--ink);font-weight:500;
+  }
+  tbody td{padding:14px 16px;border-bottom:1px solid var(--line);vertical-align:top;color:var(--ink-soft);line-height:1.65}
+  tbody td:first-child{font-weight:600;color:var(--ink);white-space:nowrap}
+  tbody tr.star td:first-child{color:var(--cobalt-deep)}
+  tbody tr.star{background:linear-gradient(90deg,var(--cobalt-wash),transparent 65%)}
+  .stars{color:var(--cobalt);letter-spacing:2px;font-size:13px}
+  .stars .off{color:#C6D0DC}
+  .verdict{
+    margin-top:18px;padding:16px 22px;background:var(--ink);color:#E7EDF5;border-radius:var(--radius);
+    font-size:14.5px;line-height:1.8;
+  }
+  .verdict b{color:#7EA6FF}
+  .verdict .vt{font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;color:#8FA3BC;display:block;margin-bottom:6px}
+
+  /* ── §07 loop ── */
+  .loop{padding:34px 26px;overflow-x:auto}
+  .loop-inner{min-width:620px}
+  .loop-row{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+  .lnode{
+    border:1.5px solid var(--green);border-radius:10px;background:#fff;padding:13px 16px;
+    text-align:center;position:relative;box-shadow:3px 3px 0 rgba(14,124,91,.1);
+  }
+  .lnode b{font-size:13.5px;color:var(--green);display:block}
+  .lnode span{font-size:11.5px;color:var(--muted);line-height:1.55;display:block;margin-top:3px}
+  .lnode.human{border-color:var(--amber);box-shadow:3px 3px 0 rgba(199,116,20,.12)}
+  .lnode.human b{color:var(--amber-text)}
+  .loop-turn{
+    display:flex;justify-content:space-between;padding:6px 34px;margin:10px 0;
+    position:relative;
+  }
+  .loop-turn .harrow{flex:1;height:2px;background:var(--green);position:relative;align-self:center}
+  .loop-turn .harrow::after{content:"";position:absolute;right:-1px;top:50%;transform:translateY(-50%);border:5px solid transparent;border-left-color:var(--green)}
+  .loop-turn .harrow.back::after{right:auto;left:-1px;border-left-color:transparent;border-right-color:var(--green)}
+  .loop-turn .hlabel{font-family:var(--mono);font-size:10.5px;color:var(--green);align-self:center;padding:0 10px;white-space:nowrap}
+  .loop-back{
+    text-align:center;font-family:var(--mono);font-size:11.5px;color:var(--green);
+    border:1.5px dashed var(--green);border-radius:99px;padding:7px 18px;margin:16px auto 0;width:fit-content;
+  }
+  .guard{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:22px}
+  .guard .gcard{border:1px solid var(--line);border-left:3px solid var(--amber);border-radius:8px;padding:13px 16px;background:#fff}
+  .guard .gcard b{font-size:13.5px;display:block;margin-bottom:3px}
+  .guard .gcard p{font-size:12.5px;color:var(--ink-soft);line-height:1.65}
+
+  /* ── §08 metrics ── */
+  .mets{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+  .met{padding:18px;border-top:3px solid var(--cobalt)}
+  .met .m-lv{font-family:var(--mono);font-size:10.5px;letter-spacing:.12em;color:var(--muted)}
+  .met .m-name{font-size:15px;font-weight:600;margin:5px 0 6px}
+  .met p{font-size:12.5px;color:var(--ink-soft);line-height:1.65}
+  .met.gold{border-top-color:var(--amber);background:linear-gradient(180deg,var(--amber-wash),#fff 60%)}
+  .met.gold .m-name::after{content:"金指标";font-size:10px;font-family:var(--mono);color:var(--amber-text);border:1px solid #EED9BC;border-radius:4px;padding:1px 6px;margin-left:8px;vertical-align:2px}
+
+  /* ── §09 roadmap ── */
+  .road{display:grid;grid-template-columns:repeat(3,1fr);gap:0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:#fff}
+  .rm{padding:22px;border-right:1px solid var(--line);position:relative}
+  .rm:last-child{border-right:none}
+  .rm .rm-tag{font-family:var(--mono);font-size:12px;font-weight:700;color:var(--cobalt)}
+  .rm .rm-time{font-family:var(--mono);font-size:11px;color:var(--muted);margin:2px 0 10px}
+  .rm ul{list-style:none;display:flex;flex-direction:column;gap:6px}
+  .rm li{font-size:13px;color:var(--ink-soft);padding-left:16px;position:relative;line-height:1.6}
+  .rm li::before{content:"·";position:absolute;left:4px;color:var(--cobalt);font-weight:700}
+  .rm .exit{margin-top:14px;padding-top:12px;border-top:1px dashed var(--line);font-size:12px;color:var(--green);line-height:1.6}
+  .rm .exit b{font-family:var(--mono);font-size:10px;letter-spacing:.1em;display:block;color:var(--muted);margin-bottom:2px}
+
+  /* ── §10 risks ── */
+  .risks .step .sn{border-color:var(--red);color:var(--red);background:var(--red-wash)}
+  .org-cond{padding:20px 24px;margin-bottom:18px;display:flex;gap:16px;align-items:flex-start;background:var(--ink);color:#E7EDF5;border-radius:var(--radius)}
+  .org-cond .oq{font-family:var(--mono);font-size:22px;color:#7EA6FF;line-height:1.3}
+  .org-cond p{font-size:14.5px;line-height:1.8}
+  .org-cond b{color:#7EA6FF}
+
+  /* ── §11 refs ── */
+  .refs ol{list-style:none;counter-reset:ref;display:flex;flex-direction:column;gap:2px}
+  .refs li{counter-increment:ref;display:grid;grid-template-columns:34px minmax(0,1fr);gap:12px;padding:10px 6px;border-bottom:1px dashed var(--line);align-items:baseline}
+  .refs li::before{content:"["counter(ref)"]";font-family:var(--mono);font-size:12px;color:var(--muted)}
+  .refs .rt{font-size:14px;font-weight:500}
+  .refs .rd{font-size:12.5px;color:var(--muted);display:block;margin-top:1px}
+  .refs .grp{font-family:var(--mono);font-size:11px;letter-spacing:.14em;color:var(--muted);margin:24px 0 10px}
+
+  /* footer */
+  footer{
+    border-top:1px solid var(--line);margin-top:70px;padding:26px 0 34px;
+    font-family:var(--mono);font-size:11.5px;color:var(--muted);line-height:2;
+  }
+  footer .f-grid{display:flex;justify-content:space-between;flex-wrap:wrap;gap:14px}
+
+  /* reveal */
+  .rv{opacity:0;transform:translateY(18px);transition:opacity .6s ease,transform .6s ease}
+  .rv.in{opacity:1;transform:none}
+  @media (prefers-reduced-motion:reduce){
+    .rv{opacity:1;transform:none;transition:none}
+    html{scroll-behavior:auto}
+    .pg-title .pulse{animation:none}
+  }
+
+  /* responsive */
+  @media (max-width:960px){
+    .shell{grid-template-columns:1fr;gap:0}
+    .toc{display:none}
+    .pg-body{grid-template-columns:1fr}
+    .pg-io{border-right:none;border-bottom:1px solid var(--line)}
+    .types,.evid,.gov,.mets,.guard{grid-template-columns:1fr}
+    .lib-grid{grid-template-columns:1fr}
+    .road{grid-template-columns:1fr}
+    .rm{border-right:none;border-bottom:1px solid var(--line)}
+    .rm:last-child{border-bottom:none}
+    .essence{flex-direction:column;align-items:flex-start;gap:8px}
+  }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand"><span class="dot"></span><span>glossary-agent</span><span style="color:var(--muted)">/ 技术方案</span></div>
+  <div class="meta"><a class="repo" href="https://github.com/yq3/lab">lab</a> · 2026-09 · v1</div>
+</header>
+
+<div class="shell">
+  <nav class="toc" aria-label="目录">
+    <div class="toc-title">目录</div>
+    <a href="#s1"><span class="no">01</span>问题定义</a>
+    <a href="#s2"><span class="no">02</span>调研结论</a>
+    <a href="#s3"><span class="no">03</span>总体架构</a>
+    <a href="#s4"><span class="no">04</span>术语库设计</a>
+    <a href="#s5"><span class="no">05</span>查询时链路</a>
+    <a href="#s6"><span class="no">06</span>机制选型</a>
+    <a href="#s7"><span class="no">07</span>自增长闭环</a>
+    <a href="#s8"><span class="no">08</span>验收指标</a>
+    <a href="#s9"><span class="no">09</span>路线图</a>
+    <a href="#s10"><span class="no">10</span>风险</a>
+    <a href="#s11"><span class="no">11</span>参考资料</a>
+  </nav>
+
+  <main>
+
+  <!-- ═══════════ HERO ═══════════ -->
+  <div class="hero">
+    <div class="eyebrow">Enterprise Agent · Terminology Layer</div>
+    <h1>让 Agent 听懂<br>你们公司的<span class="hl">黑话</span></h1>
+    <p class="hero-sub">
+      企业级 Agent 落地的第一道墙不是推理能力，是<b>词汇</b>：行业术语口径不一、内部黑话无迹可查、产品代号一词多义。
+      本方案把这个问题拆成<b>实体归一化 + 定义注入</b>，用一套可版本化、可自增长的术语层解决。
+    </p>
+    <div class="hero-facts">
+      <span>调研来源 <b>Anthropic 官方博客 16 篇</b> + GraphRAG</span>
+      <span>案例覆盖 金融 / 医疗 / 法律 / DevTools</span>
+      <span>微调依赖 <b>0 家</b></span>
+    </div>
+
+    <!-- 签名交互：术语识别 playground -->
+    <div class="panel pg rv" id="playground">
+      <div class="pg-head">
+        <div class="pg-title"><span class="pulse"></span>LIVE · 术语识别演示（页面内嵌迷你术语库，输入即识别）</div>
+        <div class="pg-presets" role="group" aria-label="例句">
+          <button type="button" data-p="0" class="on">销售口吻</button>
+          <button type="button" data-p="1">技术口吻</button>
+          <button type="button" data-p="2">术语全未命中</button>
+        </div>
+      </div>
+      <div class="pg-body">
+        <div class="pg-io">
+          <label for="pg-in">输入 · 含术语的自然语句</label>
+          <textarea id="pg-in" spellcheck="false"></textarea>
+          <div class="pg-marked" id="pg-marked" aria-live="polite"><span class="lbl">识别标注</span></div>
+        </div>
+        <div class="pg-out">
+          <div class="pg-status" id="pg-status"></div>
+          <div class="cards" id="pg-cards"></div>
+        </div>
+      </div>
+      <div class="pg-foot">链路：AC 自动机别名精确匹配（主力）→ 消歧归一 → 分层注入 L1 定义。生产版另含向量召回兜底与 MCP 活查询。</div>
+    </div>
+  </div>
+
+  <!-- ═══════════ §01 问题 ═══════════ -->
+  <section id="s1">
+    <div class="sec-head"><span class="sec-no">§01</span><h2>问题定义</h2></div>
+    <p class="sec-lede">企业 Agent 要听懂三类词汇，每类的失败模式不同，治理手段也不同。</p>
+    <div class="types">
+      <div class="panel type-card rv">
+        <div class="tt-no">TYPE-A</div>
+        <div class="tt-name">行业术语</div>
+        <div class="tt-alias">IRR · FHIR · prior auth</div>
+        <p class="tt-desc">模型可能懂个大概，但口径未必与公司一致——答得出来，答得不准。</p>
+        <p class="tt-risk">风险：口径错位（公司 MRR ≠ 教科书 MRR）</p>
+      </div>
+      <div class="panel type-card rv">
+        <div class="tt-no">TYPE-B</div>
+        <div class="tt-name">公司内部黑话</div>
+        <div class="tt-alias">星环 · 上会 · 小蜜</div>
+        <p class="tt-desc">模型完全不懂，且只存在于口头和私聊——语料里根本没有。</p>
+        <p class="tt-risk">风险：训练数据缺失（公开语料不存在）</p>
+      </div>
+      <div class="panel type-card rv">
+        <div class="tt-no">TYPE-C</div>
+        <div class="tt-name">产品名 / 代号 / 缩写</div>
+        <div class="tt-alias">TDH · ACP · v3 内部代号</div>
+        <p class="tt-desc">短文本，embedding 几乎无信号；同名冲突多，一词多义。</p>
+        <p class="tt-risk">风险：向量检索失效 + 同形歧义</p>
+      </div>
+    </div>
+    <div class="essence rv">
+      <span class="k">问题本质</span>
+      <span class="v">实体归一化 <em>（多说法 → 一概念）</em></span>
+      <span class="plus">+</span>
+      <span class="v">定义注入 <em>（LLM 缺的是定义，不是推理力）</em></span>
+    </div>
+  </section>
+
+  <!-- ═══════════ §02 调研结论 ═══════════ -->
+  <section id="s2">
+    <div class="sec-head"><span class="sec-no">§02</span><h2>调研核心结论</h2></div>
+    <p class="sec-lede">五条结论均有案例实证，是后续所有设计的依据。<b>没有一条来自推测。</b></p>
+    <div class="evid">
+      <div class="panel ev-card rv">
+        <div class="ev-stat">0<small>/ 16 家微调</small></div>
+        <h4>没有一家微调</h4>
+        <p>Hebbia（金融尽调）、Carta（临床抽象）、Thomson Reuters（法律）、Warp（自改进 agent）全部走<b>运行时注入 + 可版本化文本工件</b>：当天可改、可审查、可回滚、换模型不丢。</p>
+        <div class="src">依据 [11][12][13][14]</div>
+      </div>
+      <div class="panel ev-card rv">
+        <div class="ev-stat">−49%<small>检索失败率</small></div>
+        <h4>词典精确匹配 &gt; 向量（对短术语）</h4>
+        <p>Anthropic 官方实测：BM25 词法匹配对缩写、代号、错误码最有效（例 "TS-999"），embedding 无信号；hybrid + rerank 失败率降 67%。知识库 &lt;200k token 时直接全量塞 prompt 即可。</p>
+        <div class="src">依据 [1] Contextual Retrieval</div>
+      </div>
+      <div class="panel ev-card rv">
+        <div class="ev-stat">80%<small>系统提示词被删除</small></div>
+        <h4>渐进式披露是大量术语的正确姿势</h4>
+        <p>Anthropic 为 Claude 5 代模型删掉 Claude Code 80% 以上系统提示词，无效果损失——过度约束比欠约束更伤。Skills 三层 token 预算：索引 ~50 / 速查 ~500 / 详情 2000+。</p>
+        <div class="src">依据 [3][7]</div>
+      </div>
+      <div class="panel ev-card rv">
+        <div class="ev-stat">1<small>个 improver 闭环</small></div>
+        <h4>术语库是复利资产，靠闭环自增长</h4>
+        <p>Warp 模式：版本化文件 + PR 评审 + 定时 improver agent 挖掘工作现场反馈、提最小修改、人审合并，下次运行自动继承。反馈采集多一步提交动作都会丢信号。</p>
+        <div class="src">依据 [14]</div>
+      </div>
+      <div class="panel ev-card rv">
+        <div class="ev-stat">98–99%<small>专家一致率</small></div>
+        <h4>验收 = 专家一致率，不是准确率</h4>
+        <p>eSentire 与资深专家判断一致率 95%；Carta inter-rater reliability 98–99% 达行业金标准。术语理解的唯一金指标：agent 判断与领域专家判断的一致程度。</p>
+        <div class="src">依据 [5][12]</div>
+      </div>
+      <div class="panel ev-card rv" style="display:flex;align-items:center;justify-content:center;background:var(--ink);border-color:var(--ink)">
+        <p style="font-size:15px;line-height:1.9;color:#E7EDF5;text-align:center">
+          企业调研（500+ 技术负责人）：<b style="color:#7EA6FF">数据访问与质量（42%）</b>是 agent 落地最大瓶颈之一——<br>术语理解不是 prompt 技巧问题，<b style="color:#7EA6FF">是企业知识供给管道问题</b>。
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════ §03 架构 ═══════════ -->
+  <section id="s3">
+    <div class="sec-head"><span class="sec-no">§03</span><h2>总体架构 · 查询时链路</h2></div>
+    <p class="sec-lede">识别层是<b>独立前置层</b>，不指望模型自己认术语——词典匹配是确定性的，可单测、可度量，错误能定位到识别 / 消歧 / 注入某一环（Carta 细粒度归因模式）。</p>
+    <div class="panel pipe rv">
+      <div class="pipe-inner">
+        <div class="pnode root"><div class="pn-t">用户输入</div><div class="pn-d">含行业 / 公司 / 产品术语的自然语句</div></div>
+        <div class="varrow"></div>
+        <div class="pnode detect">
+          <div class="pn-t">术语识别前置层</div>
+          <div class="pn-d">
+            <span class="badge bd-main">主力</span>AC 自动机别名精确匹配（确定性）<br>
+            <span class="badge bd-fallback">兜底</span>向量模糊召回（错别字 / 口语变体）
+          </div>
+        </div>
+        <div class="varrow"></div>
+        <div class="pipe-split">
+          <div class="pipe-branch">
+            <div class="plabel yes">命中</div>
+            <div class="pnode"><div class="pn-t">消歧与归一</div><div class="pn-d">同形术语靠对话上下文 + 业务线路由<br>别名 → 标准实体</div></div>
+            <div class="varrow"></div>
+            <div class="pnode" style="border-style:dashed;border-color:var(--cobalt)">
+              <div class="pn-t" style="color:var(--cobalt-deep)">分层注入</div>
+              <div class="inject-3">
+                <div class="inj"><b>核心表常驻</b><span>system prompt</span></div>
+                <div class="inj"><b>Skill 三层按需</b><span>50/500/2000+</span></div>
+                <div class="inj"><b>MCP 活查询</b><span>高频变结构化</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="pipe-branch">
+            <div class="plabel no">未命中</div>
+            <div class="pnode" style="border-color:var(--red)">
+              <div class="pn-t" style="color:var(--red)">注入「未命中许可」</div>
+              <div class="pn-d">明确许可回答“未找到权威定义”<br>而非猜测（防幻觉关键）</div>
+            </div>
+          </div>
+        </div>
+        <div class="varrow"></div>
+        <div class="pnode gen"><div class="pn-t">LLM 生成</div><div class="pn-d">回答附术语来源引用（Hebbia 逐格引用模式，专家可逐条纠错）</div></div>
+        <div class="varrow"></div>
+        <div class="pnode"><div class="pn-t">反馈就地采集</div><div class="pn-d">会话内纠正 / PR 评论，零提交摩擦 → 进入 §07 自增长闭环</div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════ §04 术语库 ═══════════ -->
+  <section id="s4">
+    <div class="sec-head"><span class="sec-no">§04</span><h2>术语库设计</h2></div>
+    <p class="sec-lede">单条术语是一个 YAML 文件；整个术语库是 Git 仓库——<b>diff 可审、可回滚、agent 可提 PR</b>，这是“复利资产”的物理形态。</p>
+    <div class="lib-grid">
+      <div class="code-wrap rv">
+        <div class="code-head"><span>terms/data-intel/platform.yaml</span><span>term-0042 · v3</span></div>
+        <div class="code"><span class="c"># 术语条目：不止是定义，还有 why、示例、口径脚本</span>
+<span class="k">canonical</span>: <span class="s">星环数据平台</span>
+<span class="k">aliases</span>: [<span class="s">星环</span>, <span class="s">TDH平台</span>, <span class="s">数仓</span>]
+<span class="k">business_line</span>: <span class="s">数据智能部</span>   <span class="c"># 消歧路由 + 权限分域</span>
+<span class="k">definition</span>: |
+  <span class="y">公司内部统一数仓，底层 Transwarp TDH……</span>
+<span class="k">why</span>: |
+  <span class="y">销售口中“星环”指平台整体；技术口可能指</span>
+  <span class="y">TDH 组件。写 why 是为模型能泛化推理。</span>
+<span class="k">examples</span>:
+  - <span class="k">q</span>: <span class="s">把上季度星环的用量拉出来</span>
+    <span class="k">a</span>: <span class="s">查 tdm.usage_monthly 按部门聚合</span>
+<span class="k">scripts</span>:
+  <span class="k">usage_query</span>: <span class="s">tools/query_usage.py</span>  <span class="c"># 口径的确定性执行</span>
+<span class="k">disambiguation</span>:
+  - <span class="k">context</span>: <span class="s">销售/售前会话</span> <span class="k">means</span>: <span class="s">平台整体</span>
+  - <span class="k">context</span>: <span class="s">数据研发会话</span> <span class="k">means</span>: <span class="s">TDH 组件</span>
+<span class="k">source</span>: [{<span class="k">by</span>: <span class="s">zhang.s@corp</span>, <span class="k">date</span>: <span class="s">2026-08-30</span>}]
+<span class="k">confidence</span>: <span class="s">0.9</span>  <span class="k">version</span>: <span class="s">3</span>  <span class="c"># PR 次数 = 版本，Git 即审计日志</span></div>
+      </div>
+      <div>
+        <div class="layers">
+          <div class="layer rv">
+            <div class="lh"><span class="lname">L0 索引</span><span class="tok">~50 tok/条</span><span class="when">识别层常驻（不占 LLM 窗口）</span></div>
+            <p class="ld">canonical + 触发词（aliases）+ 一句话。喂给 AC 自动机做匹配，是机器用的。</p>
+          </div>
+          <div class="layer l1 rv">
+            <div class="lh"><span class="lname">L1 速查</span><span class="tok">~500 tok/条</span><span class="when">命中即注入 prompt</span></div>
+            <p class="ld">canonical + definition + 业务线。单次对话实际命中 3~5 条，注入成本 &lt; 3k token。</p>
+          </div>
+          <div class="layer l2 rv">
+            <div class="lh"><span class="lname">L2 详情</span><span class="tok">2000+ tok/条</span><span class="when">仅 L1 不够判断时展开</span></div>
+            <p class="ld">全量：why + examples + scripts + 消歧规则 + 来源。</p>
+          </div>
+        </div>
+        <p class="layer-note rv">▲ 三层渐进披露对应 Skills 三层 token 预算（50 / 500 / 2000+）。<b>L0 不占模型上下文</b>；500 条术语的 L1 按对话实际命中量注入。</p>
+        <div class="panel gov rv">
+          <div class="g"><h4><span class="gi">04-1</span>Git 治理</h4><p>YAML 按业务线分目录（权限分域的自然边界），条目变更走 PR 评审，版本即审计日志。</p></div>
+          <div class="g"><h4><span class="gi">04-2</span>权威口径只走 PR</h4><p>人工评审合并；memory 只存运行时学到的用户偏好，绝不承担权威术语表职责（会漂移）。</p></div>
+          <div class="g"><h4><span class="gi">04-3</span>条目写法</h4><p>写原则 + why + 干净示例，不穷举规则——示例会被模型极仔细地模仿，必须正确。</p></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════ §05 查询时链路 ═══════════ -->
+  <section id="s5">
+    <div class="sec-head"><span class="sec-no">§05</span><h2>查询时五步链路</h2></div>
+    <div class="steps" style="margin-top:8px">
+      <div class="step rv"><div class="sn" aria-hidden="true"></div><div>
+        <h4>识别</h4>
+        <p>AC 自动机（如 <code>pyahocorasick</code>）对 aliases 做多模式精确匹配——主力；向量召回仅做兜底，处理错别字与“飞书云文档 → 知识库”这类口语变体。</p>
+      </div></div>
+      <div class="step rv"><div class="sn" aria-hidden="true"></div><div>
+        <h4>消歧</h4>
+        <p>同形术语（如“小蜜”）按 <code>disambiguation.context</code> + 对话历史 + 提问者业务线路由；无法消歧时反问用户，而不是猜。</p>
+      </div></div>
+      <div class="step rv"><div class="sn" aria-hidden="true"></div><div>
+        <h4>注入</h4>
+        <p>按 §06 选型表分流（常驻 / Skill 展开 / MCP 活查）；同对话已注入的术语不重复展开，省 token。</p>
+      </div></div>
+      <div class="step rv"><div class="sn" aria-hidden="true"></div><div>
+        <h4>未命中许可 <span style="font-size:11px;color:var(--red);font-family:var(--mono);margin-left:6px">防幻觉关键</span></h4>
+        <p>system prompt 明确：“术语未命中且无把握时，声明‘未找到权威定义’而非猜测”——Anthropic prompt 指南直接指出这能显著降幻觉。</p>
+      </div></div>
+      <div class="step rv"><div class="sn" aria-hidden="true"></div><div>
+        <h4>引用</h4>
+        <p>回答中对关键术语标注来源条目（Hebbia 逐格引用模式），领域专家可逐条纠错，错误可归因。</p>
+      </div></div>
+    </div>
+  </section>
+
+  <!-- ═══════════ §06 机制选型 ═══════════ -->
+  <section id="s6">
+    <div class="sec-head"><span class="sec-no">§06</span><h2>注入机制选型</h2></div>
+    <p class="sec-lede">五种机制不是竞争关系，是分工关系——按术语的<b>量、变化频率、结构化程度</b>分流。</p>
+    <div class="panel tbl-wrap rv">
+      <table>
+        <thead><tr><th>机制</th><th>擅长</th><th>不擅长</th><th>术语场景</th></tr></thead>
+        <tbody>
+          <tr><td>Prompt 直塞</td><td>少量、核心、稳定；零基建；确定必进上下文</td><td>规模化吃窗口；改一次全量改；无版本治理</td><td><span class="stars">★★★★<span class="off">★</span></span>（&lt;百条核心表）</td></tr>
+          <tr class="star"><td>Skill 三层渐进披露</td><td>成体系、任务耦合；索引常驻命中展开；Git 版本化</td><td>依赖 description 质量；静态不随使用演化</td><td><span class="stars">★★★★★</span>（中大型术语库首选）</td></tr>
+          <tr><td>MCP 活查询</td><td>真值源在系统里、高频变、量大（SKU / 产品目录 / 代码表）；权限可审计</td><td>只管“拿到”不管“解释”；每次查询有延迟成本</td><td><span class="stars">★★★★<span class="off">★</span></span>（动态结构化术语）</td></tr>
+          <tr><td>Memory 沉淀</td><td>运行中习得的约定、用户纠错；跨会话（复杂任务 +39%）</td><td>模型自主提炼会漂移；不能当权威标准</td><td><span class="stars">★★★<span class="off">★★</span></span>（沉淀层，须可查看可编辑可关闭）</td></tr>
+          <tr><td>Context editing</td><td>长任务不爆窗（token −84%）</td><td>纯垃圾回收，不注入知识</td><td><span class="stars">★★<span class="off">★★★</span></span>（安全垫）</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="verdict rv">
+      <span class="vt">ONE-LINE DECISION</span>
+      核心少量 → <b>直塞</b>；成体系大库 → <b>Skill 三层</b>；海量高频变结构化 → <b>MCP 活查 + Skill 消歧</b>（MCP 负责「拿到」，Skill 负责「解释」）；用户纠错 → <b>memory</b>；context editing 兜底。
+    </div>
+  </section>
+
+  <!-- ═══════════ §07 自增长闭环 ═══════════ -->
+  <section id="s7">
+    <div class="sec-head"><span class="sec-no">§07</span><h2>术语库自增长闭环</h2></div>
+    <p class="sec-lede">冷启动靠人工 + 文档挖掘，跑起来之后靠这个闭环自增长——<b>Warp 已在开源仓上验证的模式</b>（数千次代码评审、数百贡献者）。</p>
+    <div class="panel loop rv">
+      <div class="loop-inner">
+        <div class="loop-row">
+          <div class="lnode"><b>① 反馈就地采集</b><span>会话内纠正 / PR 评论<br>零提交摩擦</span></div>
+          <div class="lnode"><b>② improver 定时挖掘</b><span>拉取累积反馈，对比 agent 行为<br>与专家纠正；挖未识别词</span></div>
+          <div class="lnode"><b>③ 生成最小 diff</b><span>单条目级 PR<br>降低人审负担</span></div>
+        </div>
+        <div class="loop-turn"><div class="harrow"></div><div class="hlabel">候选流转</div><div class="harrow"></div></div>
+        <div class="loop-row">
+          <div class="lnode human"><b>④ 人工评审</b><span>护栏：默认反馈可能有错<br>agent 先 sanity check</span></div>
+          <div class="lnode"><b>⑤ 合并入库</b><span>版本化文件<br>Git 历史即审计日志</span></div>
+          <div class="lnode"><b>⑥ 自动继承</b><span>下次运行即生效<br>新术语 T+1 可用</span></div>
+        </div>
+        <div class="loop-turn"><div class="harrow back"></div><div class="hlabel">回到 ① 持续采集</div><div class="harrow back"></div></div>
+        <div class="loop-back">↻ 可验证领域加回归 harness：术语库每轮变更先跑参考语料对比</div>
+      </div>
+    </div>
+    <div class="guard">
+      <div class="gcard rv"><b>护栏一：反馈默认可能有错</b><p>improver 需带上下文 sanity check，过滤反馈来源可信度。</p></div>
+      <div class="gcard rv"><b>护栏二：人审终审</b><p>agent 只提最小 diff，合并权永远在人。</p></div>
+      <div class="gcard rv"><b>护栏三：登记前置</b><p>新产品上线 checklist 强制含“术语登记”，否则闭环只能消化存量。</p></div>
+    </div>
+  </section>
+
+  <!-- ═══════════ §08 验收指标 ═══════════ -->
+  <section id="s8">
+    <div class="sec-head"><span class="sec-no">§08</span><h2>验收指标与 eval 基准</h2></div>
+    <div class="mets" style="margin-top:8px">
+      <div class="panel met rv"><div class="m-lv">LAYER 1 · 识别层</div><div class="m-name">术语命中率</div><p>recall / precision。可离线单测——词典匹配是确定性的。</p></div>
+      <div class="panel met rv"><div class="m-lv">LAYER 2 · 消歧层</div><div class="m-name">路由正确率</div><p>同形术语按上下文路由的正确率，构造跨业务线对话用例。</p></div>
+      <div class="panel met gold rv"><div class="m-lv">LAYER 3 · 端到端</div><div class="m-name">专家一致率</div><p>对齐 eSentire 95% / Carta 98–99% 模式。唯一金指标。</p></div>
+      <div class="panel met rv"><div class="m-lv">LAYER 4 · 归因</div><div class="m-name">错误定位</div><p>定位到术语表 / 识别 / 注入 / 检索哪一环，避免只看聚合分。</p></div>
+    </div>
+    <p class="sec-lede rv" style="margin-top:20px;margin-bottom:0">建<b>行业专属基准</b>（30~50 条标注 query 起步），随模型升级与术语库更新持续加码，新模型与旧模型 head-to-head 对测（Hebbia 模式）。术语关系复杂时（产品→子产品→部门→负责人）后备 GraphRAG 实体图增强，不在 POC 范围。</p>
+  </section>
+
+  <!-- ═══════════ §09 路线图 ═══════════ -->
+  <section id="s9">
+    <div class="sec-head"><span class="sec-no">§09</span><h2>实施路线图</h2></div>
+    <div class="road rv" style="margin-top:8px">
+      <div class="rm">
+        <div class="rm-tag">M1 · POC</div>
+        <div class="rm-time">1–2 周</div>
+        <ul>
+          <li>YAML 术语库 + AC 识别</li>
+          <li>L1 直塞注入</li>
+          <li>20–50 条种子术语</li>
+          <li>离线 eval（Python + pyahocorasick，不引入向量库）</li>
+        </ul>
+        <div class="exit"><b>EXIT</b>识别命中 &gt; 95%；端到端一致率有基线数字</div>
+      </div>
+      <div class="rm">
+        <div class="rm-tag">M2 · 试点</div>
+        <div class="rm-time">1 个月</div>
+        <ul>
+          <li>接真实对话语料</li>
+          <li>L2 按需展开</li>
+          <li>高频变术语接 MCP</li>
+          <li>反馈闭环（人工整理版）</li>
+        </ul>
+        <div class="exit"><b>EXIT</b>单业务线日活使用；周均新增/修订条目 &gt; 5</div>
+      </div>
+      <div class="rm">
+        <div class="rm-tag">M3 · 推广</div>
+        <div class="rm-time">持续</div>
+        <ul>
+          <li>improver 自动化 PR</li>
+          <li>按业务线权限分域</li>
+          <li>指标看板</li>
+        </ul>
+        <div class="exit"><b>EXIT</b>一致率 ≥ 90%；术语入库 T+1</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════ §10 风险 ═══════════ -->
+  <section id="s10">
+    <div class="sec-head"><span class="sec-no">§10</span><h2>前置条件与风险</h2></div>
+    <div class="org-cond rv">
+      <div class="oq">“</div>
+      <p>对 agent 而言，<b>没写下来且不可访问的东西就不存在</b>。”公司黑话只存在于口头、私聊和 DM，agent 永远学不到。需要<b>默认公开 + 少量清晰安全边界</b>的信息架构（Slack / Anthropic 共同强调）——这是决定术语库上限的组织前置条件。</p>
+    </div>
+    <div class="steps risks">
+      <div class="step rv"><div class="sn" aria-hidden="true"></div><div><h4>memory 漂移污染权威口径</h4><p>权威定义只走 PR 通道；memory 只存偏好，且可查看 / 可编辑 / 可关闭。</p></div></div>
+      <div class="step rv"><div class="sn" aria-hidden="true"></div><div><h4>别名爆炸导致 AC 误命中</h4><p>L0 索引带业务线过滤；命中后消歧层反问确认。</p></div></div>
+      <div class="step rv"><div class="sn" aria-hidden="true"></div><div><h4>术语表全量塞爆上下文</h4><p>三层披露硬预算（50 / 500 / 2000）；context editing 兜底。</p></div></div>
+      <div class="step rv"><div class="sn" aria-hidden="true"></div><div><h4>反馈质量差带偏术语库</h4><p>improver 只提最小 diff + 人审终审 + 回归 harness。</p></div></div>
+      <div class="step rv"><div class="sn" aria-hidden="true"></div><div><h4>换模型后行为变化</h4><p>eval 基准 head-to-head 对测通过后才切换（Hebbia 模式）。</p></div></div>
+    </div>
+  </section>
+
+  <!-- ═══════════ §11 参考资料 ═══════════ -->
+  <section id="s11" class="refs">
+    <div class="sec-head"><span class="sec-no">§11</span><h2>参考资料</h2></div>
+    <p class="sec-lede">2026-09 深读来源，编号与正文引用对应。全文见 <a href="./README.md">glossary-agent/README.md</a>。</p>
+    <div class="grp">METHODOLOGY · 方法论与机制</div>
+    <ol>
+      <li><span class="rt"><a href="https://www.anthropic.com/news/contextual-retrieval" target="_blank" rel="noopener">Contextual Retrieval</a></span><span class="rd">Anthropic — BM25 对术语最有效；hybrid+rerank −67%；&lt;200k token 直接塞 prompt</span></li>
+      <li><span class="rt"><a href="https://claude.com/blog/the-new-rules-of-context-engineering-for-claude-5-generation-models" target="_blank" rel="noopener">The new rules of context engineering for Claude 5 generation models</a></span><span class="rd">Anthropic — 删 80% 系统提示词；渐进披露</span></li>
+      <li><span class="rt"><a href="https://claude.com/blog/skills-explained" target="_blank" rel="noopener">Skills explained</a></span><span class="rd">Anthropic — 五机制官方对比</span></li>
+      <li><span class="rt"><a href="https://claude.com/blog/building-agents-with-skills-equipping-agents-for-specialized-work" target="_blank" rel="noopener">Building agents with Skills</a></span><span class="rd">Anthropic — 三层 50/500/2000+ token 预算</span></li>
+      <li><span class="rt"><a href="https://claude.com/blog/what-is-model-context-protocol" target="_blank" rel="noopener">What is Model Context Protocol</a></span><span class="rd">Anthropic — MCP 管拿到，Skill 管解释</span></li>
+      <li><span class="rt"><a href="https://claude.com/blog/context-management" target="_blank" rel="noopener">Managing context on the Claude Developer Platform</a></span><span class="rd">Anthropic — memory tool + context editing：+39%，token −84%</span></li>
+      <li><span class="rt"><a href="https://claude.com/blog/memory" target="_blank" rel="noopener">Bringing memory to Claude</a></span><span class="rd">Anthropic — 项目级记忆隔离；可查看/可编辑/可关闭</span></li>
+      <li><span class="rt"><a href="https://claude.com/blog/best-practices-for-prompt-engineering" target="_blank" rel="noopener">Best practices for prompt engineering</a></span><span class="rd">Anthropic — 示例会被极仔细模仿；许可说不确定</span></li>
+    </ol>
+    <div class="grp">CASE STUDIES · 企业案例</div>
+    <ol>
+      <li><span class="rt"><a href="https://claude.com/blog/how-warp-builds-self-improving-agents-on-claude" target="_blank" rel="noopener">How Warp builds self-improving agents on Claude</a></span><span class="rd">improver 双 skill 闭环——§07 蓝本</span></li>
+      <li><span class="rt"><a href="https://claude.com/blog/working-at-the-frontier-how-hebbia-builds-ai-for-financial-diligence-that-cant-miss-a-detail" target="_blank" rel="noopener">How Hebbia builds AI for financial diligence</a></span><span class="rd">meta-prompting 层；逐格引用；随版本加码的行业基准</span></li>
+      <li><span class="rt"><a href="https://claude.com/blog/carta-healthcare-clinical-abstractor" target="_blank" rel="noopener">How Carta Healthcare gets AI to reason like a clinical abstractor</a></span><span class="rd">SME 解释 → prompt diff 当天发版；IRR 98–99%</span></li>
+      <li><span class="rt"><a href="https://claude.com/blog/working-at-the-frontier-how-thomson-reuters-builds-ai-for-high--stakes-professional-work" target="_blank" rel="noopener">How Thomson Reuters builds AI for high-stakes professional work</a></span><span class="rd">权威语料 grounding + 引用验证 agent</span></li>
+      <li><span class="rt"><a href="https://claude.com/blog/turning-conversation-into-knowledge-how-slack-builds-human-agent-teams" target="_blank" rel="noopener">Turning conversation into knowledge: Slack</a></span><span class="rd">对话即知识库；public by default</span></li>
+      <li><span class="rt"><a href="https://claude.com/blog/building-effective-human-agent-teams" target="_blank" rel="noopener">Building effective human-agent teams</a></span><span class="rd">“没写下来就不存在”；lessons &amp; missteps 周报</span></li>
+    </ol>
+    <div class="grp">SURVEY & OTHER · 调研与其他</div>
+    <ol>
+      <li><span class="rt"><a href="https://claude.com/blog/how-enterprises-are-building-ai-agents-in-2026" target="_blank" rel="noopener">How enterprises are building AI agents in 2026</a></span><span class="rd">500+ 企业调研；数据访问与质量 42% 是首要瓶颈</span></li>
+      <li><span class="rt"><a href="https://claude.com/blog/building-ai-agents-for-the-enterprise" target="_blank" rel="noopener">Building AI agents for the enterprise</a></span><span class="rd">institutional knowledge 编码为复利系统</span></li>
+      <li><span class="rt"><a href="https://microsoft.github.io/graphrag/" target="_blank" rel="noopener">Microsoft GraphRAG</a></span><span class="rd">实体关系图增强，M3 后备选项</span></li>
+    </ol>
+    <p style="margin-top:20px;font-size:13px;color:var(--muted)">开源现状：GitHub 上 glossary/terminology + RAG 检索仅有玩具级项目，“术语管理 + 注入”环节无事实标准实现——需自建，也为拆分独立建仓留了空间。</p>
+  </section>
+
+  <footer>
+    <div class="f-grid">
+      <div>
+        glossary-agent · 技术方案 v1 · 2026-09<br>
+        设计文档 <a href="./README.md">README.md</a> · 图源 <a href="./diagrams.puml">diagrams.puml</a> · SVG <a href="./out/term-pipeline.svg">term-pipeline</a> / <a href="./out/term-growth-loop.svg">term-growth-loop</a>
+      </div>
+      <div style="text-align:right">
+        本页自包含 · 无外部依赖 · 可离线打开<br>
+        lab / yq3
+      </div>
+    </div>
+  </footer>
+
+  </main>
+</div>
+
+<script>
+/* ───────── 迷你术语库（演示用，对应生产版 L0+L1） ───────── */
+const TERMS = [
+  {
+    id:'term-0042',
+    canonical:'星环数据平台',
+    aliases:['星环','TDH平台','数仓','Transwarp Data Hub'],
+    line:'数据智能部',
+    def:'公司内部统一数仓，底层 Transwarp TDH，含离线/实时两条链路。',
+    disambiguation:[
+      {ctx:'销售/售前会话', means:'平台整体'},
+      {ctx:'数据研发会话', means:'TDH 组件本身'}
+    ]
+  },
+  {
+    id:'term-0107',
+    canonical:'上会',
+    aliases:['上会'],
+    line:'风控',
+    def:'提交风控委员会评审。行业术语，公司口径与监管口径一致。'
+  },
+  {
+    id:'term-0233',
+    canonical:'MRR（公司口径）',
+    aliases:['MRR','月经常性收入'],
+    line:'财务',
+    def:'剔除一次性实施费后的月度经常性收入；口径以脚本 tools/mrr.py 为准，优先于文字定义。'
+  },
+  {
+    id:'term-0301',
+    canonical:'小蜜',
+    aliases:['小蜜'],
+    line:'待消歧',
+    def:'',
+    ambiguous:[
+      {ctx:'客服业务线', means:'智能客服产品「小蜜」'},
+      {ctx:'销售业务线', means:'销售助手项目代号「小蜜」'}
+    ]
+  }
+];
+
+const PRESETS = [
+  '把上季度星环的用量拉出来，顺便让小蜜把这单上会材料整理一下',
+  '数仓昨晚的同步任务为什么失败了？MRR 看板数字也对不上',
+  '帮我看看北极星指标这周的表现怎么样'
+];
+
+const $in = document.getElementById('pg-in');
+const $marked = document.getElementById('pg-marked');
+const $cards = document.getElementById('pg-cards');
+const $status = document.getElementById('pg-status');
+const resolveState = {}; // alias -> chosen ctx
+
+/* 别名按长度降序，长词优先匹配；全部小写比较 */
+const ALIAS_ENTRIES = TERMS.flatMap(t => t.aliases.map(a => ({alias:a, low:a.toLowerCase(), term:t})))
+  .sort((x,y) => y.low.length - x.low.length);
+
+function findMatches(text){
+  const low = text.toLowerCase();
+  const found = [];
+  for(const e of ALIAS_ENTRIES){
+    let idx = 0;
+    while((idx = low.indexOf(e.low, idx)) !== -1){
+      found.push({start:idx, end:idx + e.low.length, alias:e.alias, term:e.term});
+      idx += e.low.length;
+    }
+  }
+  /* 去重叠：按起点排序，保留最长且不与已选区间重叠的匹配 */
+  found.sort((a,b) => a.start - b.start || (b.end - b.start) - (a.end - a.start));
+  const picked = [];
+  for(const m of found){
+    if(picked.length && m.start < picked[picked.length-1].end) continue;
+    picked.push(m);
+  }
+  return picked;
+}
+
+function esc(s){return s.replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+
+function render(){
+  const text = $in.value;
+  const ms = findMatches(text);
+
+  /* 标注句 */
+  let html = '<span class="lbl">识别标注</span>';
+  if(!text.trim()){
+    html += '<span style="color:var(--muted)">输入语句后此处高亮命中的术语…</span>';
+  } else if(!ms.length){
+    html += '<span style="color:var(--muted)">' + esc(text) + '</span>';
+  } else {
+    let cur = 0;
+    for(const m of ms){
+      html += esc(text.slice(cur, m.start));
+      const isAmb = !!m.term.ambiguous && !resolveState[m.term.canonical];
+      html += '<mark class="' + (isAmb ? 'amb' : '') + '" title="→ ' + esc(m.term.canonical) + '">' + esc(m.alias) + '</mark>';
+      cur = m.end;
+    }
+    html += esc(text.slice(cur));
+  }
+  $marked.innerHTML = html;
+
+  /* 状态条 */
+  const hit = ms.filter(m => !m.term.ambiguous).length;
+  const amb = ms.filter(m => !!m.term.ambiguous && !resolveState[m.term.canonical]).length;
+  const st = [];
+  if(hit) st.push('<span class="st-hit">命中 ' + hit + '</span>');
+  if(amb) st.push('<span class="st-amb">待消歧 ' + amb + '</span>');
+  if(!text.trim()) st.push('<span class="st-miss">等待输入</span>');
+  else if(!ms.length) st.push('<span class="st-miss">0 命中 · 触发未命中许可</span>');
+  $status.innerHTML = st.join('');
+
+  /* 卡片 */
+  const seen = new Set();
+  let cards = '';
+  for(const m of ms){
+    const t = m.term;
+    if(seen.has(t.canonical)) continue;
+    seen.add(t.canonical);
+    if(t.ambiguous){
+      const chosenCtx = resolveState[t.canonical];
+      if(chosenCtx){
+        const opt = t.ambiguous.find(o => o.ctx === chosenCtx);
+        cards += '<div class="tcard"><div class="head"><span class="canon">' + esc(t.canonical) + '</span><span class="alias">命中词：' + esc(m.alias) + '</span><span class="bl">' + esc(chosenCtx) + '</span></div><div class="resolved">已消歧 → ' + esc(opt.means) + '（生产版由对话上下文/业务线自动路由）</div></div>';
+      } else {
+        cards += '<div class="tcard amb"><div class="head"><span class="canon">' + esc(t.canonical) + '</span><span class="alias">命中词：' + esc(m.alias) + '</span><span class="bl">同形术语</span></div><div class="def">一词多义，需上下文消歧——请选择本次对话语境：</div><div class="amb-opts">' +
+          t.ambiguous.map(o => '<button type="button" data-term="' + esc(t.canonical) + '" data-ctx="' + esc(o.ctx) + '">' + esc(o.ctx) + ' · ' + esc(o.means) + '</button>').join('') +
+          '</div></div>';
+      }
+    } else {
+      cards += '<div class="tcard"><div class="head"><span class="canon">' + esc(t.canonical) + '</span><span class="alias">命中词：' + esc(m.alias) + '</span><span class="bl">' + esc(t.line) + '</span></div><div class="def">' + esc(t.def) + '</div></div>';
+    }
+  }
+  if(text.trim() && !ms.length){
+    cards += '<div class="tcard miss"><div class="head"><span class="canon" style="color:var(--red)">未命中许可</span></div><div class="def">「北极星指标」等词不在术语库中——system prompt 已注入许可：<b>agent 应回答“未找到该术语的权威定义”并反问澄清，而非猜测</b>（防幻觉关键，见 §05-04）。</div></div>';
+  }
+  if(!text.trim()){
+    cards = '<div style="font-size:13px;color:var(--muted);padding:8px 2px">右侧实时展示：命中术语卡（L1 速查内容）· 待消歧卡 · 未命中许可卡。</div>';
+  }
+  $cards.innerHTML = cards;
+}
+
+$in.addEventListener('input', render);
+$cards.addEventListener('click', e => {
+  const btn = e.target.closest('button[data-term]');
+  if(!btn) return;
+  resolveState[btn.dataset.term] = btn.dataset.ctx;
+  render();
+});
+
+/* 预设例句 */
+document.querySelectorAll('.pg-presets button').forEach(b => {
+  b.addEventListener('click', () => {
+    document.querySelectorAll('.pg-presets button').forEach(x => x.classList.remove('on'));
+    b.classList.add('on');
+    Object.keys(resolveState).forEach(k => delete resolveState[k]);
+    $in.value = PRESETS[+b.dataset.p];
+    render();
+  });
+});
+
+$in.value = PRESETS[0];
+render();
+
+/* ───────── TOC 高亮 + 滚动显现 ───────── */
+const tocLinks = document.querySelectorAll('.toc a');
+const map = {};
+tocLinks.forEach(a => { map[a.getAttribute('href').slice(1)] = a; });
+const secObs = new IntersectionObserver(entries => {
+  entries.forEach(en => {
+    if(en.isIntersecting){
+      tocLinks.forEach(a => a.classList.remove('active'));
+      const a = map[en.target.id];
+      if(a) a.classList.add('active');
+    }
+  });
+}, {rootMargin:'-20% 0px -70% 0px'});
+document.querySelectorAll('section[id]').forEach(s => secObs.observe(s));
+
+const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+if(!reduced){
+  const rvObs = new IntersectionObserver(entries => {
+    entries.forEach(en => {
+      if(en.isIntersecting){ en.target.classList.add('in'); rvObs.unobserve(en.target); }
+    });
+  }, {threshold:.12});
+  document.querySelectorAll('.rv').forEach(el => rvObs.observe(el));
+} else {
+  document.querySelectorAll('.rv').forEach(el => el.classList.add('in'));
+}
+</script>
+</body>
+</html>
