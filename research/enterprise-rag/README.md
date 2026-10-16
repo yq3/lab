@@ -115,6 +115,7 @@ spring-ai（b5eb0272f）、langchain4j（0028928ea）、spring-ai-alibaba（f82d
 - [x] 复核：14 项抽查（13 命中 + 1 处修正：milvus jieba 中文 Python 用例被 skip，证据改锚 Go 活测试，见 report §12）
 - [x] 补充轮（2026-10-15）：厂商第一方实践两路网络调研——dimensions/10a（OpenAI+Anthropic，含本地 openai-cookbook 源码级）+ 10b（Google+Microsoft）；report TL;DR 增补 11-13 条、检索配方补 Contextual Retrieval 与 BEIR 背书、治理补托管 ACL 闭环模式、时效表补三处产品更名；补充轮复核 4 项全中（含 10a 一处路径修正）
 - [x] 历史锚点轮（2026-10-15）：ragflow/quivr 的 Python 版对照——git worktree 挂历史锚点（ragflow `2508c46c8` 纯 Python 最后完整态 / quivr `947a78541` Python 版最后态）只读深挖，dimensions/11a + 11b；核心产出：Go 注释失实证伪（ES 权重 0.05,0.95 vs 0.001,1）、use_kg 半移植修正、resume/tag 回归项、quivr V2 确证同牌新产品（v1-final tag）；dim04 与 report §2 已回填修正；复核 4 项（含 11a 一处表述修正）
+- [x] OneRAG 快速评估（2026-10-16，用户指定对象）：dimensions/12——形态与自建方案高度同构（FastAPI+RRF k=60+FastMCP+React 前端，工程质量强），但中文 BM25 分词缺失（kiwipiepy 韩语向）、解析 pypdf 级、无用户/ACL；结论「参考价值高、采用价值低」
 - [x] 博客系列轮（2026-10-15）：[blog/](./blog/) 10 篇《给 Agent 造知识库：企业级 RAG 搭建手记》——五路写手并行（每人 2 篇），论断范围不超出调研档案、存疑项如实标注；含档案修正三处（unstructured-inference 实为公开仓、BEIR 数字定案 50.0、llama_index 集成包 25→26）；系列级校对（统一十篇文末目录、修正 08 篇错误预告）；抽检 3/3 命中（qdrant DEFAULT_RRF_K/ragas 行号/MinerU 模型注册）
 - 备注：本轮不做 profiles（九维已覆盖 ragflow/haystack 等对象的机制细节，单档全景信息增量低于成本），方法沿 agent-persistence 轮「维度主导」先例；历史锚点轮新增证据形态【历史源码】（worktree 挂历史提交，先例：agent-persistence 轮 OpenHands 锚点）
 
@@ -135,4 +136,5 @@ spring-ai（b5eb0272f）、langchain4j（0028928ea）、spring-ai-alibaba（f82d
   [10a 厂商：OpenAI/Anthropic](./dimensions/10a-vendor-openai-anthropic.md) ·
   [10b 厂商：Google/Microsoft](./dimensions/10b-vendor-google-microsoft.md) ·
   [11a 历史锚点：ragflow Python 版](./dimensions/11a-legacy-python-ragflow.md) ·
-  [11b 历史锚点：quivr Python 版](./dimensions/11b-legacy-python-quivr.md)
+  [11b 历史锚点：quivr Python 版](./dimensions/11b-legacy-python-quivr.md) ·
+  [12 OneRAG 快速评估](./dimensions/12-onerag-assessment.md)
