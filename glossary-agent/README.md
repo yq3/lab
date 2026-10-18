@@ -1,9 +1,11 @@
 # glossary-agent — 企业级 Agent 术语理解技术方案
 
-> **定位**：设计文档（调研结论 + 架构设计）。POC 未启动，落地时以本文档为基准。
+> **定位**：设计文档（调研结论 + 架构设计）。POC 未启动，落地时以本文档为基准（**2026-10-18 D23 起**：落地基准改为 knowledge-lattice 的需求/设计文档，本文转为调研与设计沉淀——见下方决策变更与附 3）。
 > **调研基础**：Anthropic 官方博客深读 16 篇（2023-08 ~ 2026-09）+ Microsoft GraphRAG，全部为运行时注入的真实企业案例。
 > **日期**：2026-09-04　|　**维护**：与 `diagrams.puml` 同目录，图变更需重跑 puml 校验渲染。
-> **姊妹项目（2026-10-16 补）**：文档知识层见 [../knowledge-lattice/](../knowledge-lattice/)，双层分工与集成方式见[文末附录](#附与-knowledge-lattice-的分工与集成2026-10-16-补)。
+> **姊妹项目（2026-10-16 补）**：文档知识层见 [../knowledge-lattice/](../knowledge-lattice/)，双层分工与集成方式见[文末附录](#附与-knowledge-lattice-的分工与集成2026-10-16-补)（**2026-10-18 起分工口径已变**——见下方决策变更与附 3）。
+>
+> ⚠️ **决策变更（2026-10-18，knowledge-lattice D23 / [issue #35](https://github.com/yq3/lab/issues/35)）**：「术语层作为独立 MCP server 部署」的形态**已取消**——术语层与业务对象关联（统称**业务语义**）并入 [knowledge-lattice](../knowledge-lattice/) 的 `core/semantic/` 模块：同一服务、同一 MCP server、同一套部署，避免知识管理分散在多个服务。**本文档的定位随之调整为「调研结论与设计沉淀」**：AC 自动机精确匹配、三层渐进披露（L0/L1/L2）、Git YAML + PR 治理、四类黑话分治、评测集前移等核心结论被 D23 全盘吸收为 semantic 模块的设计输入；下文 §9 实施路线图与「独立 POC」的表述**不再执行**，对应能力按 knowledge-lattice 的 M2-S1~S3 轨道实现。M2 之前的过渡期，agent 侧仍按本文方案（Git YAML + 本地 AC 自动机）先行，YAML schema 与 knowledge-lattice 正式方案一致、迁移零改动。详见[附 3](#附-3决策变更并入-knowledge-lattice2026-10-18d23)。
 
 ---
 
@@ -207,6 +209,8 @@ stop
 
 ## 9. 实施路线图
 
+> **已被 D23 取代（2026-10-18）**：本节作为独立项目的 M1~M3 路线不再执行；对应能力按 knowledge-lattice 的 M2-S1（模板链路）→ M2-S2（场景/报表项 + YAML 覆盖层 + annotate）→ M2-S3（概念 / 文档打标 / 实体召回）轨道实现（见其 requirements §8 / design §8）。M2 之前的过渡期沿用下表 M1 的"YAML 术语库 + AC 识别 + L1 直塞注入"作为 agent 本地版。
+
 | 阶段 | 周期 | 内容 | 出口标准 |
 |---|---|---|---|
 | M1 POC | 1~2 周 | YAML 术语库 + AC 识别 + L1 直塞注入 + 20~50 条种子术语 + 离线 eval | 标注 query 集上识别命中 > 95%，端到端一致率有基线数字 |
@@ -269,6 +273,8 @@ GitHub 上 glossary/terminology + RAG 检索仅有玩具级项目，**"术语管
 
 ## 附：与 knowledge-lattice 的分工与集成（2026-10-16 补）
 
+> **历史口径（保留供追溯）**：本附录第 3 点「不合并系统 / 并挂两个 MCP server / 运行时投影为演进缝」与第 6 点「两线并行」已被 2026-10-18 的 D23 取代——见附 3。第 1、2、4、5 点的结论（调研互证、表列详情真相在元数据系统、组织内默认可见、L0 为构建产物）在 D23 中保留。
+
 企业 agent 需要两类知识（税务场景实证：黑话词典 + 政策/指南文档都存在），本方案只管其一，另一层由姊妹项目承载：
 
 | | glossary-agent（本方案，术语层） | knowledge-lattice（文档层） |
@@ -322,3 +328,16 @@ GitHub 上 glossary/terminology + RAG 检索仅有玩具级项目，**"术语管
 3. **评测集前移**：收集 100~200 条真实用户话术、标注每句应命中的术语 ID，度量识别层召回/精确——比专家一致率更早可用，是调别名、消歧规则与兜底阈值的依据。
 
 两个反模式（实证否决）：全塞 prompt（超 20 万 token 经济阈值、噪声大——只有核心几十条常驻）；结构化词条切块向量化（短术语向量高度聚集——"进项税额/进项税额转出/加计抵减"几乎重合而业务上必须区分，结构丢失、top-k 语义近而业务错）。
+
+---
+
+## 附 3：决策变更——并入 knowledge-lattice（2026-10-18，D23）
+
+[issue #35](https://github.com/yq3/lab/issues/35)（knowledge-lattice 决策 D23）取代本文「独立部署」路线，要点如下：
+
+1. **并入**：术语层与业务对象关联统称**业务语义**，作为 knowledge-lattice 的 `core/semantic/` 模块实现——同一服务、同一 MCP server（docs 组 + semantic 组工具：`annotate` / `search_entities` / `get_entity` / `describe_table`）、同一套部署；与文档层**共享基础设施**（SQLite 连接工厂、鉴权与组织上下文、审计 outbox、worker 框架、MCP 外壳），**不共享领域模型与维度 ACL 编译器**。动机：服务归一（不为术语层多部署、鉴权、监控、发版一套）；业务对象之间本来就有关联（场景→模板→字段→列、报表项→字段取数），需要同一张图。
+2. **本文哪些结论被继承**（作为 semantic 模块设计输入）：§2 调研结论（运行时注入不微调、词典精确匹配 > 向量、渐进披露、复利资产闭环、专家一致率）；§3/§5 的 AC 自动机确定性识别前置层与消歧；§4.2 三层渐进披露 L0/L1/L2；§4.3 Git YAML + PR 治理（真相源仍是 Git，`owner` 必填）；§7 自增长闭环（高频未识别词回流成待补别名）；附 2 的四类黑话分治、三层识别架构、"自动骨架 + 人工增量按 id 合并"、评测集前移；附录第 1/2/4/5 点。
+3. **本文哪些口径被取代**：附录第 3 点「不合并系统、并挂两个 MCP server、运行时投影为演进缝」与第 6 点「两线并行 / 本方案 POC 先行」——独立部署与独立 POC 取消；§9 的 M1~M3 路线图不再执行，对应能力按 knowledge-lattice **M2-S1~S3** 轨道实现（模板链路 → 场景/报表项 + YAML 覆盖层 + annotate → 概念 / 文档打标 / 实体召回）；§8"GraphRAG 式实体图增强"备选项——D23 明确**不做 GraphRAG、不引入图数据库**，改用**类型化对象图**（关系直接从业务系统配置同步，不用 LLM 抽取；SQLite 递归 CTE 做 1~2 跳展开）。
+4. **超出本文的新增设计**（见 knowledge-lattice [design.md](../knowledge-lattice/docs/design.md) §4 `sem_*` DDL / §5.8~5.10 / §6.3）：九种实体类型（concept / system / scenario / template / template_field / report / report_item / table / column）与十种关系类型白名单；骨架每日自动同步 + 删除比例保护（默认 20% 中止）+ missing 宽限期（7 天）；YAML 覆盖层合并规则与 CI 校验（别名冲突、短词拦截、L0 预算 1500 token）；构建产物（AC 自动机 / 模糊索引 / L0 片段）按 `(org, dict_rev)` 原子切换；agent 薄中间件注入规则（每轮 ≤600 token，annotate 超时 200ms 降级）；文档块 ↔ 实体打标与**实体召回路**（强制复用文档层维度 ACL 编译产物，不开后门）；`restricted` 实体权限；识别评测门槛（AC precision ≥ 0.95 / recall ≥ 0.80、负样本误报 ≤ 0.05）。
+5. **过渡期（现在~knowledge-lattice M2）**：agent 侧按本文方案先行——Git YAML + 本地 AC 自动机（pyahocorasick），只覆盖 concept/system 与 L0；**YAML schema 与正式方案（design §5.8）一致**（`id: type:key`、`aliases` / `abbr` / `definition` / `why` / `examples` / `disambiguation` / `refers_to` / `l0` / `sensitivity` / `owner`），迁移零改动；规范化函数抽成小 package 两端共用；中间件接口不变（输入文本、输出 mentions），本地 AC ↔ 服务端 `annotate` 经开关切换并支持灰度，切换时用评测集做对比。
+6. **本目录后续**：不再独立建仓；文档与 `diagrams.puml` 保留作调研与设计沉淀，不再按 §9 路线更新；新的设计变更一律记入 knowledge-lattice 的需求 / 设计文档与 issue。
