@@ -9,7 +9,7 @@
 - 每个 App 本质是一个 POC：效果验证通过后，可能拆出去单独建仓继续演进，所以目录应保持自包含、独立可运行。
 - `research/`：调研专区（过程+结果，每次任务一个子目录），工作模式见 [research/AGENTS.md](research/AGENTS.md)；被调研的开源仓库克隆在 `~/develop/opensource/`（克隆规范见该目录自己的 AGENTS.md）。
 - `py-night-school/`：Python 夜校教程（写给 Java 工程师的 Python Agent 开发晚课）；中心思想、课程设计理念、硬性纪律与写课流程见 [py-night-school/AGENTS.md](py-night-school/AGENTS.md)，写课/改课/审课前必读。
-- `knowledge-lattice/`：企业知识层服务（文档知识 + 业务语义，POC，尚未开始实现）；**设计冻结纪律**——`docs/` 下需求与设计文档仅在决策变化时修改，实现问题走测试用例与 issue，动手前先读 [knowledge-lattice/README.md](knowledge-lattice/README.md)；`docs/known-gaps.md` 是活文档、不受冻结纪律约束；`prototype/index.html` 为信息结构与 UI 风格双基准，原型微调属非决策变更、不动 D 编号决策。
+- `knowledge-lattice/`：企业知识层服务（文档知识 + 业务语义，POC，尚未开始实现）；**设计冻结纪律**——`docs/` 下需求与设计文档仅在决策变化时修改，实现问题走测试用例与 issue，动手前先读 [knowledge-lattice/README.md](knowledge-lattice/README.md)；`docs/known-gaps.md` 是活文档、不受冻结纪律约束；`docs/TEST-CASES.md` 是验收用例展开层（design §9 冻结 T/T-S 编号的展开 + 模块 TC-* 用例 + 里程碑对照表），同为活文档、随实现回写口径、与正文冲突时以正文为准并开 issue；`prototype/index.html` 为信息结构与 UI 风格双基准，原型微调属非决策变更、不动 D 编号决策。
 
 ## 工作约定
 
