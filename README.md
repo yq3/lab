@@ -33,6 +33,8 @@ Python 夜校教程：写给 Java 工程师的 Python Agent 开发晚课。以 a
 
 ### [knowledge-lattice](./knowledge-lattice)
 
-企业知识层服务（POC，需求 v0.5.1 / 设计 v0.5.2 已冻结）：**文档知识**（维度 ACL 权限内的混合检索）
-与**业务语义**（术语识别 + 业务对象类型化关系图）同服务归一，单进程 + SQLite、零中间件，经单一
-MCP server 给 agent 供数，含 v0.5 交互原型。详见 [knowledge-lattice/README.md](./knowledge-lattice/README.md)。
+企业知识层服务（POC，需求/设计 v0.8，冻结纪律延续）：**文档知识**（维度 ACL 权限内的混合检索）
+与**业务语义**（术语识别 + 业务对象类型化关系图）同服务归一，单进程 + 存储后端双实现（SQLite 默认
+零中间件 / PostgreSQL+pgvector 可选——D24）、嵌入与重排经 OpenAI 兼容 API（D12 修订），经单一
+MCP server 给 agent 供数，含 v0.5 交互原型与验收用例集（TEST-CASES v1.4，172 条）。
+详见 [knowledge-lattice/README.md](./knowledge-lattice/README.md)。
