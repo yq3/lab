@@ -54,3 +54,7 @@ research/<topic>/
 | `agent-framework/` | 主流 Agent 开发框架多维度对比（17 框架 × 15 维，源码级） | 2026-09 | 方法和评级体系的来源，见其 README.md |
 | `agent-oss/` | Agent 开源产品应用架构解剖（18 仓 → 财务 agent 参考模式，pattern catalog + 推荐架构） | 2026-09 | 产品轮：8 维解剖模板 + 三级模式清单（直接可用/需改造/仅参考），见其 README.md |
 | `agent-tutorials/` | Agent 开源教程解剖（8 仓 → py-night-school 教程设计依据，教学机制级） | 2026-09 | 教程轮：市场扫描（landscape.md）+ 课时内容级逐仓解剖（profiles ×8）+ 教学机制综合（report.md），结论直接回灌教程 CURRICULUM |
+| `agent-persistence/` | Agent 持久化专项（25 仓 → 七类运行时数据的 schema 级存储实现全景） | 2026-09 | 持久化轮：不做 profiles、按数据类别 × 六路深挖（会话转录/执行状态/记忆/权限审批/审计成本/产物大对象），dimensions ×6 + pattern 清单 18 条 + 反模式 7 条；含对旧档案的 3 处修正（cline 转录非 JSONL 等），见其 report.md §12 |
+| `agent-workbench/` | 税务多系统接入 AI Agent 的作业形态调研（统一工作台设想评估，网络调研非源码级） | 2026-10 | 工作台轮：四路并行（平台大厂 6 家/税务垂直 14 家/Agent UI 形态/集成架构）→ 结论「统一 agent 层方向成立，主屏进度须为编排引擎事件流投影，HITL 一等公民，成败在接入层与编排层而非前端」；证据等级【一手/转述/摘要/未找到】为本轮定制，见其 README.md |
+| `enterprise-rag/` | 企业级 RAG 系统/Agent 搭建专项（六层对象 × 九构建块，源码级） | 2026-10 | RAG 轮：15 仓新克隆（ragflow/quivr/docling/MinerU/milvus 等）+ 7 仓复用，维度主导不做 profiles；第一发现是「大重写周期」（ragflow Go 重写 Python 已删、quivr 5 周龄 Go 重写、MinerU 4.0 换代），企业级落差实锤（文档级权限五平台全无）；交付三条路线 + 分场景技术栈 + 实施蓝图，见其 report.md |
+| `dataagent-semantic/` | Spring AI Alibaba DataAgent 语义知识层专项（单仓深挖 × 对比 knowledge-lattice 业务语义层，源码级） | 2026-10 | 语义层轮：复用 agent-oss 轮克隆（同基线 3fb7852），只深挖语义模型/业务知识/知识库三类知识的数据模型、17 节点消费路径与同义词机制；核心结论「问题相似、方案不同」——DataAgent 是 NL2SQL 内部燃料（平面三件套 + 无术语识别、同义词纯隐式），反向印证 KL 的骨架同步 + AC 自动机路线；借鉴仅轻件（YAML 作者指南清单/样本值格式/QA 对 backlog），见其 report.md |
