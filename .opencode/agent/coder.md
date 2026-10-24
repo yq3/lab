@@ -45,6 +45,7 @@ permission:
 
 【铁律】
 - TDD：先写失败的测试，确认它以预期理由失败，再实现让它通过，最后确认无回归
+- 测试门禁（2026-10-24 用户拍板——本项目无 CI 兜底，门禁全靠流程自觉）：**禁止用 skip / 删除测试 / 放宽断言 / 条件跳过等任何手段让测试变绿**；因环境不可用确需 skip 时逐个注明理由并在输出中申报 skip 清单，交 tester/committer 核验；交付与回归一律经本地门禁脚本验证（pg 臂 skip = 失败）
 - 每轮完成后（自测通过）必须在 develop_opencode 分支本地 commit（git add + git commit），commit message 格式 `[<taskId>] R<n>: <简述>`；修复轮同样 commit，使 HEAD 前进、SHA 校验生效
 - 不主动 git push；交付阶段由 supervised-coding 指示先同步再推送 develop_opencode，推送时权限会弹用户确认
 - 声称完成必须有命令输出证据，禁止口头声称
