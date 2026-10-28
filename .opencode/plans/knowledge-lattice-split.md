@@ -124,6 +124,18 @@
 - **验收**：fresh clone（GitHub SSH）→ `uv sync` → `.env`（本地密钥，不入库）→ `LATTICE_PG_DSN=... scripts/test_gate.sh`：**GATE PASS**——双模式各 663 passed / 1 deselected / 0 skipped（70s/模式），pg 臂 225 条全实跑。
 - **lab 收尾**：README §knowledge-lattice 段落刷新最终态（v0.9.5 / TEST-CASES v1.8 / 门禁 663）+ 已拆仓标注块（定格 `93f4426`）；本方案文档随收尾 PR 入库；`knowledge-lattice/` 目录与 `.opencode/workflows/` 全部文件原样留存、未删任何内容。
 
+## 十、增补迁移（2026-10-28，用户指示）
+
+新仓追加一批开发工作流基建（commit `0c18d0a`，**原样复制自 lab `origin/main` tracked 内容、以新文件直接提交**——不携 git 历史：新仓已发布，避免 force 改写；若需历史可重跑 filter-repo + force push，未做）：
+
+- `.opencode/agent/`：六个子代理定义（coder / tester / committer / reviewer / supervised-coding / vision）
+- `.opencode/README.md`：工作流约定文档——同时闭环了模板 frontmatter "README §4.5/§4.6" 在新仓的悬空引用
+- `.opencode/opencode.json`（仅 `subagent_depth`，无外部依赖）
+- `.opencode/skills/impeccable`（3.4M 完整 skill，180 文件计入）
+- `.agents/skills/`：playwright-cli（含 references ×8）、frontend-design
+
+复查：这批文件中仅 `.opencode/README.md` 含 lab 项目名（历史沿革叙述，照搬不改）；README 中 "package.json" 字样为 tester 栈探测通用文案、非 lab 文件引用；opencode.json 与 agent/skills 无 lab 特有路径引用。lab 侧全部原样留存、未删任何内容。
+
 ## 七、决策点（已拍板，2026-10-28）
 
 1. **可见性**：**public**（用户裁定；内部信息顾虑已提示一次，不再重提）
