@@ -1,0 +1,16 @@
+[project]
+name = "taxagent-calc"
+version = "0.1.0"
+description = "计税 agent（税务计算团队）：综合所得年度汇算计税，经 A2A 对外服务"
+requires-python = ">=3.12"
+dependencies = ["taxagent-shared"]
+
+[tool.uv.sources]
+taxagent-shared = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["tax_calc"]

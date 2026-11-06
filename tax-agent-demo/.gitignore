@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+.pytest_cache/
+.ruff_cache/
+.pyright/
+
+# agent 工作区运行产物（保留目录本身）
+agents/main/tax_main/workspace/*
+!agents/main/tax_main/workspace/.gitkeep
+agents/filing/tax_filing/workspace/*
+!agents/filing/tax_filing/workspace/.gitkeep

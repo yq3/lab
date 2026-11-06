@@ -1,0 +1,14 @@
+{
+  "bracket_year": 2025,
+  "basic_deduction": 60000,
+  "note": "综合所得年度汇算税率表；金额一律整数元；全年应纳税所得额 = 收入额 - 基本减除费用 - 扣除项",
+  "brackets": [
+    {"level": 1, "min": 0, "max": 36000, "rate": 0.03, "quick_deduction": 0},
+    {"level": 2, "min": 36000, "max": 144000, "rate": 0.10, "quick_deduction": 2520},
+    {"level": 3, "min": 144000, "max": 300000, "rate": 0.20, "quick_deduction": 16920},
+    {"level": 4, "min": 300000, "max": 420000, "rate": 0.25, "quick_deduction": 31920},
+    {"level": 5, "min": 420000, "max": 660000, "rate": 0.30, "quick_deduction": 52920},
+    {"level": 6, "min": 660000, "max": 960000, "rate": 0.35, "quick_deduction": 85920},
+    {"level": 7, "min": 960000, "max": null, "rate": 0.45, "quick_deduction": 181920}
+  ]
+}

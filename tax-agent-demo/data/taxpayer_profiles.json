@@ -1,0 +1,57 @@
+{
+  "profiles": [
+    {
+      "taxpayer_id": "T2025-001",
+      "name": "张三",
+      "year": 2025,
+      "incomes": {
+        "wages": 300000,
+        "labor_remuneration": 20000,
+        "author_remuneration": 0
+      },
+      "prepaid_tax": 18000,
+      "social_insurance": 24000,
+      "special_extra_deductions": [
+        {"type": "子女教育", "amount": 24000, "evidence_complete": true},
+        {"type": "住房贷款利息", "amount": 12000, "evidence_complete": true},
+        {"type": "赡养老人", "amount": 30000, "evidence_complete": true}
+      ],
+      "other_deductions": 0
+    },
+    {
+      "taxpayer_id": "T2025-002",
+      "name": "李四",
+      "year": 2025,
+      "incomes": {
+        "wages": 520000,
+        "labor_remuneration": 60000,
+        "author_remuneration": 30000
+      },
+      "prepaid_tax": 86000,
+      "social_insurance": 36000,
+      "special_extra_deductions": [
+        {"type": "子女教育", "amount": 24000, "evidence_complete": true},
+        {"type": "继续教育", "amount": 3600, "evidence_complete": false},
+        {"type": "赡养老人", "amount": 30000, "evidence_complete": true}
+      ],
+      "other_deductions": 0,
+      "missing_evidence_note": "继续教育扣除的执业资格证书复印件缺失，需补传后才能提交申报"
+    },
+    {
+      "taxpayer_id": "T2025-003",
+      "name": "王五",
+      "year": 2025,
+      "incomes": {
+        "wages": 120000,
+        "labor_remuneration": 80000,
+        "author_remuneration": 40000
+      },
+      "prepaid_tax": 12000,
+      "social_insurance": 12000,
+      "special_extra_deductions": [
+        {"type": "住房租金", "amount": 18000, "evidence_complete": true}
+      ],
+      "other_deductions": 4000
+    }
+  ]
+}
