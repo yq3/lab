@@ -16,6 +16,7 @@
 5. 第三轮专题（2026-11-01，异步任务 + 工程化落地）：8 路 WebSearch（MCP 长任务、A2A、OpenAI Background、Claude Code 后台任务、幂等、注入防御、上下文经济、生产实践）+ 1 篇一手全文（MCP Tasks 扩展官方文档），交付 engineering.md（新增来源 E1~E10）。
 6. 第四轮专题（2026-11-01，回调唤醒 + 挂起恢复）：8 路 WebSearch（deepagents、LangGraph 1.0 durable execution、Temporal、A2A push、OpenAI Agents SDK HITL、ChatGPT Tasks）+ 2 篇一手（gh api 拉 deepagents README、LangGraph 1.0 官方博客全文）+ 1 篇一手附录（gh api 拉 ext-tasks 官方 schema），engineering.md 增 §1.7/§1.8 与来源 E11~E18。
 7. 第五轮源码级复核（2026-11-01）：按 AGENTS.md 证据纪律对前三轮网络结论对码——复用 `deepagents@9e7d62ff`、`langgraph@e539ac12` 克隆，新克隆 `modelcontextprotocol/python-sdk@d7845c07`（经 gh-proxy 镜像，remote 已改回官方）；engineering.md 增 §6（四级挂起链路坐实、节点重放语义、SDK 双规范线与形状差异等修正性发现）。
+8. 第六轮产品级实证（2026-11-07）：对码四家 harness 的异步任务机制——`claude-code-sourcemap@a8a678c`（通知队列唤醒链路【核心】）、`openai/codex@ee6814bfa4`（cloud-tasks 委派 + unified_exec）、`deepseek-ai/deepseek-harness`（jobs/schedule 包，B 形态教科书【文档级】）、ChatGPT 产品行为；engineering.md 增 §7。结论：四家无一家用挂起执行等长任务，全部是"立即返回句柄 + 状态可查 + 完成通知注入会话"的 B 系实现。
 
 ## 证据等级（沿用 agent-workbench 轮定制）
 

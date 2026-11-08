@@ -234,6 +234,48 @@ description/schema 的每次改动都跑评测集（原则篇 P10 的 held-out �
 - §1.8 的"已知坑"升级：双执行从【转述】issue 记录升级为【核心-文档】官方语义（节点重放），纪律更明确。
 - §1.8 决策语义细化：HITL 实为四态（多一个 `respond`），reject 文案内建防重试指令——与 report.md P7"错误即提示词"互为印证（官方中间件同款做法）。
 - 上轮示例代码中"interrupt 前 submit"的写法**需修正**：按 6.2 语义，submit 应放在 resume 之后或带幂等键，否则恢复重放会重复提交。
+
+## 7. 产品级实证：四家 harness 的异步任务机制（第六轮，2026-11-07）
+
+> 基线：`claude-code-sourcemap@a8a678c`（还原自 @anthropic-ai/claude-code@2.1.88，2026-03-31，复用已有克隆【还原源码】）、`openai/codex@ee6814bfa4`（2026-09-12，复用已有克隆【核心-文档+源码】）、`deepseek-ai/deepseek-harness`（27.5 万星，开发者预览，gh api 浏览【文档级】）、ChatGPT（产品行为，转述级）。
+
+### 7.1 Claude Code——进程内通知队列唤醒【核心】
+
+- 任务抽象 7 类：`LocalShellTask` / `LocalAgentTask` / `RemoteAgentTask` / `InProcessTeammateTask` / `LocalWorkflowTask` / `MonitorMcpTask` / `DreamTask`（`src/tasks/types.ts`）。
+- **唤醒链路**：任务完成 → `enqueuePendingNotification({value, mode:'task-notification'})`（`tasks/LocalMainSessionTask.ts:262`，`utils/task/framework.ts:200`）→ `messageQueueManager.ts:142` 命令队列（优先级 now/next/later）→ agent query loop 排水，通知作为下一轮输入喂给模型。
+- UX 细节：前台化任务不通知（`LocalMainSessionTask.ts:197`——用户正盯着看就无需通知）；终止通知走 XML task_notification 协议（`stopTask.ts:87`、`sdkEventQueue.ts:104`）。
+- 专用取数工具 `TaskOutputTool` 存在（`tools/TaskOutputTool/`）；模型热轮询输出文件的已知 bug 印证"轮询纪律必须协议/提示承载"。
+
+### 7.2 Codex——云端任务委派 + 后台 shell 会话【核心-文档】
+
+- `codex-rs/cloud-tasks/`：任务委派到 Codex Cloud（`codex_cloud_tasks_client::TaskId/TaskStatus`），TUI 有 NewTaskPage（env_id、best_of_n 尝试数），完成后以 diff 形式回贴本地（`ApplyJob`/`scrollable_diff`）——远程异步委派 + 结果回贴形态。
+- `unified_exec`：feature+policy 门控的后台 shell 会话工具（`tools/src/tool_config_tests.rs:25`；完整语义未深挖，证据部分）。
+
+### 7.3 DeepSeek Harness（dsh）——B 形态的教科书官方文档【文档级】
+
+`packages/jobs/` 组 README 原文（逐条对应本文件 §1.5/§1.7 的设计）：
+
+- "运行长时间工作的工具把工作注册为任务，拥有它的 agent 可以**在不阻塞自身轮次**的情况下读取、等待、列出或取消任务"；
+- "任务属于启动它的 agent 会话，**一个 agent 永远不会看到另一个 agent 的工作**"——owner 隔离（= correlation_id + 权限绑定）；
+- "任务完成时**以会话内通知送达**给拥有它的 agent，**无需轮询**"——B 的唤醒通道；
+- 结构：`jobs`（注册表约定：id/归属/生命周期/完成监听器）+ `jobs-local`（进程本地存储，按所有者隔离）+ `tool-jobs`（模型侧工具）。
+
+`packages/schedule/`：Host 拥有的计划任务，RFC 5545 重复规则，**Host 重启后保留**；到期任务**作为普通 follow-up 消息进入目标 Session**（不是邮件/短信/推送）——跨重启的事件注入会话。
+
+### 7.4 ChatGPT——通知 + 会话注入（产品行为，转述级）
+
+Scheduled Tasks（2025-01）：定时/重复任务离线照跑，完成后 web/桌面/移动/邮件推送；Deep Research 后台跑数分钟，完成推送、结果作为新消息进对话；API 侧 background mode（轮询或 webhook，~10 分钟保留期）。C 兜底 + 会话注入的混合形态。
+
+### 7.5 结论：四家无一例外全是 B 系
+
+| 产品 | 等待模型 | 唤醒通道 | owner 隔离 |
+|---|---|---|---|
+| Claude Code | B（会话保活） | 进程内通知队列 → query loop | 任务归属会话 |
+| Codex | B/C（云端委派） | TaskStatus 轮询 + diff 回贴 | TaskId |
+| dsh | **B（教科书）** | 会话内通知（免轮询）+ follow-up 消息注入 | **按所有者隔离（写进设计原则）** |
+| ChatGPT | C 兜底 + 会话注入 | 推送/邮件 + 新消息进对话 | 用户账号 |
+
+四家共同点：立即返回句柄、状态可查询（专用工具）、完成以通知/消息注入会话、**无一家用挂起执行等长任务**。差异只在唤醒通道（进程内队列 / 云端轮询 / 会话通知 / 系统推送）——企业自建场景选 MQ 即等价替换。dsh 的 jobs 文档可直接当团队规范脚手架用。
 - 复核建议：写团队规范前优先补读 E1（已可全文复核）、E3、E6 原文；E2 建议抓 spec 原文核 8 态清单。
 
 ## 5. 附录：Tasks 扩展报文速查（一手：`gh api` 实拉 ext-tasks 官方 schema）
