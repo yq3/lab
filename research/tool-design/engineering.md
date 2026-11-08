@@ -104,6 +104,8 @@ agent 的工具调用是"请求-响应"心智，但业务系统里耗时任务�
 
 **把它用于异步等待**：挂起等人与挂起等事是同一机制——把挂起点放在"提交异步任务"之后，恢复条件从"审批结果"换成"任务完成事件"（webhook 到达时由服务端触发 resume），审批语义即复用为异步语义。这是 deepagents/LangGraph 栈对异步场景真正的价值：**等待不占模型轮次，事件到了才花钱调模型**。
 
+> ⚠️ **第七轮修正（2026-11-08）**：本段"同一机制"的表述在**机制层**成立，在**语义层**不成立。区别只有一条但足够致命——**等待期间对话能不能继续**：等人时对话本就不该继续（用户下一条消息就是答复），等事时对话必须能继续。把长任务做成 `interrupt()` 会导致悬空中断堆积、检查点分叉、节点重放（重复提交）与上下文错位四种故障，证据见 [long-running-tasks.md §4](long-running-tasks.md#4-为什么不该把异步等待做成-interrupt)。**结论：审批流用中断，异步任务用事件注入；webhook + resume 这条路线保留给"等人"场景。**
+
 **OpenAI Agents SDK 同构**（【摘要】官方文档）：interruptions + `RunState`——运行暂停在待审批工具调用上，状态可保存，之后 `agent.run(state)` 带决定恢复；要点：嵌套 handoff 产生的中断要在顶层 agent 上恢复。
 
 **LangGraph 1.0（2025-10）把持久化转正**（【一手】官方博客）：durable execution 默认（执行状态自动持久化，服务重启"从离开的地方精确续跑"）；persistence 明确面向 "multi-day approval processes or background jobs that run across multiple sessions"。

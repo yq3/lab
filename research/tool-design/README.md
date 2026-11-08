@@ -5,7 +5,7 @@
 | 时间 | 2026-10-28（单会话完成） |
 | 形态 | 网络调研（非源码级，同 `agent-workbench/` 轮模式） |
 | 背景问题 | Java 分布式微服务业务系统，agent 服务基于 Python、经公司统一 Python MCP 网关接入。业务系统 API 应如何包装 / 整改 / 重写成 tool？业界与 Anthropic / OpenAI 等官方有哪些实践与文章？ |
-| 交付 | [report.md](report.md)（设计原则篇，先读这篇）+ [engineering.md](engineering.md)（工程化落地篇：异步任务 + 生产注意点） |
+| 交付 | [report.md](report.md)（设计原则篇，先读这篇）+ [engineering.md](engineering.md)（工程化落地篇：异步任务 + 生产注意点）+ [long-running-tasks.md](long-running-tasks.md)（长任务专题：等待归属 / 事件投递机制 / 进度三通道 / 凭证生命周期） |
 
 ## 方法
 
@@ -17,10 +17,15 @@
 6. 第四轮专题（2026-11-01，回调唤醒 + 挂起恢复）：8 路 WebSearch（deepagents、LangGraph 1.0 durable execution、Temporal、A2A push、OpenAI Agents SDK HITL、ChatGPT Tasks）+ 2 篇一手（gh api 拉 deepagents README、LangGraph 1.0 官方博客全文）+ 1 篇一手附录（gh api 拉 ext-tasks 官方 schema），engineering.md 增 §1.7/§1.8 与来源 E11~E18。
 7. 第五轮源码级复核（2026-11-01）：按 AGENTS.md 证据纪律对前三轮网络结论对码——复用 `deepagents@9e7d62ff`、`langgraph@e539ac12` 克隆，新克隆 `modelcontextprotocol/python-sdk@d7845c07`（经 gh-proxy 镜像，remote 已改回官方）；engineering.md 增 §6（四级挂起链路坐实、节点重放语义、SDK 双规范线与形状差异等修正性发现）。
 8. 第六轮产品级实证（2026-11-07）：对码四家 harness 的异步任务机制——`claude-code-sourcemap@a8a678c`（通知队列唤醒链路【核心】）、`openai/codex@ee6814bfa4`（cloud-tasks 委派 + unified_exec）、`deepseek-ai/deepseek-harness`（jobs/schedule 包，B 形态教科书【文档级】）、ChatGPT 产品行为；engineering.md 增 §7。结论：四家无一家用挂起执行等长任务，全部是"立即返回句柄 + 状态可查 + 完成通知注入会话"的 B 系实现。
+9. 第七轮长任务专题（2026-11-08，应"轮询之外还有别的方式吗"追问）：补齐落地侧缺口——等待归属五层级、六种替代轮询的方案、**对 engineering.md §1.8"挂起等人与挂起等事同一机制"的修正**（LangGraph `interrupt()` docstring + `pregel/_loop.py` 三处源码坐实）、事件投递机制的白话拆解（信箱/感知/读取时机/表结构/五个坑）、进度反馈三通道与并行任务进度语义、用户 cookie 长任务的凭证生命周期；交付 long-running-tasks.md（新增【还原源码】【随包文档】两类证据，DSH 侧补投递粒度与防坑机制）。
 
 ## 证据等级（沿用 agent-workbench 轮定制）
 
 - 【一手】官方原文，已全文抓取并提炼
+- 【核心】源码实现级，可追溯到文件与行号（第五轮起）
+- 【核心-文档】源码仓库内的 docstring / 注释原文（第五轮起）
+- 【还原源码】sourcemap 还原的闭源仓库代码（第六轮起，先例：agent-oss 轮）
+- 【随包文档】随发布包分发的官方包 README（第六轮起，DeepSeek Harness asar 内）
 - 【转述】第三方对官方内容的转述 / 官方内容的二手摘编
 - 【摘要】仅搜索引擎结果摘要，未读原文
 - 【未找到】检索未命中
@@ -36,5 +41,7 @@
 - [x] Phase 7 工程化专题：异步任务（MCP Tasks / A2A / OpenAI Background / Claude Code）+ 生产注意点 10 项（engineering.md）
 - [x] Phase 8 回调与挂起专题：主动回调四路线 + deepagents/LangGraph interrupt + Temporal durable execution（engineering.md §1.7/§1.8，来源 E11~E18）
 - [x] Phase 9 源码级复核：deepagents 挂起链路【核心】、langgraph 恢复重放语义【核心-文档】、python-sdk Tasks 双规范线【核心】（engineering.md §6，含对 §1.3/§1.8 的修正）
+- [x] Phase 10 长任务落地专题：等待归属五层级 + 事件投递 vs interrupt（修正 §1.8）+ 投递机制白话拆解 + 进度三通道 + 凭证生命周期（long-running-tasks.md）
 - [ ] （可选后续）web_reader 补抓 GitHub 两篇工程博客原文，摘要级 → 一手
 - [ ] （可选后续）补读 engineering.md §4 列出的待复核原文（A2A spec 8 态清单、OpenAI Background 保留期细节）
+- [ ] （可选后续）long-running-tasks.md §11.3 列出的四处〔推理〕结论做最小复现实验（分叉 UI 表现、多中断恢复顺序、DSH 唤醒预算边界）
